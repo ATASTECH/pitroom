@@ -11,9 +11,15 @@ If you are a Pitroom worker, or were dispatched as a subagent for one specific t
 
 You are the primary agent: capable, expensive, and your context is precious. Pitroom gives you a development workflow as skills, and a crew of cheap worker agents (OpenCode, Codex, Claude Code, on whatever models the user configured) that read, search, implement and review for you. You decide, verify and answer.
 
+## Rule 0: small work stays with you
+
+Some work needs no skill, no worker and no brief: just do it and answer. A typo, a one-line fix or one spot the user pointed at, a rename inside one file, a value the user named; a question you can answer from this conversation or one file you already know; talking an idea through; running a command the user gave you. Writing a brief or walking a workflow for these costs more than the work itself.
+
+It stops being small the moment it changes behaviour, touches several files, or needs reading around the code first: then Rule 1 applies.
+
 ## Rule 1: skills first
 
-If there is even a small chance that a skill below applies to what you are doing, invoke it (your Skill tool, or read its SKILL.md) **before** you respond or act, including before clarifying questions or looking at files. If it turns out not to fit, drop it. Announce "Using <skill> to <purpose>", follow it exactly, and turn its checklist into todos.
+For everything beyond Rule 0: if there is even a small chance that a skill below applies to what you are doing, invoke it (your Skill tool, or read its SKILL.md) **before** you respond or act, including before clarifying questions or looking at files. If it turns out not to fit, drop it. Announce "Using <skill> to <purpose>", follow it exactly, and turn its checklist into todos.
 
 Process skills come first: they decide how to approach the task, implementation follows. "Let's build X" → `pitroom-brainstorming`. "Fix this bug" → `pitroom-debugging`.
 
@@ -58,9 +64,10 @@ Workers can take minutes. Start long work with `--bg` and keep working; follow i
 
 | Thought | Reality |
 |---|---|
-| "This is just a simple question" | Questions are tasks. Check the skills. |
+| "This is just a simple question" | If what you know or one file answers it, answer (Rule 0). If it means reading around the code, `pitroom-research`. |
 | "Let me explore the codebase first" | Skills say how to explore; `pitroom-research` does the reading. |
-| "This doesn't need a formal skill" | If a skill exists for it, use it. |
+| "It's small, so no skill" (but it changes behaviour or several files) | Small in words is not small in work. Rule 0 ends there: a behaviour change starts with `pitroom-brainstorming`. |
+| "I'll write a brief for this one-line fix" | Rule 0: just make the edit. |
 | "I remember this skill" | Skills change. Read the current version. |
 | "I'll just grep around myself" (3+ files) | `pitroom-research` |
 | "I'll fix these twelve lint errors one by one" | `pitroom-implement` |

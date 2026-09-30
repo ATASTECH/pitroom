@@ -60,6 +60,11 @@ it and get approval. "Simple" tasks are where unexamined assumptions
 cause the most wasted work. What scales with simplicity is the
 artifact, never the approval.
 
+This gate is for creative work: a feature, a component, a behaviour
+change. A typo, a one-line fix the user spelled out, or a value the
+user named is not creative work; `using-pitroom` leaves those to you
+without this skill.
+
 ## Red Flags
 
 | Thought | Reality |
