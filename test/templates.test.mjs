@@ -40,4 +40,9 @@ test('answers: STATUS line and review verdicts', () => {
     spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 0,
   });
   assert.deepEqual(parseVerdict('looks fine'), { spec: 'unknown', quality: 'unknown', critical: 0, important: 0, minor: 0 });
+  const quoted = 'Last round: SPEC: FAIL · QUALITY: NEEDS_FIXES\n'
+    + 'SUMMARY: SPEC: PASS · QUALITY: APPROVED · ISSUES: critical=0 important=0 minor=0\n'
+    + 'DETAILS: fixed the critical=2 findings';
+  assert.deepEqual(parseVerdict(quoted), { spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 0 },
+    'every field comes from the SUMMARY line, never from verdicts quoted elsewhere');
 });

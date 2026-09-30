@@ -48,10 +48,19 @@ export function doctor(probe: boolean): number {
     add('fail', (e as Error).message);
   }
   if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
-  // Tier workers (config "tiers") are checked like the chain's.
-  const tiers = Object.keys(effective().tiers.value);
-  const tierTargets = tiers.map((name) => resolveChain({ tier: name, noFallback: true }).worker);
-  if (tiers.length) add('ok', `tiers: ${tiers.map((name, i) => `${name}=${describeTarget(tierTargets[i]!)}`).join(', ')}`);
+  // Tier workers (config "tiers") are checked like the chain's; a broken tier is one failed
+  // check, not the end of the diagnosis.
+  const tierTargets: Target[] = [];
+  const tierNames: string[] = [];
+  for (const name of Object.keys(effective().tiers.value)) {
+    try {
+      tierTargets.push(resolveChain({ tier: name, noFallback: true }).worker);
+      tierNames.push(name);
+    } catch (e) {
+      add('fail', `tier "${name}": ${(e as Error).message}`);
+    }
+  }
+  if (tierNames.length) add('ok', `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i]!)}`).join(', ')}`);
   const byBackend = new Map<string, (string | undefined)[]>();
   for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
   for (const [id, models] of byBackend) {

@@ -2793,9 +2793,17 @@ function doctor4(probe) {
     add("fail", e.message);
   }
   if (chain.length) add("ok", `worker chain: ${chain.map(describeTarget).join(" \u2192 ")}`);
-  const tiers = Object.keys(effective().tiers.value);
-  const tierTargets = tiers.map((name) => resolveChain({ tier: name, noFallback: true }).worker);
-  if (tiers.length) add("ok", `tiers: ${tiers.map((name, i) => `${name}=${describeTarget(tierTargets[i])}`).join(", ")}`);
+  const tierTargets = [];
+  const tierNames = [];
+  for (const name of Object.keys(effective().tiers.value)) {
+    try {
+      tierTargets.push(resolveChain({ tier: name, noFallback: true }).worker);
+      tierNames.push(name);
+    } catch (e) {
+      add("fail", `tier "${name}": ${e.message}`);
+    }
+  }
+  if (tierNames.length) add("ok", `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i])}`).join(", ")}`);
   const byBackend = /* @__PURE__ */ new Map();
   for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
   for (const [id, models] of byBackend) {

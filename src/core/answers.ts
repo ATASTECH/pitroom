@@ -18,11 +18,15 @@ export interface Verdict {
   minor: number;
 }
 
-/** A reviewer's `SPEC: … · QUALITY: … · ISSUES: …` summary line. */
+/**
+ * A reviewer's `SPEC: … · QUALITY: … · ISSUES: …` summary line. Every field is read from that one
+ * line (the SUMMARY line when there is one), so verdicts quoted elsewhere in the answer never mix in.
+ */
 export function parseVerdict(text: string): Verdict {
-  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(text)?.[1]?.toLowerCase();
-  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(text)?.[1]?.toUpperCase();
-  const count = (k: string) => Number(new RegExp(`\\b${k}=(\\d+)`, 'i').exec(text)?.[1] ?? 0);
+  const line = /^\s*SUMMARY:.*\bSPEC:.*$/im.exec(text)?.[0] ?? /^.*\bSPEC:.*$/im.exec(text)?.[0] ?? '';
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(line)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(line)?.[1]?.toUpperCase();
+  const count = (k: string) => Number(new RegExp(`\\b${k}=(\\d+)`, 'i').exec(line)?.[1] ?? 0);
   return {
     spec: spec === 'pass' || spec === 'fail' ? spec : 'unknown',
     quality: quality === 'APPROVED' ? 'approved' : quality ? 'needs-fixes' : 'unknown',

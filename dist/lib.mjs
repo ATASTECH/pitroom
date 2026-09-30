@@ -1116,9 +1116,10 @@ function parseStatus(text) {
   return TASK_STATUSES.includes(value) ? value : "unknown";
 }
 function parseVerdict(text) {
-  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(text)?.[1]?.toLowerCase();
-  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(text)?.[1]?.toUpperCase();
-  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(text)?.[1] ?? 0);
+  const line = /^\s*SUMMARY:.*\bSPEC:.*$/im.exec(text)?.[0] ?? /^.*\bSPEC:.*$/im.exec(text)?.[0] ?? "";
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(line)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(line)?.[1]?.toUpperCase();
+  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(line)?.[1] ?? 0);
   return {
     spec: spec === "pass" || spec === "fail" ? spec : "unknown",
     quality: quality === "APPROVED" ? "approved" : quality ? "needs-fixes" : "unknown",

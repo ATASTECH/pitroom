@@ -392,3 +392,12 @@ test('config "tiers" names workers: --tier picks one, -W wins, unknown tiers war
   assert.equal(c.status, 2);
   assert.match(c.stderr, /drop --worker\/--tier/);
 });
+
+test('doctor reports a broken tier and keeps checking the others', () => {
+  const s = sandbox();
+  s.config({ tiers: { broken: '  ', cheap: 'opencode:mock/cheap' } });
+  const d = s.run(['doctor']);
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(d.stdout, /tier "broken": empty worker target/);
+  assert.match(d.stdout, /tiers: cheap=opencode:mock\/cheap/);
+});
