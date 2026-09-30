@@ -401,3 +401,16 @@ test('doctor reports a broken tier and keeps checking the others', () => {
   assert.match(d.stdout, /tier "broken": empty worker target/);
   assert.match(d.stdout, /tiers: cheap=opencode:mock\/cheap/);
 });
+
+test('doctor warns when superpowers is installed too', () => {
+  const s = sandbox();
+  const home = path.join(s.base, 'user-home');
+  fs.mkdirSync(path.join(home, '.agents', 'skills', 'using-superpowers'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agents', 'skills', 'using-superpowers', 'SKILL.md'), '---\nname: using-superpowers\n---\n');
+  assert.match(s.run(['doctor'], { HOME: home }).stdout, /superpowers is installed too \(.*using-superpowers\).*keep one/);
+  const empty = path.join(s.base, 'empty-home');
+  fs.mkdirSync(empty);
+  const clean = s.run(['doctor'], { HOME: empty }).stdout;
+  assert.match(clean, /worker chain:/, 'doctor ran its checks');
+  assert.doesNotMatch(clean, /superpowers/);
+});

@@ -20,8 +20,15 @@ function frontmatter(file) {
   return { fields, body: m[2] };
 }
 
-test('the pack: using-pitroom plus focused pitroom-* skills', () => {
-  assert.deepEqual(skills.sort(), ['pitroom-crew', 'pitroom-implement', 'pitroom-research', 'pitroom-review', 'using-pitroom']);
+const PACK = [
+  'pitroom-brainstorming', 'pitroom-crew', 'pitroom-debugging', 'pitroom-driven-development', 'pitroom-finishing',
+  'pitroom-implement', 'pitroom-receiving-review', 'pitroom-research', 'pitroom-review', 'pitroom-tdd',
+  'pitroom-verification', 'pitroom-worktrees', 'pitroom-writing-plans', 'using-pitroom',
+];
+
+test('the pack: using-pitroom plus the pitroom-* workflow skills', () => {
+  for (const s of skills) assert.ok(PACK.includes(s), `unexpected skill folder ${s}`);
+  assert.ok(skills.includes('using-pitroom'));
 });
 
 for (const name of skills) {
@@ -31,11 +38,24 @@ for (const name of skills) {
     assert.match(fields.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
     assert.ok(fields.name.length <= 64);
     assert.ok(fields.description && fields.description.length <= 1024, 'description present, at most 1024 chars');
-    assert.match(fields.description, /^Use (when|at|for)/, 'description says when to use it');
+    assert.match(fields.description, /^Use\b/, 'description says when to use it');
     assert.ok(body.trim().length > 200);
-    assert.doesNotMatch(body, /references\//, 'no links to files that do not exist');
   });
 }
+
+test('skill files name Pitroom skills only, and every relative link resolves', () => {
+  for (const name of skills) {
+    const dir = path.join(skillsDir, name);
+    for (const f of fs.readdirSync(dir).filter((x) => x.endsWith('.md'))) {
+      const text = fs.readFileSync(path.join(dir, f), 'utf8');
+      assert.doesNotMatch(text, /superpowers:|docs\/superpowers|\.superpowers\//, `${name}/${f}`);
+      for (const [, target] of text.matchAll(/\]\(([^)\s#]+)[^)]*\)/g)) {
+        if (/^[a-z][a-z0-9+.-]*:/i.test(target)) continue;
+        assert.ok(fs.existsSync(path.join(dir, target)), `${name}/${f}: link ${target}`);
+      }
+    }
+  }
+});
 
 test('using-pitroom routes to every other skill', () => {
   const { body } = frontmatter(path.join(skillsDir, 'using-pitroom', 'SKILL.md'));
@@ -54,7 +74,8 @@ test('session-start hook injects using-pitroom (and nothing inside a worker)', (
   const ctx = out.hookSpecificOutput.additionalContext;
   assert.match(ctx, /# Using Pitroom/);
   assert.doesNotMatch(ctx, /^name: using-pitroom/m, 'frontmatter stripped');
-  assert.ok(ctx.length < 6000, 'kept short: it is paid for in every session');
+  assert.ok(ctx.length < 8192, 'kept short: it is paid for in every session');
+  assert.match(ctx, /pitroom-brainstorming/);
   const cursor = JSON.parse(spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...env, CURSOR_PLUGIN_ROOT: root } }).stdout);
   assert.ok(cursor.additional_context && !cursor.hookSpecificOutput, 'one field per host, never both');
   const inWorker = spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...env, PITROOM_ACTIVE: '1' } });

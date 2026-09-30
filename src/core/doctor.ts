@@ -119,6 +119,13 @@ function skillChecks(): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const all = skillNames();
   const viaPlugin = pluginInstalled();
+  const superpowers = superpowersInstalled();
+  if (superpowers) {
+    checks.push({
+      level: 'warn',
+      message: `superpowers is installed too (${superpowers}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`,
+    });
+  }
   for (const { base, names } of installedSkills()) {
     if (names.length === all.length) checks.push({ level: 'ok', message: `skills in ${base}: ${names.join(', ')}` });
     else if (names.length) checks.push({ level: 'warn', message: `skills in ${base}: only ${names.join(', ')} of ${all.length}; run \`pitroom install\`` });
@@ -154,4 +161,20 @@ function pluginInstalled(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Where superpowers is installed next to Pitroom, if it is. */
+function superpowersInstalled(): string | undefined {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
+    const key = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).plugins ?? {}).find((k) => k.startsWith('superpowers@'));
+    if (key) return `Claude Code plugin ${key}`;
+  } catch {
+    // no Claude Code plugins
+  }
+  for (const base of [path.join(os.homedir(), '.agents', 'skills'), path.join(os.homedir(), '.claude', 'skills')]) {
+    const dir = path.join(base, 'using-superpowers');
+    if (fs.existsSync(path.join(dir, 'SKILL.md'))) return dir;
+  }
+  return undefined;
 }
