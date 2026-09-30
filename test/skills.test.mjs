@@ -166,3 +166,15 @@ test('the skills keep deletion decisions with the primary agent and the user', (
     assert.match(frontmatter(path.join(skillsDir, s, 'SKILL.md')).body, /--allow-delete/, s);
   }
 });
+
+test('the README keeps no hard-coded version, and its code fences and diagrams are balanced', () => {
+  const readme = fs.readFileSync(path.join(root, 'README.md'), 'utf8');
+  assert.doesNotMatch(readme, /Current version/i, 'a version written by hand drifts; the badges show it');
+  const fences = readme.split('\n').filter((l) => /^\s*```/.test(l));
+  assert.equal(fences.length % 2, 0, 'every code fence is closed');
+  const mermaid = fences.filter((l) => /```mermaid/.test(l)).length;
+  assert.ok(mermaid >= 2, 'the workflow and the architecture are drawn');
+  for (const tag of ['details', 'div', 'table']) {
+    assert.equal((readme.match(new RegExp(`<${tag}[ >]`, 'g')) ?? []).length, (readme.match(new RegExp(`</${tag}>`, 'g')) ?? []).length, `<${tag}> is balanced`);
+  }
+});

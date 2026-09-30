@@ -17,7 +17,7 @@ Don't use it when the failures are related (fixing one might fix the others: inv
 
 ## 1. Split
 
-Parts must be **independent**: no part needs another's result, and no two parts edit the same file. Two to five parts is the sweet spot; at most `maxParallel` workers (default 4) run at a time, the rest queue. Keep dependent or judgment-heavy parts for yourself.
+Parts must be **independent**: no part needs another's result, and no two parts edit the same file. Start as many workers as there are independent parts: up to 20 run at a time by default (`maxParallel`, 30 at most), the rest queue. Keep dependent or judgment-heavy parts for yourself.
 
 ## 2. Write focused briefs
 
@@ -76,5 +76,5 @@ pitroom show <run>                  # the full report of the ones you need
 ## When things go wrong
 
 - A worker failed or timed out: retry that part once with a sharper brief, or do it yourself.
-- Rate limits: the fallback chain handles single failures; if many fail, lower `maxParallel` (config or `PITROOM_MAX_PARALLEL`).
+- Rate limits: the fallback chain handles single failures; if many fail at once, lower `maxParallel` (config or `PITROOM_MAX_PARALLEL`) or spread the parts over more than one worker.
 - Stop everything: `pitroom stop -g NAME` (running and queued).

@@ -130,3 +130,12 @@ test('apply refuses a patch that deletes files until --allow-delete', () => {
   assert.ok(!fs.existsSync(gone), 'deleted only with the flag');
   assert.match(fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8'), /kept/);
 });
+
+test('maxParallel defaults to 20 and no setting goes above 30', () => {
+  const s = sandbox();
+  const value = (env) => JSON.parse(s.run(['config', '--json'], env).stdout ?? '{}');
+  assert.match(s.run(['config']).stdout, /maxParallel\s+20\s+\(default\)/);
+  assert.match(s.run(['config'], { PITROOM_MAX_PARALLEL: '99' }).stdout, /maxParallel\s+30\s+\(env\)/);
+  assert.match(s.run(['config'], { PITROOM_MAX_PARALLEL: '12' }).stdout, /maxParallel\s+12\s+\(env\)/);
+  void value;
+});

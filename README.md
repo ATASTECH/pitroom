@@ -38,8 +38,6 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 
 </div>
 
-> **Current version: 0.6.0.**
-
 ---
 
 ## Why Pitroom?
@@ -100,7 +98,8 @@ In isolate mode nothing reaches your tree until you apply it.
 
 - **Receipts, not vibes.** Tokens the worker burned, tokens returned to your agent, compression ratio, and an estimate of what your primary model would have charged. `pitroom savings --card card.svg` makes a shareable card.
 - **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
-- **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. A queue (`maxParallel`) keeps free tiers from rate-limiting you; parallel writers are refused.
+- **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. Up to 20 workers run at once by default (`maxParallel`, 30 at most), the rest queue, and the fallback chain absorbs free-tier rate limits; parallel writers are refused.
+- **Free first, dearer only when needed.** Runs and plan tasks start on the `cheap` tier, OpenCode's free model; `standard` (Codex) and `capable` (Claude Code) are for tasks that need them, and an optional `review` tier names who reviews. `pitroom models` shows what each worker offers, the effort levels (`low` … `xhigh`) each model accepts, what you say it costs (`costs`) and what it used; `--effort` sets the level per run. Details: [Models, costs and effort](#models-costs-and-effort).
 - **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
 - **Your agent sets the permissions.** It creates each worker with the permissions the task and your session allow (read-only, isolated copy, in-place edits, web), and a worker never widens its own. A fixed floor stays for every run: no git history changes, no `sudo`, no publishing, no secrets. A worker cannot land a deletion either: `pitroom apply` refuses a patch that deletes files unless your agent passes `--allow-delete`.
 - **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
@@ -174,69 +173,51 @@ To repeat it on your own repository: `pitroom crew -d <repo> -g bench "<question
 
 ## Quick start
 
-<table>
-<tr>
+You need Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
-<td width="25%" valign="top">
+### 1. Install: pick your agent
 
-### 01
-
-**Install**
-
-Plugin or npm (below)
-
-</td>
-
-<td width="25%" valign="top">
-
-### 02
-
-**Connect a worker**
-
-OpenCode, Codex or Claude Code
-
-</td>
-
-<td width="25%" valign="top">
-
-### 03
-
-**Check it**
-
-`pitroom doctor --probe`
-
-</td>
-
-<td width="25%" valign="top">
-
-### 04
-
-**Use it**
-
-Ask your agent, or run `pitroom`
-
-</td>
-
-</tr>
-</table>
-
-Requires Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
-
-### Choose how to install
-
-| You use | Install | What you get |
-|---|---|---|
-| **Claude Code** | `claude plugin marketplace add ATASTECH/pitroom`<br>`claude plugin install pitroom@pitroom`<br>(inside a session: `/plugin marketplace add ATASTECH/pitroom`, `/plugin install pitroom@pitroom`) | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. The plugin is the published npm package: under 0.5 MB, no dependencies. |
-| **Codex** | `codex plugin marketplace add ATASTECH/pitroom`<br>`codex plugin add pitroom@pitroom`<br>and `npm i -g pitroom` | The 14 skills. Codex plugins have no session-start hook, so Pitroom is not introduced on its own: the skills load when a task matches, or ask for one by name. The `pitroom` command itself comes from npm. |
-| **Any other agent, or only the CLI** | `npm i -g pitroom`<br>`pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
+**Claude Code**
 
 ```bash
-pitroom doctor --probe   # worker CLI, models, permissions, skills, one live round trip
+claude plugin marketplace add ATASTECH/pitroom
+claude plugin install pitroom@pitroom
 ```
 
-Pick one path: `doctor` warns if the skills load twice. To run `pitroom` yourself in a terminal (`watch`, `savings`, the status line below), install it from npm as well; the plugins alone do not put it on your PATH.
+<sub>Inside a session: `/plugin marketplace add ATASTECH/pitroom`, then `/plugin install pitroom@pitroom`.</sub>
 
-### Your first run
+**Codex**
+
+```bash
+codex plugin marketplace add ATASTECH/pitroom
+codex plugin add pitroom@pitroom
+npm i -g pitroom
+```
+
+**Any other agent (Cursor, Gemini CLI, a plain shell) or just the CLI**
+
+```bash
+npm i -g pitroom
+pitroom install
+```
+
+| Path | You get |
+|---|---|
+| Claude Code plugin | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. |
+| Codex plugin | The 14 skills. Codex has no session-start hook, so Pitroom is not introduced on its own: the skills load when a task matches, or name one. `pitroom` itself comes from npm. |
+| npm + `pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
+
+Pick one path, not several: `doctor` warns if the skills load twice. The plugins alone do not put `pitroom` on your PATH, so install it from npm too if you want to run it yourself (`watch`, `models`, `savings`, the status line).
+
+### 2. Check the setup
+
+```bash
+pitroom doctor --probe
+```
+
+It checks the worker CLIs, models, permissions and skills, and runs one live round trip.
+
+### 3. Use it
 
 Pitroom is a toolbox, not a procedure: your agent uses it when it helps, or you ask explicitly:
 
@@ -248,7 +229,25 @@ Or start a worker yourself and read its receipt:
 ```bash
 pitroom "Which files read the session cookie? Cite file:line."
 pitroom savings          # what all your runs saved so far
+pitroom models           # what each worker offers, what it costs you, what it used
 ```
+
+<details>
+<summary>Update and uninstall</summary>
+
+```bash
+# update
+claude plugin update pitroom@pitroom
+codex plugin marketplace upgrade pitroom
+npm i -g pitroom@latest
+
+# uninstall
+claude plugin uninstall pitroom@pitroom
+codex plugin remove pitroom@pitroom
+pitroom uninstall && npm rm -g pitroom
+```
+
+</details>
 
 ---
 
@@ -275,17 +274,31 @@ Long jobs: `--bg` returns immediately; `pitroom wait <id>` blocks for up to 9 mi
 
 Pitroom ships a full development methodology as skills, adapted from [superpowers](https://github.com/obra/superpowers) so that its subagents are cheap workers: your agent brainstorms and plans with you, then executes the plan task by task while workers do the typing and a second model does the reviewing.
 
-```text
-pitroom-brainstorming ──► spec (docs/pitroom/specs/)
-pitroom-writing-plans ──► plan (docs/pitroom/plans/), every task tagged with a worker tier
-pitroom-driven-development, per task:
-  pitroom run -i --plan PLAN --step N    implementer worker, isolated copy, TDD evidence, STATUS line
-  pitroom review <run>                   read-only reviewer on another backend: SPEC and QUALITY verdicts
-  pitroom run --continue <run> "…"       fix rounds; the re-review sees only the fix diff
-  pitroom apply <run> · tests · commit   the primary lands it; workers never commit
-pitroom review --range main..HEAD --plan PLAN   whole-branch review on the capable tier
-pitroom-finishing ──► merge, PR or keep (asked, never automatic)
+```mermaid
+flowchart TD
+  A["Your idea"] --> B["brainstorming<br/>design you approve"]
+  B --> C["writing-plans<br/>tasks, a worker tier each"]
+  C --> D1
+  subgraph LOOP["For every task (driven-development)"]
+    D1["run --plan --step N<br/>worker in an isolated copy"] --> D2["review<br/>another model: SPEC and QUALITY"]
+    D2 -- "findings" --> D3["run --continue<br/>fix round"]
+    D3 --> D2
+    D2 -- "approved" --> D4["apply, test, commit<br/>your agent, never the worker"]
+  end
+  D4 --> E["review --range<br/>the whole branch"]
+  E --> F["finishing<br/>merge, PR or keep: asked"]
 ```
+
+| Step | Skill | Command |
+|---|---|---|
+| Design | `pitroom-brainstorming` | writes the spec to `docs/pitroom/specs/` |
+| Plan | `pitroom-writing-plans` | writes the plan to `docs/pitroom/plans/`, a worker tier on every task |
+| Implement | `pitroom-driven-development` | `pitroom run -i --plan PLAN --step N` |
+| Review | `pitroom-review` | `pitroom review <run>` (a read-only reviewer on another model) |
+| Fix | `pitroom-receiving-review` | `pitroom run --continue <run> "…"` (the re-review sees only the fix) |
+| Land | `pitroom-driven-development` | `pitroom apply <run>`, your tests, your commit |
+| Branch review | `pitroom-review` | `pitroom review --range main..HEAD --plan PLAN` |
+| Finish | `pitroom-finishing` | merge, pull request or keep: asked, never automatic |
 
 A review package holds the diff under review with 10 lines of context, and the reviewer's CLI sends it to that worker's model provider. Pitroom does not filter it: secrets committed in a reviewed range go along as they are.
 
@@ -329,7 +342,7 @@ RUN                   STATE  MODE  TIME  STEPS  WORKER                    NOW / 
 
 Humans get the same table live with `pitroom watch -g NAME`; `pitroom wait -g NAME --brief` prints one line per worker, `pitroom show <run>` the full answer.
 
-For changes, `pitroom crew -i …` gives every worker its own isolated copy of your current state and `pitroom apply -g NAME` lands the patches in order, stopping at the first conflict. At most `maxParallel` workers (default 4) run at once, the rest queue; only one `--write` run per repository is allowed. `pitroom stop -g NAME` stops running and queued workers.
+For changes, `pitroom crew -i …` gives every worker its own isolated copy of your current state and `pitroom apply -g NAME` lands the patches in order, stopping at the first conflict. Up to `maxParallel` workers (default 20, at most 30) run at once, the rest queue; only one `--write` run per repository is allowed. `pitroom stop -g NAME` stops running and queued workers.
 
 ---
 
@@ -399,16 +412,15 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 ![Pitroom workflow: primary agent → Pitroom CLI → OpenCode, Codex or Claude Code workers → verified answer, exact diff and receipt returned to the primary agent.](docs/pitroom-flow.png)
 
-```text
-primary agent ──(skill: "delegate?")──► pitroom run "task"
-                                          │ snapshot tree (throwaway index)      [write]
-                                          │ isolated copy of current state       [isolate]
-                                          │ worker adapter: mode → the CLI's own permissions
-                                          ▼
-    worker CLI, e.g. opencode run --standalone --format json   (stdin closed, git guard, your default model)
-                                          │ NDJSON events
-                                          ▼
-                     final answer · exact diff · receipt ──► primary agent verifies / applies
+```mermaid
+flowchart LR
+  P["Primary agent<br/>Claude Code, Codex, …"] -- "pitroom run, crew, review" --> C["Pitroom CLI"]
+  C --> M{"Mode"}
+  M -- "read" --> W
+  M -- "isolate" --> I["Private copy of<br/>your current tree"] --> W
+  M -- "write" --> S["Your tree plus a<br/>throwaway git snapshot"] --> W
+  W["Worker CLI<br/>OpenCode, Codex or Claude Code<br/>its own permissions and the git guard"] -- "event stream" --> C
+  C -- "answer, exact diff, receipt" --> P
 ```
 
 <details>
@@ -468,7 +480,7 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 | `PITROOM_MODEL` | the worker's default | Model for the preferred worker |
 | `PITROOM_FALLBACK` | none | Comma-separated targets to fail over to on model/provider errors |
 | `PITROOM_TIMEOUT` | `30m` | Per-run timeout |
-| `PITROOM_MAX_PARALLEL` | `4` | Workers running at once; more queue |
+| `PITROOM_MAX_PARALLEL` | `20` | Workers running at once (at most 30); more queue |
 | `PITROOM_PRIMARY` | `sonnet` | Pricing preset for the savings estimate: `sonnet`, `opus`, `haiku`, `gpt-5` |
 | `PITROOM_PRICE` | | Custom primary price, USD per 1M tokens: `"in,out[,cachedIn]"` |
 | `PITROOM_HOME` | `~/.local/state/pitroom` | Where run records and the ledger live |
@@ -484,13 +496,18 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
   "fallback": ["opencode:opencode/space-bunny-free", "codex"],
   "models": { "codex": "gpt-6.1-sol", "claude": "claude-sonnet-5-5" },
   "costs": { "codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2 },
-  "tiers": { "cheap": "opencode", "standard": "codex", "capable": "claude" },
+  "tiers": { "cheap": "opencode", "standard": "codex", "capable": "claude", "review": "opencode:opencode/space-bunny-free" },
   "timeout": "20m",
   "primary": "opus",
   "link": ["node_modules"],
-  "maxParallel": 3
+  "maxParallel": 20
 }
 ```
+
+- `worker` and `fallback`: who runs a task when you name no one, and who takes over when it fails; `models`: the model each worker uses when a target names none.
+- `tiers`: `cheap`, `standard` and `capable` name the workers for plan tasks and `--tier`; an optional `review` tier names who reviews a run (by default another worker than the implementer's, `standard` first).
+- `costs`: your relative cost per `worker:model`, only compared with each other; `maxParallel`: workers at once (default 20, at most 30).
+
 
 ---
 

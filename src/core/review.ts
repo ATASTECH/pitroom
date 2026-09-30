@@ -150,7 +150,7 @@ export function rangeReview(range: string, dir: string, planFile?: string): Revi
 }
 
 /**
- * The reviewer when none is named: for a run, the first of the standard tier, the
+ * The reviewer when none is named: for a run, the `review` tier if the config has one, else the first of the standard tier, the
  * capable tier, the fallbacks and the default worker whose backend differs from
  * the implementer's; for a range, the capable tier. Undefined = the default worker.
  */
@@ -158,6 +158,7 @@ export function pickReviewer(job: ReviewJob): string | undefined {
   const eff = effective();
   const tiers = eff.tiers.value;
   if (job.kind === 'range') return tiers.capable;
+  if (tiers.review) return tiers.review;
   const implementer = job.implementer;
   if (!implementer) return undefined;
   const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;

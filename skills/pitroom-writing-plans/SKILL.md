@@ -50,7 +50,7 @@ Every task names the worker tier that implements it, on its own line right under
 - **standard**: several files with integration concerns, or an implementer working from prose.
 - **capable**: design judgment or broad understanding of the codebase.
 
-Turn count beats token price: the cheapest models take 2-3× the turns on multi-step work. When unsure between two tiers, take the higher.
+Turn count beats token price: the cheapest models take 2-3× the turns on multi-step work. The user prefers the free tier, so start with `cheap` for everything a cheap worker can plausibly do and raise only the tasks that need more; a failed cheap task costs one retry on a higher tier. When you are truly unsure between two tiers for a task that is costly to redo, take the higher.
 
 ## Bite-Sized Task Granularity
 

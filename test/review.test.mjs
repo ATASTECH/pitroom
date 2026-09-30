@@ -127,3 +127,14 @@ test('review refuses what it cannot review', () => {
   assert.match(busy.stderr, /still (queued|running); pitroom wait/);
   s.run(['stop', bg]);
 });
+
+test('a configured review tier picks the reviewer of a run and needs no same-backend warning', () => {
+  const s = sandbox();
+  s.config({ tiers: { review: 'opencode:mock/reviewer' } });
+  const id = runId(s.run(['run', '-i', 'add one [[mock:append:app.txt:one;answer:SUMMARY: added one]]']));
+  const r = s.run(['review', id], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const last = s.calls().filter((c) => c.argv[0] === 'run').at(-1);
+  assert.equal(last.argv[last.argv.indexOf('--model') + 1], 'mock/reviewer');
+  assert.doesNotMatch(r.stdout, /same backend as the implementer/, 'a review tier is the user\'s own choice');
+});

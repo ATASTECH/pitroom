@@ -68,7 +68,7 @@ Run options
       --task-file PATH  read the task from a file (crew: tasks separated by --- lines)
       --allow-non-git   allow --write outside a git repository (no tracking/revert)
 
-Parallel: at most maxParallel workers (default 4, PITROOM_MAX_PARALLEL) run at once; others queue.
+Parallel: at most maxParallel workers (default 20, up to 30; PITROOM_MAX_PARALLEL) run at once; others queue.
           One --write run per repository; use --isolate for parallel changes.
 Exit codes: 0 ok · 1 worker failed · 2 usage · 3 refused/setup · 4 timeout
             5 read-only violation · 6 verify failed · 75 still running (wait again)

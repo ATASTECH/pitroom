@@ -1066,6 +1066,9 @@ function matches(v, type) {
   }
   return typeof v === type;
 }
+var DEFAULT_PARALLEL = 20;
+var MAX_PARALLEL_LIMIT = 30;
+var clampParallel = (s) => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT) });
 var positiveInt = (v) => {
   const n = Number(v);
   return v !== void 0 && v !== "" && Number.isInteger(n) && n > 0 ? n : void 0;
@@ -1090,7 +1093,7 @@ function effective(flags = {}) {
     price: setting(void 0, e.PITROOM_PRICE, c.price, void 0),
     link: setting(void 0, void 0, c.link, []),
     web: setting(void 0, void 0, c.web, false),
-    maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
+    maxParallel: clampParallel(setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
     models: setting(void 0, void 0, c.models, {}),
     tiers: setting(void 0, void 0, c.tiers, {}),
     costs: setting(void 0, void 0, c.costs, {})
@@ -2185,6 +2188,7 @@ function pickReviewer(job) {
   const eff = effective();
   const tiers = eff.tiers.value;
   if (job.kind === "range") return tiers.capable;
+  if (tiers.review) return tiers.review;
   const implementer = job.implementer;
   if (!implementer) return void 0;
   const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
@@ -3293,7 +3297,7 @@ async function cmdReview(p) {
       group: flag(p, "group") ?? job.group,
       review: { of: job.of, kind: job.kind, packageFile, plan: job.plan }
     });
-    const automatic = !range && !flag(p, "worker") && !flag(p, "tier");
+    const automatic = !range && !flag(p, "worker") && !flag(p, "tier") && !effective().tiers.value.review;
     if (automatic && job.implementer && meta.worker.backend === job.implementer.backend) {
       meta.warnings.push(
         `reviewer runs on the same backend as the implementer (${job.implementer.backend}); configure tiers "standard" or "capable" for a second model`
@@ -3871,7 +3875,7 @@ Run options
       --task-file PATH  read the task from a file (crew: tasks separated by --- lines)
       --allow-non-git   allow --write outside a git repository (no tracking/revert)
 
-Parallel: at most maxParallel workers (default 4, PITROOM_MAX_PARALLEL) run at once; others queue.
+Parallel: at most maxParallel workers (default 20, up to 30; PITROOM_MAX_PARALLEL) run at once; others queue.
           One --write run per repository; use --isolate for parallel changes.
 Exit codes: 0 ok \xB7 1 worker failed \xB7 2 usage \xB7 3 refused/setup \xB7 4 timeout
             5 read-only violation \xB7 6 verify failed \xB7 75 still running (wait again)

@@ -97,6 +97,11 @@ export interface Setting<T> {
   source: Source;
 }
 
+/** Workers that run at once when nothing says otherwise, and the most any setting can ask for. */
+export const DEFAULT_PARALLEL = 20;
+export const MAX_PARALLEL_LIMIT = 30;
+const clampParallel = (s: Setting<number>): Setting<number> => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT) });
+
 const positiveInt = (v: unknown) => {
   const n = Number(v);
   return v !== undefined && v !== '' && Number.isInteger(n) && n > 0 ? n : undefined;
@@ -125,7 +130,7 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     price: setting<string | undefined>(undefined, e.PITROOM_PRICE, c.price, undefined),
     link: setting<string[]>(undefined, undefined, c.link, []),
     web: setting<boolean>(undefined, undefined, c.web, false),
-    maxParallel: setting<number>(undefined, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
+    maxParallel: clampParallel(setting<number>(undefined, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
     models: setting<Record<string, string>>(undefined, undefined, c.models, {}),
     tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
     costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),

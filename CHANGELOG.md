@@ -8,6 +8,13 @@
 - `--effort LEVEL` for every worker (`model#level`: Codex effort, Claude Code `--effort`, OpenCode variant). The skills tell the agent to pick the cheapest model and the lowest effort that fits.
 - Fix: a target that names only an effort (`codex:#low`) skipped the configured `models` default and ran the vendor's own default model. It now gets the configured model with that effort. A Codex or Claude Code worker with no pinned model gets a warning.
 
+### More workers, free first
+- Up to 20 workers run at once by default (`maxParallel`), 30 at most; before, the default was 4. The rest queue and the fallback chain absorbs free-tier rate limits.
+- An optional `review` tier in `tiers` names who reviews a run (and needs no same-backend warning). The skills start on the `cheap` tier, OpenCode's free model, and raise a task only when it needs more; plans are written the same way.
+
+### README
+- Install commands per agent as copy-and-paste blocks (Claude Code, Codex, npm), with update and uninstall; diagrams for the workflow and for how a run flows; the free-first setup, `pitroom models`, costs and effort are explained; the hard-coded version line is gone (the badges show the real versions).
+
 ### Seeing Pitroom at work
 - The card hook also reaches the agent (`additionalContext`), so the user hears which worker and model ran even where the host shows no hook messages. Runs that finished without a card are announced on the next `pitroom` command.
 - `pitroom savings --models` lists workers and models with runs, tokens, cost and savings.

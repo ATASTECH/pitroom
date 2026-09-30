@@ -65,7 +65,8 @@ export async function cmdReview(p: Parsed): Promise<number> {
     // differs it falls back to the default worker, possibly the same model
     // grading itself. Say so on the report, but only for automatic picks: an
     // explicitly named reviewer (-W/--tier) and range reviews need no warning.
-    const automatic = !range && !flag(p, 'worker') && !flag(p, 'tier');
+    // A configured `review` tier is the user's own choice, so it needs no warning.
+    const automatic = !range && !flag(p, 'worker') && !flag(p, 'tier') && !effective().tiers.value.review;
     if (automatic && job.implementer && meta.worker.backend === job.implementer.backend) {
       meta.warnings.push(
         `reviewer runs on the same backend as the implementer (${job.implementer.backend}); configure tiers "standard" or "capable" for a second model`,
