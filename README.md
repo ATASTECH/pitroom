@@ -146,9 +146,9 @@ Every run prints a receipt, and `pitroom savings` adds them up:
 
 ### 01
 
-**Get it**
+**Install**
 
-`npm i -g pitroom`
+Plugin or npm (below)
 
 </td>
 
@@ -156,9 +156,9 @@ Every run prints a receipt, and `pitroom savings` adds them up:
 
 ### 02
 
-**Link it**
+**Connect a worker**
 
-`pitroom install`
+OpenCode, Codex or Claude Code
 
 </td>
 
@@ -187,23 +187,33 @@ Ask your agent, or run `pitroom`
 
 Requires Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
+### Choose how to install
+
+| You use | Install | What you get |
+|---|---|---|
+| **Claude Code** | `claude plugin marketplace add ATASTECH/pitroom`<br>`claude plugin install pitroom@pitroom`<br>(inside a session: `/plugin marketplace add ATASTECH/pitroom`, `/plugin install pitroom@pitroom`) | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. The plugin is the published npm package: under 0.5 MB, no dependencies. |
+| **Codex** | `codex plugin marketplace add ATASTECH/pitroom`<br>`codex plugin add pitroom@pitroom`<br>and `npm i -g pitroom` | The 14 skills. Codex plugins have no session-start hook, so Pitroom is not introduced on its own: the skills load when a task matches, or ask for one by name. The `pitroom` command itself comes from npm. |
+| **Any other agent, or only the CLI** | `npm i -g pitroom`<br>`pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
+
 ```bash
-npm i -g pitroom
-pitroom install          # skills → ~/.agents/skills + ~/.claude/skills, launcher → ~/.local/bin/pitroom
 pitroom doctor --probe   # worker CLI, models, permissions, skills, one live round trip
 ```
 
-Or, in Claude Code, install it as a plugin (skills plus the session-start hook):
+Pick one path: `doctor` warns if the skills load twice. To run `pitroom` yourself in a terminal (`watch`, `savings`, the status line below), install it from npm as well; the plugins alone do not put it on your PATH.
 
-```text
-/plugin marketplace add ATASTECH/pitroom
-/plugin install pitroom@pitroom
-```
+### Your first run
 
-Use one or the other, not both (`doctor` warns if the skills load twice). Pitroom is a toolbox, not a procedure: your agent uses it when it helps, or you ask explicitly:
+Pitroom is a toolbox, not a procedure: your agent uses it when it helps, or you ask explicitly:
 
 > Use pitroom to map how sessions are created and invalidated, then propose a fix.
 > Split this into a pitroom crew: audit auth, billing and uploads for missing input validation.
+
+Or start a worker yourself and read its receipt:
+
+```bash
+pitroom "Which files read the session cookie? Cite file:line."
+pitroom savings          # what all your runs saved so far
+```
 
 ---
 

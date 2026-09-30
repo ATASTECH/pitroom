@@ -87,12 +87,26 @@ test('plugin manifests are valid and agree on the version', () => {
   assert.match(cmd, /hooks\/session-start\.mjs/);
   assert.equal(json('.claude-plugin/plugin.json').name, 'pitroom');
   assert.equal(json('.claude-plugin/plugin.json').version, version);
+  // The marketplace (read by Claude Code and Codex) installs the published npm package, not this
+  // repository: a repository source would copy src/ and test/ and run npm install for the dev tools.
   const market = json('.claude-plugin/marketplace.json');
-  assert.equal(market.plugins[0].source, './');
-  assert.equal(market.plugins[0].version, version);
+  assert.deepEqual(market.plugins[0].source, { source: 'npm', package: 'pitroom' });
+  assert.equal(market.plugins[0].version, undefined, 'no pin: users follow the latest release');
+  assert.equal(market.plugins[0].name, json('.claude-plugin/plugin.json').name);
   const codex = json('.codex-plugin/plugin.json');
   assert.equal(codex.version, version);
   assert.ok(fs.existsSync(path.join(root, codex.skills)));
+});
+
+test('the Codex manifest meets the public directory limits (no hooks, short listing text)', () => {
+  const codex = json('.codex-plugin/plugin.json');
+  assert.equal('hooks' in codex, false, 'the directory rejects packages with lifecycle hooks');
+  const ui = codex.interface;
+  assert.ok(ui.displayName.length <= 30 && ui.shortDescription.length <= 30, 'display name and subtitle: 30 characters');
+  assert.ok(ui.longDescription.length <= 4000 && ui.developerName.length <= 80);
+  assert.ok(Array.isArray(ui.capabilities), 'capabilities are required in the Codex format');
+  for (const k of ['websiteURL', 'supportURL']) assert.match(ui[k], /^https:\/\//, k);
+  assert.ok(codex.description.length <= 4000 && codex.author.name);
 });
 
 test('install links every skill and a working launcher; uninstall removes only those', () => {

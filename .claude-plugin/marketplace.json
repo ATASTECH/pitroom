@@ -8,8 +8,10 @@
     {
       "name": "pitroom",
       "description": "Delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex or Claude Code workers, with verified answers, exact diffs and cost receipts.",
-      "version": "0.6.0",
-      "source": "./",
+      "source": {
+        "source": "npm",
+        "package": "pitroom"
+      },
       "author": {
         "name": "TahaAtas"
       }

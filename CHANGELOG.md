@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.6.1
+
+### Install
+- The Claude Code and Codex marketplace now installs the published npm package (under 0.5 MB, no dependencies) instead of copying the whole repository: before, `claude plugin install` also copied `src/` and `test/` and ran `npm install` for the development tools (39 MB). One `.claude-plugin/marketplace.json` serves both agents.
+- The README has an install table per agent: Claude Code plugin, Codex plugin (skills only, no session-start hook, the `pitroom` command comes from npm) and npm with `pitroom install`.
+
+### Directory listing
+- The Codex manifest carries the listing fields the public plugin directory asks for (short description, developer, capabilities, links) and no longer declares `hooks`, which the directory does not accept.
+- `docs/releasing.md` lists the release steps and how to submit to the Anthropic and OpenAI directories.
+
 ## 0.6.0
 
 ### Workflow skills
