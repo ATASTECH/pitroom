@@ -12,6 +12,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 
 [![Release](https://img.shields.io/github/v/release/ATASTECH/pitroom?label=release)](https://github.com/ATASTECH/pitroom/releases/latest)
 [![Downloads](https://img.shields.io/github/downloads/ATASTECH/pitroom/total?label=downloads)](https://github.com/ATASTECH/pitroom/releases)
+[![npm](https://img.shields.io/npm/v/pitroom?label=npm)](https://www.npmjs.com/package/pitroom)
 [![Stars](https://img.shields.io/github/stars/ATASTECH/pitroom?style=flat&label=stars)](https://github.com/ATASTECH/pitroom/stargazers)
 [![CI](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml/badge.svg)](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
@@ -147,7 +148,7 @@ Every run prints a receipt, and `pitroom savings` adds them up:
 
 **Get it**
 
-Clone the repository
+`npm i -g pitroom`
 
 </td>
 
@@ -187,15 +188,15 @@ Ask your agent, or run `pitroom`
 Requires Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
 ```bash
-git clone https://github.com/ATASTECH/pitroom && cd pitroom
-node dist/pitroom.mjs install   # skills → ~/.agents/skills + ~/.claude/skills, launcher → ~/.local/bin/pitroom
-pitroom doctor --probe          # worker CLI, models, permissions, skills, one live round trip
+npm i -g pitroom
+pitroom install          # skills → ~/.agents/skills + ~/.claude/skills, launcher → ~/.local/bin/pitroom
+pitroom doctor --probe   # worker CLI, models, permissions, skills, one live round trip
 ```
 
-Or, in Claude Code, install it as a plugin (skills plus the session-start hook), from a clone or the repository:
+Or, in Claude Code, install it as a plugin (skills plus the session-start hook):
 
 ```text
-/plugin marketplace add /path/to/pitroom
+/plugin marketplace add ATASTECH/pitroom
 /plugin install pitroom@pitroom
 ```
 
