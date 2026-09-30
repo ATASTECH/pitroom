@@ -975,7 +975,8 @@ var SCHEMA = {
   link: "string[]",
   web: "boolean",
   maxParallel: "number",
-  models: "record"
+  models: "record",
+  tiers: "record"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path5.resolve(process.env.PITROOM_CONFIG);
@@ -1043,7 +1044,8 @@ function effective(flags = {}) {
     link: setting(void 0, void 0, c.link, []),
     web: setting(void 0, void 0, c.web, false),
     maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
-    models: setting(void 0, void 0, c.models, {})
+    models: setting(void 0, void 0, c.models, {}),
+    tiers: setting(void 0, void 0, c.tiers, {})
   };
 }
 
@@ -1134,6 +1136,7 @@ var VALUE_FLAGS = {
   "--model": "model",
   "-W": "worker",
   "--worker": "worker",
+  "--tier": "tier",
   "-g": "group",
   "--group": "group",
   "-t": "timeout",
@@ -1146,7 +1149,10 @@ var VALUE_FLAGS = {
   "--since": "since",
   "--card": "card",
   "--days": "days",
-  "--interval": "interval"
+  "--interval": "interval",
+  "--range": "range",
+  "--plan": "plan",
+  "--step": "step"
 };
 var BOOL_FLAGS = {
   "-r": "read",
@@ -1243,6 +1249,7 @@ function runOptions(p, task) {
     link: p.flags.has("link") ? (p.flags.get("link") ?? []).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean) : effective().link.value,
     worker: flag(p, "worker"),
     model: flag(p, "model"),
+    tier: flag(p, "tier"),
     timeoutSec: parseDuration(effective({ timeout: flag(p, "timeout") }).timeout.value),
     verify: flag(p, "verify"),
     continueFrom: cont ? resolveRun(cont) : void 0,
@@ -1252,17 +1259,97 @@ function runOptions(p, task) {
     group: flag(p, "group")
   };
 }
+function planStep(p) {
+  const file = flag(p, "plan");
+  const step = flag(p, "step");
+  if (!file && !step) return void 0;
+  if (!file || !step) throw new UserError("--plan and --step go together: pitroom run -i --plan PLAN.md --step N");
+  if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
+  return { file, step: Number(step) };
+}
 
 // src/cli/commands.ts
-import fs17 from "node:fs";
-import path14 from "node:path";
+import fs21 from "node:fs";
+import path18 from "node:path";
 
 // src/core/report.ts
-import fs9 from "node:fs";
+import fs10 from "node:fs";
 
-// src/core/receipt.ts
+// src/core/plan.ts
 import fs8 from "node:fs";
 import path7 from "node:path";
+var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
+function structure(lines) {
+  const headings = [];
+  const rules = [];
+  const fenced = [];
+  let open;
+  lines.forEach((l, i) => {
+    const f = FENCE.exec(l);
+    if (f) {
+      fenced[i] = true;
+      const mark = f[1];
+      if (!open) open = mark;
+      else if (mark[0] === open[0] && mark.length >= open.length && !f[2].trim()) open = void 0;
+      return;
+    }
+    fenced[i] = !!open;
+    if (open) return;
+    const h = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(l);
+    if (h) headings.push({ line: i, level: h[1].length, text: h[2] });
+    else if (RULE.test(l)) rules.push(i);
+  });
+  return { headings, rules, fenced };
+}
+function parsePlan(text, file = "") {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const { headings, rules, fenced } = structure(lines);
+  const after = (line) => Math.min(headings.find((h) => h.line > line)?.line ?? lines.length, rules.find((r) => r > line) ?? lines.length);
+  const titleHeading = headings.find((h) => h.level === 1);
+  const start = titleHeading ? titleHeading.line + 1 : 0;
+  const header = lines.slice(start, after(start - 1)).filter((l) => !/^\s*>/.test(l)).join("\n").trim();
+  const gc = headings.find((h) => /^global constraints\b/i.test(h.text));
+  const constraints = gc ? lines.slice(gc.line + 1, after(gc.line)).join("\n").trim() : "";
+  const tasks = [];
+  for (const h of headings) {
+    const m = /^Task\s+(\d+)\b\s*[:.)\-–—]?\s*(.*)$/i.exec(h.text);
+    if (!m) continue;
+    const end = headings.find((o) => o.line > h.line && o.level <= h.level)?.line ?? lines.length;
+    const body = lines.slice(h.line, end).join("\n").replace(/(\n\s*(?:---|\*\*\*|___)\s*)+$/, "").trimEnd();
+    const unfenced = lines.slice(h.line, end).filter((_, j) => !fenced[h.line + j]).join("\n");
+    const tier = /^\s*[-*]?\s*\*\*Worker:\*\*\s*`?([\w-]+)`?/m.exec(unfenced)?.[1]?.toLowerCase();
+    tasks.push({ step: Number(m[1]), title: m[2].trim(), text: body, ...tier ? { tier } : {} });
+  }
+  return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
+}
+function loadPlan(file) {
+  const abs = path7.resolve(file);
+  if (!fs8.existsSync(abs) || !fs8.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs8.readFileSync(abs, "utf8"), fs8.realpathSync(abs));
+  if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
+  return plan;
+}
+function planTask(plan, step) {
+  const t = plan.tasks.find((x) => x.step === step);
+  if (!t) throw new UserError(`no Task ${step} in ${plan.file}; it has ${plan.tasks.map((x) => `Task ${x.step}`).join(", ")}`);
+  return t;
+}
+function brief(plan, task) {
+  return `${[
+    `# ${plan.title || planName(plan.file)}`,
+    plan.header,
+    "## Global Constraints",
+    plan.constraints || "(none stated in the plan)",
+    task.text
+  ].filter(Boolean).join("\n\n")}
+`;
+}
+var planName = (file) => path7.basename(file).replace(/\.md$/i, "");
+
+// src/core/receipt.ts
+import fs9 from "node:fs";
+import path8 from "node:path";
 var PRESETS = {
   sonnet: { name: "Claude Sonnet", input: 3, output: 15, cachedInput: 0.3 },
   opus: { name: "Claude Opus", input: 5, output: 25, cachedInput: 0.5 },
@@ -1298,13 +1385,13 @@ function record(meta) {
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name
   };
-  fs8.mkdirSync(path7.dirname(ledgerFile()), { recursive: true });
-  fs8.appendFileSync(ledgerFile(), `${JSON.stringify(entry)}
+  fs9.mkdirSync(path8.dirname(ledgerFile()), { recursive: true });
+  fs9.appendFileSync(ledgerFile(), `${JSON.stringify(entry)}
 `);
 }
 function readLedger(sinceMs2) {
-  if (!fs8.existsSync(ledgerFile())) return [];
-  return fs8.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+  if (!fs9.existsSync(ledgerFile())) return [];
+  return fs9.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
       return [JSON.parse(l)];
     } catch {
@@ -1379,7 +1466,7 @@ function duration(meta) {
 }
 function readSummary(meta) {
   const f = runFile(meta.id, "summary.md");
-  return fs9.existsSync(f) ? fs9.readFileSync(f, "utf8").trim() : "";
+  return fs10.existsSync(f) ? fs10.readFileSync(f, "utf8").trim() : "";
 }
 function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   const out = [];
@@ -1387,6 +1474,14 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(" \xB7 "));
+  if (meta.reviewOf) {
+    const v = meta.verdict;
+    const verdict = v ? ` \xB7 SPEC ${v.spec.toUpperCase()} \xB7 QUALITY ${v.quality.toUpperCase()} \xB7 critical ${v.critical} \xB7 important ${v.important} \xB7 minor ${v.minor}` : "";
+    out.push(`review of ${meta.reviewOf} (${meta.reviewKind})${verdict}`);
+  } else if (meta.plan) {
+    const status = meta.taskStatus ? ` \xB7 STATUS ${meta.taskStatus}` : "";
+    out.push(`plan: ${planName(meta.plan.file)} \xB7 Task ${meta.plan.step}: ${meta.plan.title}${status}`);
+  }
   for (const a of meta.attempts ?? []) out.push(`fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
@@ -1419,6 +1514,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
     if (meta.changes.length > 50) out.push(`   \u2026 ${meta.changes.length - 50} more`);
     if (meta.changes.length) {
       out.push(`   diff:    pitroom show ${meta.id} --patch`);
+      out.push(`   review:  pitroom review ${meta.id}`);
       if (meta.mode === "isolate" && !meta.applied && !meta.discarded) {
         out.push(`   apply:   pitroom apply ${meta.id}`, `   discard: pitroom discard ${meta.id}`);
       }
@@ -1432,15 +1528,15 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   }
   if (isActive(meta.state)) {
     out.push(`\u2500\u2500 still running: pitroom wait ${meta.id}   (stop: pitroom stop ${meta.id})`);
-  } else if (meta.sessionId && !meta.applied && !meta.discarded) {
+  } else if (meta.sessionId && !meta.applied && !meta.discarded && !meta.reviewOf) {
     out.push(`\u2500\u2500 follow up: pitroom run --continue ${meta.id} "\u2026"`);
   }
   return out.join("\n");
 }
 function live(meta) {
   const f = runFile(meta.id, "events.jsonl");
-  if (!fs9.existsSync(f)) return { steps: 0, toolCalls: 0 };
-  const p = getBackend((meta.ran ?? meta.worker).backend).parse(fs9.readFileSync(f, "utf8"));
+  if (!fs10.existsSync(f)) return { steps: 0, toolCalls: 0 };
+  const p = getBackend((meta.ran ?? meta.worker).backend).parse(fs10.readFileSync(f, "utf8"));
   return { steps: p.usage.steps, toolCalls: p.usage.toolCalls, last: p.lastActivity };
 }
 function progress(meta) {
@@ -1565,26 +1661,26 @@ ${(/* @__PURE__ */ new Date()).toLocaleTimeString()} \xB7 Ctrl-C to stop watchin
 }
 
 // src/core/install.ts
-import fs10 from "node:fs";
+import fs11 from "node:fs";
 import os7 from "node:os";
-import path8 from "node:path";
+import path9 from "node:path";
 import { fileURLToPath } from "node:url";
 var LEGACY = ["pitroom", "opencode-worker"];
 function packageRoot() {
-  return path8.resolve(path8.dirname(fileURLToPath(import.meta.url)), "..");
+  return path9.resolve(path9.dirname(fileURLToPath(import.meta.url)), "..");
 }
 function skillNames(root = packageRoot()) {
-  const dir = path8.join(root, "skills");
-  if (!fs10.existsSync(dir)) return [];
-  return fs10.readdirSync(dir).filter((d) => fs10.existsSync(path8.join(dir, d, "SKILL.md"))).sort();
+  const dir = path9.join(root, "skills");
+  if (!fs11.existsSync(dir)) return [];
+  return fs11.readdirSync(dir).filter((d) => fs11.existsSync(path9.join(dir, d, "SKILL.md"))).sort();
 }
 function skillTargets() {
   const home2 = os7.homedir();
-  const targets = [path8.join(home2, ".agents", "skills")];
-  if (fs10.existsSync(path8.join(home2, ".claude"))) targets.push(path8.join(home2, ".claude", "skills"));
+  const targets = [path9.join(home2, ".agents", "skills")];
+  if (fs11.existsSync(path9.join(home2, ".claude"))) targets.push(path9.join(home2, ".claude", "skills"));
   return targets;
 }
-var launcherPath = () => path8.join(os7.homedir(), ".local", "bin", "pitroom");
+var launcherPath = () => path9.join(os7.homedir(), ".local", "bin", "pitroom");
 var LAUNCHER_MARK = "# pitroom launcher";
 function launcherScript(bundle) {
   const q = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
@@ -1602,7 +1698,7 @@ exit 127
 function isOurLauncher(file, root) {
   if (linksInto(file, root)) return true;
   try {
-    const s = fs10.readFileSync(file, "utf8");
+    const s = fs11.readFileSync(file, "utf8");
     return s.includes(LAUNCHER_MARK) && s.includes(root);
   } catch {
     return false;
@@ -1610,57 +1706,57 @@ function isOurLauncher(file, root) {
 }
 function placeLauncher(bundle, root, force) {
   const dest = launcherPath();
-  fs10.mkdirSync(path8.dirname(dest), { recursive: true });
-  const exists = fs10.lstatSync(dest, { throwIfNoEntry: false });
+  fs11.mkdirSync(path9.dirname(dest), { recursive: true });
+  const exists = fs11.lstatSync(dest, { throwIfNoEntry: false });
   if (exists && !isOurLauncher(dest, root)) {
     if (!force) return `! ${dest} exists and is not Pitroom's launcher; kept (use --force to back it up and replace)`;
-    fs10.renameSync(dest, `${dest}.bak-${Date.now()}`);
+    fs11.renameSync(dest, `${dest}.bak-${Date.now()}`);
   } else if (exists) {
-    fs10.rmSync(dest, { force: true });
+    fs11.rmSync(dest, { force: true });
   }
-  fs10.writeFileSync(dest, launcherScript(bundle), { mode: 493 });
+  fs11.writeFileSync(dest, launcherScript(bundle), { mode: 493 });
   return `\u2714 ${dest} \u2192 launcher for ${bundle} (Node 18+)`;
 }
 function linksInto(link, dir) {
-  const st = fs10.lstatSync(link, { throwIfNoEntry: false });
+  const st = fs11.lstatSync(link, { throwIfNoEntry: false });
   if (!st?.isSymbolicLink()) return false;
-  const target = path8.resolve(path8.dirname(link), fs10.readlinkSync(link));
-  const rel = path8.relative(dir, target);
-  return !rel.startsWith("..") && !path8.isAbsolute(rel);
+  const target = path9.resolve(path9.dirname(link), fs11.readlinkSync(link));
+  const rel = path9.relative(dir, target);
+  return !rel.startsWith("..") && !path9.isAbsolute(rel);
 }
 function place(src, dest, opts) {
-  fs10.mkdirSync(path8.dirname(dest), { recursive: true });
-  const st = fs10.lstatSync(dest, { throwIfNoEntry: false });
+  fs11.mkdirSync(path9.dirname(dest), { recursive: true });
+  const st = fs11.lstatSync(dest, { throwIfNoEntry: false });
   if (st && !st.isSymbolicLink()) {
     if (!opts.force) return `! ${dest} exists and is not a link; kept (use --force to back it up and replace)`;
-    fs10.renameSync(dest, `${dest}.bak-${Date.now()}`);
+    fs11.renameSync(dest, `${dest}.bak-${Date.now()}`);
   } else if (st) {
-    fs10.unlinkSync(dest);
+    fs11.unlinkSync(dest);
   }
-  if (opts.copy) fs10.cpSync(src, dest, { recursive: true });
-  else fs10.symlinkSync(src, dest, process.platform === "win32" ? "junction" : fs10.statSync(src).isDirectory() ? "dir" : "file");
+  if (opts.copy) fs11.cpSync(src, dest, { recursive: true });
+  else fs11.symlinkSync(src, dest, process.platform === "win32" ? "junction" : fs11.statSync(src).isDirectory() ? "dir" : "file");
   return `\u2714 ${dest} \u2192 ${opts.copy ? "copied" : src}`;
 }
 function install(opts) {
   const root = packageRoot();
   const skills = skillNames(root);
-  if (!skills.length) throw new Error(`no skills found under ${path8.join(root, "skills")}`);
+  if (!skills.length) throw new Error(`no skills found under ${path9.join(root, "skills")}`);
   const out = [];
   for (const base of skillTargets()) {
     for (const legacy of LEGACY) {
-      const l = path8.join(base, legacy);
+      const l = path9.join(base, legacy);
       if (!skills.includes(legacy) && linksInto(l, root)) {
-        fs10.unlinkSync(l);
+        fs11.unlinkSync(l);
         out.push(`\u2714 removed old link ${l}`);
       }
     }
-    for (const name of skills) out.push(place(path8.join(root, "skills", name), path8.join(base, name), opts));
+    for (const name of skills) out.push(place(path9.join(root, "skills", name), path9.join(base, name), opts));
   }
-  const bundle = path8.join(root, "dist", "pitroom.mjs");
-  if (fs10.existsSync(bundle)) {
+  const bundle = path9.join(root, "dist", "pitroom.mjs");
+  if (fs11.existsSync(bundle)) {
     out.push(placeLauncher(bundle, root, opts.force));
-    const onPath = (process.env.PATH ?? "").split(path8.delimiter).some((d) => path8.resolve(d) === path8.dirname(launcherPath()));
-    if (!onPath) out.push(`! ${path8.dirname(launcherPath())} is not on PATH; add it, or run ${launcherPath()} directly`);
+    const onPath = (process.env.PATH ?? "").split(path9.delimiter).some((d) => path9.resolve(d) === path9.dirname(launcherPath()));
+    if (!onPath) out.push(`! ${path9.dirname(launcherPath())} is not on PATH; add it, or run ${launcherPath()} directly`);
   }
   return out;
 }
@@ -1668,37 +1764,126 @@ function uninstall() {
   const root = packageRoot();
   const out = [];
   for (const base of skillTargets()) {
-    if (!fs10.existsSync(base)) continue;
-    for (const name of fs10.readdirSync(base)) {
-      const l = path8.join(base, name);
+    if (!fs11.existsSync(base)) continue;
+    for (const name of fs11.readdirSync(base)) {
+      const l = path9.join(base, name);
       if (linksInto(l, root)) {
-        fs10.unlinkSync(l);
+        fs11.unlinkSync(l);
         out.push(`\u2714 removed ${l}`);
       }
     }
   }
   if (isOurLauncher(launcherPath(), root)) {
-    fs10.rmSync(launcherPath(), { force: true });
+    fs11.rmSync(launcherPath(), { force: true });
     out.push(`\u2714 removed ${launcherPath()}`);
   }
   return out.length ? out : ["nothing to remove"];
 }
 function installedSkills() {
   const names = skillNames();
-  return skillTargets().map((base) => ({ base, names: names.filter((n) => fs10.existsSync(path8.join(base, n, "SKILL.md"))) }));
+  return skillTargets().map((base) => ({ base, names: names.filter((n) => fs11.existsSync(path9.join(base, n, "SKILL.md"))) }));
 }
 
-// src/core/run.ts
-import { spawn as spawn2, spawnSync as spawnSync5 } from "node:child_process";
-import fs16 from "node:fs";
-import path13 from "node:path";
+// src/core/plan-status.ts
+import crypto2 from "node:crypto";
+import fs12 from "node:fs";
+import path10 from "node:path";
+function notesFile(plan) {
+  const id = crypto2.createHash("sha1").update(plan.file).digest("hex").slice(0, 12);
+  return path10.join(home(), "plans", id, "notes.md");
+}
+function readNotes(plan) {
+  const f = notesFile(plan);
+  if (!fs12.existsSync(f)) return [];
+  return fs12.readFileSync(f, "utf8").split("\n").slice(1).filter(Boolean).map((l) => {
+    const m = /^(\d{4}-\d\d-\d\d \d\d:\d\d) (.*)$/.exec(l);
+    return m ? { at: m[1], text: m[2] } : { at: "", text: l };
+  });
+}
+function addNote(planFile, text) {
+  const plan = loadPlan(planFile);
+  const f = notesFile(plan);
+  fs12.mkdirSync(path10.dirname(f), { recursive: true });
+  if (!fs12.existsSync(f)) fs12.writeFileSync(f, `# plan: ${plan.file}
+`);
+  const at = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ");
+  fs12.appendFileSync(f, `${at} ${text.replace(/\s+/g, " ").trim()}
+`);
+  return f;
+}
+function planStatus(planFile) {
+  const plan = loadPlan(planFile);
+  const runs = [];
+  for (const id of listRunIds()) {
+    try {
+      const m = freshMeta(id);
+      if (m.plan?.file === plan.file) runs.push(m);
+    } catch {
+    }
+  }
+  const notes = readNotes(plan);
+  const tasks = plan.tasks.map((t) => {
+    const impl = runs.filter((m) => m.plan.step === t.step && !m.reviewOf);
+    const rev = runs.filter((m) => m.plan.step === t.step && m.reviewOf).at(-1);
+    const last = impl.at(-1);
+    return {
+      step: t.step,
+      title: t.title,
+      runs: impl.length,
+      last: last && { id: last.id, state: last.state, status: last.taskStatus },
+      review: rev && { id: rev.id, state: rev.state, kind: rev.reviewKind ?? "task", verdict: rev.verdict },
+      applied: impl.some((m) => m.applied || m.mode === "write" && m.state === "done" && !m.reverted && !!m.changes?.length),
+      note: [...notes].reverse().find((n) => n.text.startsWith(`Task ${t.step}:`))?.text
+    };
+  });
+  return { plan, tasks, rulings: notes.filter((n) => /\bRuling:/.test(n.text)), notesFile: notesFile(plan) };
+}
+var cell = (s, max) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
+};
+function formatPlanStatus(s) {
+  const head = ["TASK", "STATE", "STATUS", "REVIEW", "ROUNDS", "APPLIED", "TITLE", "NOTE"];
+  const rows = s.tasks.map((t) => {
+    const v = t.review?.verdict;
+    const review = v ? `${v.spec}/${v.quality} (c${v.critical} i${v.important} m${v.minor})` : t.review?.state ?? "-";
+    return [
+      String(t.step),
+      t.last?.state ?? "-",
+      t.last?.status ?? "-",
+      review,
+      t.runs ? String(t.runs - 1) : "-",
+      t.runs ? t.applied ? "yes" : "no" : "-",
+      cell(t.title, 32),
+      cell(t.note ?? "", 60)
+    ];
+  });
+  const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
+  const fmt = (r) => r.map((c, i) => i === r.length - 1 ? c : c.padEnd(widths[i])).join("  ").trimEnd();
+  const rulings = s.rulings.length ? s.rulings.map((n) => `  ${n.at} ${n.text}`).join("\n") : "  none";
+  return [
+    `plan ${s.plan.file} \xB7 ${s.plan.title || planName(s.plan.file)} \xB7 ${s.tasks.length} tasks`,
+    "",
+    fmt(head),
+    ...rows.map(fmt),
+    "",
+    `Rulings:
+${rulings}`,
+    `notes: ${s.notesFile}`
+  ].join("\n");
+}
+
+// src/core/review.ts
+import crypto4 from "node:crypto";
+import fs14 from "node:fs";
+import path12 from "node:path";
 
 // src/vcs/git.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
-import crypto2 from "node:crypto";
-import fs11 from "node:fs";
+import crypto3 from "node:crypto";
+import fs13 from "node:fs";
 import os8 from "node:os";
-import path9 from "node:path";
+import path11 from "node:path";
 var SAFE = [
   "-c",
   "color.ui=false",
@@ -1730,20 +1915,20 @@ function gitAvailable() {
 }
 function repoRoot(dir) {
   const r = git(dir, ["rev-parse", "--show-toplevel"]);
-  return r.code === 0 ? path9.resolve(r.stdout.trim()) : void 0;
+  return r.code === 0 ? path11.resolve(r.stdout.trim()) : void 0;
 }
 function snapshotTree(root, exclude = []) {
-  const tmp = path9.join(os8.tmpdir(), `pitroom-index-${process.pid}-${crypto2.randomBytes(4).toString("hex")}`);
-  const real = path9.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
+  const tmp = path11.join(os8.tmpdir(), `pitroom-index-${process.pid}-${crypto3.randomBytes(4).toString("hex")}`);
+  const real = path11.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
   const env = { ...process.env, GIT_INDEX_FILE: tmp };
   try {
-    if (fs11.existsSync(real)) fs11.copyFileSync(real, tmp);
+    if (fs13.existsSync(real)) fs13.copyFileSync(real, tmp);
     else must(root, ["read-tree", "--empty"], env);
     must(root, ["add", "-A", "--", ":/", ...exclude.map((p) => `:(top,exclude)${p}`)], env);
     return must(root, ["write-tree"], env).trim();
   } finally {
-    fs11.rmSync(tmp, { force: true });
-    fs11.rmSync(`${tmp}.lock`, { force: true });
+    fs13.rmSync(tmp, { force: true });
+    fs13.rmSync(`${tmp}.lock`, { force: true });
   }
 }
 var DIFF = ["diff", "--no-ext-diff", "--no-textconv", "--no-renames"];
@@ -1763,27 +1948,27 @@ function diffTrees(root, a, b) {
   return { changes, stats: { files: changes.length, insertions, deletions }, patch };
 }
 function createIsolatedCopy(root, tree, dest) {
-  const objects = path9.join(path9.resolve(root, must(root, ["rev-parse", "--git-common-dir"]).trim()), "objects");
-  fs11.mkdirSync(path9.dirname(dest), { recursive: true });
-  must(path9.dirname(dest), ["init", "--quiet", dest]);
-  fs11.writeFileSync(path9.join(dest, ".git", "objects", "info", "alternates"), `${objects}
+  const objects = path11.join(path11.resolve(root, must(root, ["rev-parse", "--git-common-dir"]).trim()), "objects");
+  fs13.mkdirSync(path11.dirname(dest), { recursive: true });
+  must(path11.dirname(dest), ["init", "--quiet", dest]);
+  fs13.writeFileSync(path11.join(dest, ".git", "objects", "info", "alternates"), `${objects}
 `);
   must(dest, ["read-tree", tree]);
   must(dest, ["checkout-index", "--all", "--force"]);
 }
 function removeIsolatedCopy(dest, ownedBy) {
-  const rel = path9.relative(ownedBy, dest);
-  if (!rel || rel.startsWith("..") || path9.isAbsolute(rel)) throw new Error(`refusing to remove ${dest}`);
-  fs11.rmSync(dest, { recursive: true, force: true });
+  const rel = path11.relative(ownedBy, dest);
+  if (!rel || rel.startsWith("..") || path11.isAbsolute(rel)) throw new Error(`refusing to remove ${dest}`);
+  fs13.rmSync(dest, { recursive: true, force: true });
 }
 function linkIntoWorktree(root, worktree, rels) {
   const linked = [];
   for (const rel of rels) {
-    const src = path9.join(root, rel);
-    const dst = path9.join(worktree, rel);
-    if (!fs11.existsSync(src) || fs11.existsSync(dst)) continue;
-    fs11.mkdirSync(path9.dirname(dst), { recursive: true });
-    fs11.symlinkSync(src, dst, process.platform === "win32" ? "junction" : void 0);
+    const src = path11.join(root, rel);
+    const dst = path11.join(worktree, rel);
+    if (!fs13.existsSync(src) || fs13.existsSync(dst)) continue;
+    fs13.mkdirSync(path11.dirname(dst), { recursive: true });
+    fs13.symlinkSync(src, dst, process.platform === "win32" ? "junction" : void 0);
     linked.push(rel);
   }
   return linked;
@@ -1795,25 +1980,209 @@ function applyPatch(root, patchFile, reverse) {
   const r = git(root, ["apply", "--whitespace=nowarn", ...flags, patchFile]);
   return { ok: r.code === 0, message: r.stderr.trim() };
 }
+function reviewDiff(root, a, b) {
+  return `${must(root, [...DIFF, "--stat", a, b]).trim()}
+
+${must(root, [...DIFF, "-U10", a, b])}`;
+}
+function rangeDiff(root, a, b) {
+  const range = `${a}..${b}`;
+  const log = must(root, ["log", "--oneline", "--no-decorate", range]).trim();
+  return [
+    `## COMMITS
+
+${log || "(none)"}`,
+    `## FILES CHANGED
+
+${must(root, [...DIFF, "--stat", range]).trim() || "(none)"}`,
+    `## DIFF
+
+${must(root, [...DIFF, "-U10", range])}`
+  ].join("\n\n");
+}
+function commitOf(root, ref) {
+  const r = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  return r.code === 0 ? r.stdout.trim() : void 0;
+}
+function gitDir(dir) {
+  const r = git(dir, ["rev-parse", "--absolute-git-dir"]);
+  return r.code === 0 ? r.stdout.trim() : void 0;
+}
+
+// src/core/review.ts
+var TEMPLATE = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
+var section = (title, body) => `## ${title}
+
+${body.trim() || "(empty)"}
+`;
+function ancestors(m) {
+  const out = [];
+  for (let id = m.parent; id; ) {
+    const a = readMeta(id);
+    out.push(a);
+    id = a.parent;
+  }
+  return out;
+}
+function briefOf(m) {
+  const root = [m, ...ancestors(m)].at(-1);
+  const f = runFile(root.id, "brief.md");
+  return fs14.existsSync(f) ? fs14.readFileSync(f, "utf8") : root.task;
+}
+function latestReview(ids) {
+  for (const id of listRunIds().reverse()) {
+    try {
+      const m = readMeta(id);
+      if (m.reviewOf && ids.includes(m.reviewOf) && m.state === "done") return m;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function diffOf(m, from = m.baseTree) {
+  const where = m.mode === "isolate" ? m.worktree : m.repoRoot;
+  if (where && fs14.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
+  if (from !== m.baseTree) {
+    throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
+  }
+  return fs14.readFileSync(runFile(m.id, "changes.patch"), "utf8");
+}
+function runReview(id) {
+  const m = freshMeta(id);
+  if (isActive(m.state)) throw new UserError(`run ${m.id} is still ${m.state}; pitroom wait ${m.id} first`, 3);
+  if (m.reviewOf) throw new UserError(`run ${m.id} is itself a review`);
+  if (m.mode === "read") throw new UserError(`run ${m.id} was read-only; there is no change to review`);
+  if (!m.changes?.length) throw new UserError(`run ${m.id} made no changes; nothing to review`);
+  const chain = ancestors(m);
+  const previous = latestReview(chain.map((a) => a.id));
+  const dir = m.mode === "isolate" && m.worktree && fs14.existsSync(m.worktree) ? m.cwd : m.dir;
+  const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group, plan: m.plan };
+  const title = m.plan ? `Task ${m.plan.step}: ${m.plan.title}` : `run ${m.id}`;
+  if (!previous) {
+    return {
+      ...job,
+      kind: "task",
+      package: [`# Review package \xB7 ${title}
+`, section("BRIEF", briefOf(m)), section("REPORT", readSummary(m)), section("DIFF", diffOf(m))].join("\n")
+    };
+  }
+  const reviewed = chain.find((a) => a.id === previous.reviewOf);
+  const from = m.mode === "isolate" ? reviewed.afterTree : m.baseTree;
+  return {
+    ...job,
+    kind: "fix",
+    package: [
+      `# Re-review package \xB7 ${title} \xB7 fix round after review ${previous.id}
+`,
+      section("BRIEF", briefOf(m)),
+      section("PREVIOUS FINDINGS", readSummary(previous)),
+      section("FIX REPORT", readSummary(m)),
+      section("FIX DIFF", diffOf(m, from))
+    ].join("\n")
+  };
+}
+function rangeReview(range, dir, planFile) {
+  const root = repoRoot(dir);
+  if (!root) throw new UserError("--range needs a git repository");
+  const i = range.indexOf("..");
+  const a = i > 0 ? range.slice(0, i) : "";
+  const b = i > 0 ? range.slice(i + 2) || "HEAD" : "";
+  if (!a || b.startsWith(".")) throw new UserError(`--range takes A..B (e.g. main..HEAD), not "${range}"`);
+  for (const ref of [a, b]) if (!commitOf(root, ref)) throw new UserError(`not a commit: ${ref}`);
+  const plan = planFile ? loadPlan(planFile) : void 0;
+  const notes = plan ? readNotes(plan) : [];
+  const requirements = plan ? [
+    `Plan: ${plan.file}`,
+    "### Global Constraints",
+    plan.constraints || "(none stated in the plan)",
+    "### Tasks",
+    plan.tasks.map((t) => `- Task ${t.step}: ${t.title}`).join("\n")
+  ].join("\n\n") : "(none given; judge the change on its own terms)";
+  return {
+    kind: "range",
+    of: `${a}..${b}`,
+    dir: root,
+    group: plan ? planName(plan.file) : void 0,
+    package: [
+      `# Review package \xB7 ${a}..${b}
+`,
+      section("WHAT WAS IMPLEMENTED", plan ? `${plan.title}
+
+${plan.header}` : "The commits below."),
+      section("REQUIREMENTS", requirements),
+      ...notes.length ? [section("NOTES FROM EXECUTION", notes.map((n) => `- ${n.text}`).join("\n"))] : [],
+      rangeDiff(root, a, b)
+    ].join("\n")
+  };
+}
+function pickReviewer(job) {
+  const eff = effective();
+  const tiers = eff.tiers.value;
+  if (job.kind === "range") return tiers.capable;
+  const implementer = job.implementer;
+  if (!implementer) return void 0;
+  const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
+  const candidates = [tiers.standard, tiers.capable, ...eff.fallback.value, eff.worker.value].filter((s) => !!s);
+  return candidates.find((c) => parseTarget(c, def).backend !== implementer.backend);
+}
+function writePackage(job) {
+  const g = gitDir(job.dir);
+  if (!g) throw new UserError(`not a git repository: ${job.dir}`);
+  const file = path12.join(g, "pitroom", `review-${crypto4.randomBytes(4).toString("hex")}.md`);
+  fs14.mkdirSync(path12.dirname(file), { recursive: true });
+  fs14.writeFileSync(file, job.package);
+  return file;
+}
+
+// src/core/templates.ts
+import fs15 from "node:fs";
+import path13 from "node:path";
+var FILES = {
+  implementer: "pitroom-driven-development/implementer-prompt.md",
+  "task-reviewer": "pitroom-driven-development/task-reviewer-prompt.md",
+  "re-review": "pitroom-driven-development/re-review-prompt.md",
+  "code-reviewer": "pitroom-review/code-reviewer.md"
+};
+function loadTemplate(name, root = packageRoot()) {
+  const file = path13.join(root, "skills", FILES[name]);
+  if (!fs15.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs15.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+}
+function fill(template, values) {
+  const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
+  if (missing.length) throw new UserError(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`, 3);
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
+}
+
+// src/core/run.ts
+import { spawn as spawn2, spawnSync as spawnSync5 } from "node:child_process";
+import fs20 from "node:fs";
+import path17 from "node:path";
 
 // src/core/chain.ts
 function resolveChain(flags = {}) {
-  const eff = effective({ worker: flags.worker, model: flags.model });
+  const warnings = [];
+  let spec = flags.worker;
+  if (!spec && flags.tier) {
+    const tiers = effective().tiers.value;
+    spec = Object.hasOwn(tiers, flags.tier) ? tiers[flags.tier] : void 0;
+    if (!spec) warnings.push(`tier "${flags.tier}" is not configured (config "tiers"); using the default worker`);
+  }
+  const eff = effective({ worker: spec, model: flags.model });
   const models = eff.models.value;
   const withDefault = (t) => t.model || !models[t.backend] ? t : { ...t, model: models[t.backend] };
   let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
   if (eff.model.value) worker = { ...worker, model: eff.model.value };
   worker = withDefault(worker);
   const fallback = [];
-  const warnings = [];
   if (!flags.noFallback) {
-    for (const spec of eff.fallback.value) {
-      const t = withDefault(parseTarget(spec, worker.backend));
+    for (const s of eff.fallback.value) {
+      const t = withDefault(parseTarget(s, worker.backend));
       try {
         getBackend(t.backend);
         fallback.push(t);
       } catch (e) {
-        warnings.push(`fallback ${spec} skipped: ${e.message}`);
+        warnings.push(`fallback ${s} skipped: ${e.message}`);
       }
     }
   }
@@ -1822,11 +2191,11 @@ function resolveChain(flags = {}) {
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs13 from "node:fs";
+import fs17 from "node:fs";
 
 // src/vcs/guard.ts
-import fs12 from "node:fs";
-import path10 from "node:path";
+import fs16 from "node:fs";
+import path14 from "node:path";
 var VERSION = 1;
 var SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
@@ -1901,15 +2270,15 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path10.join(home(), "shim", `v${VERSION}`);
+  return path14.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
-  for (const dir of (process.env.PATH ?? "").split(path10.delimiter).filter(Boolean)) {
-    if (path10.resolve(dir) === skip) continue;
-    const p = path10.join(dir, "git");
+  for (const dir of (process.env.PATH ?? "").split(path14.delimiter).filter(Boolean)) {
+    if (path14.resolve(dir) === skip) continue;
+    const p = path14.join(dir, "git");
     try {
-      fs12.accessSync(p, fs12.constants.X_OK);
-      if (fs12.statSync(p).isFile()) return p;
+      fs16.accessSync(p, fs16.constants.X_OK);
+      if (fs16.statSync(p).isFile()) return p;
     } catch {
     }
   }
@@ -1922,13 +2291,13 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path10.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path14.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
-  if (fs12.existsSync(file) && fs12.readFileSync(file, "utf8") === content) return;
-  fs12.mkdirSync(path10.dirname(file), { recursive: true });
+  if (fs16.existsSync(file) && fs16.readFileSync(file, "utf8") === content) return;
+  fs16.mkdirSync(path14.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs12.writeFileSync(tmp, content, { mode: 493 });
-  fs12.renameSync(tmp, file);
+  fs16.writeFileSync(tmp, content, { mode: 493 });
+  fs16.renameSync(tmp, file);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -1950,7 +2319,7 @@ function guardEnv(env) {
     PAGER: "cat"
   };
   if (process.platform === "win32") return { ...env, ...quiet };
-  writeIfChanged(path10.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path14.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(env, [
     ["core.hooksPath", hooksDir()],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -1958,14 +2327,14 @@ function guardEnv(env) {
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
-  writeIfChanged(path10.join(dir, "git"), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path10.delimiter}${env.PATH ?? ""}` };
+  writeIfChanged(path14.join(dir, "git"), SHIM);
+  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path14.delimiter}${env.PATH ?? ""}` };
 }
 
 // src/core/process.ts
 async function spawnWorker(inv, opts) {
-  const out = fs13.openSync(opts.stdoutFile, "w");
-  const err = fs13.openSync(opts.stderrFile, "w");
+  const out = fs17.openSync(opts.stdoutFile, "w");
+  const err = fs17.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -1997,17 +2366,37 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs13.closeSync(out);
-  fs13.closeSync(err);
+  fs17.closeSync(out);
+  fs17.closeSync(err);
   return res;
 }
 
+// src/core/answers.ts
+var TASK_STATUSES = ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"];
+function parseStatus(text) {
+  const value = /^\s*STATUS:\s*([A-Za-z_]+)/im.exec(text)?.[1]?.toUpperCase() ?? "";
+  return TASK_STATUSES.includes(value) ? value : "unknown";
+}
+function parseVerdict(text) {
+  const line = /^\s*SUMMARY:.*\bSPEC:.*$/im.exec(text)?.[0] ?? /^.*\bSPEC:.*$/im.exec(text)?.[0] ?? "";
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(line)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(line)?.[1]?.toUpperCase();
+  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(line)?.[1] ?? 0);
+  return {
+    spec: spec === "pass" || spec === "fail" ? spec : "unknown",
+    quality: quality === "APPROVED" ? "approved" : quality ? "needs-fixes" : "unknown",
+    critical: count("critical"),
+    important: count("important"),
+    minor: count("minor")
+  };
+}
+
 // src/core/slots.ts
-import crypto3 from "node:crypto";
-import fs14 from "node:fs";
-import path11 from "node:path";
-var slotsDir = () => path11.join(home(), "slots");
-var locksDir = () => path11.join(home(), "locks");
+import crypto5 from "node:crypto";
+import fs18 from "node:fs";
+import path15 from "node:path";
+var slotsDir = () => path15.join(home(), "slots");
+var locksDir = () => path15.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -2021,23 +2410,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs14.mkdirSync(path11.dirname(file), { recursive: true });
+  fs18.mkdirSync(path15.dirname(file), { recursive: true });
   try {
-    fs14.writeFileSync(file, runId, { flag: "wx" });
+    fs18.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs14.readFileSync(file, "utf8").trim();
+    owner = fs18.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs14.rmSync(file, { force: true });
+  fs18.rmSync(file, { force: true });
   try {
-    fs14.writeFileSync(file, runId, { flag: "wx" });
+    fs18.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -2046,25 +2435,25 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs14.readFileSync(file, "utf8").trim() === runId) fs14.rmSync(file, { force: true });
+    if (fs18.readFileSync(file, "utf8").trim() === runId) fs18.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path11.join(slotsDir(), `slot-${n}`);
+    const file = path15.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
-var lockFile = (repoRoot2) => path11.join(locksDir(), `write-${crypto3.createHash("sha1").update(path11.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot2) => path15.join(locksDir(), `write-${crypto5.createHash("sha1").update(path15.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot2, runId) {
   const file = lockFile(repoRoot2);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs14.readFileSync(file, "utf8").trim();
+    owner = fs18.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -2110,8 +2499,8 @@ ${task}`;
 }
 
 // src/core/refs.ts
-import fs15 from "node:fs";
-import path12 from "node:path";
+import fs19 from "node:fs";
+import path16 from "node:path";
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
   String.raw`(?<![\w/:.-])(\.{0,2}/?(?:[\w@.+-]+/)*(?:[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}|${EXTENSIONLESS})):(\d+)(?:[-–](\d+))?`,
@@ -2157,13 +2546,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path12.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path16.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs15.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs15.readFileSync(file, "utf8").split("\n");
+      const size = fs19.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs19.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -2172,7 +2561,7 @@ function verifyRefs(refs, dirs) {
   for (const ref of refs) {
     const file = resolve(ref.file, roots);
     if (!file) {
-      invalid.push({ ref: ref.text, reason: path12.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path16.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     const lines = load(file);
@@ -2199,10 +2588,10 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 function resolve(ref, roots) {
-  const candidates = path12.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path12.join(r, ref));
+  const candidates = path16.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path16.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs15.statSync(c).isFile() && inside(c, roots);
+      return fs19.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -2210,35 +2599,53 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path12.relative(r, path12.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path12.isAbsolute(rel);
+    const rel = path16.relative(r, path16.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path16.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
-var VERSION2 = true ? "0.5.0" : "0.0.0-dev";
+var VERSION2 = true ? "0.6.0" : "0.0.0-dev";
+function planWork(o) {
+  if (!o.plan) return { task: o.task.trim(), tier: o.tier };
+  if (o.continueFrom) throw new UserError("a follow-up continues its parent's task; drop --plan/--step");
+  if (o.mode === "read") throw new UserError("--plan runs implement a task: add -i (an isolated copy, recommended) or -w");
+  const plan = loadPlan(o.plan.file);
+  const t = planTask(plan, o.plan.step);
+  const text = brief(plan, t);
+  const task = fill(loadTemplate("implementer"), {
+    PLAN_FILE: plan.file,
+    STEP: String(t.step),
+    TITLE: t.title,
+    BRIEF: text.trim(),
+    NOTES: o.task.trim() || "(none)"
+  });
+  const tier = o.tier ?? (o.worker ? void 0 : t.tier);
+  return { task, tier, plan: { file: plan.file, step: t.step, title: t.title }, brief: text };
+}
 function prepareRun(o) {
   if (process.env.PITROOM_ACTIVE === "1") {
     throw new UserError("refusing to delegate from inside a Pitroom worker (no recursive delegation)", 3);
   }
-  if (!o.task.trim()) throw new UserError("empty task");
+  const work = planWork(o);
+  if (!work.task) throw new UserError("empty task");
   const warnings = [];
   let parent;
   let worker;
   let fallback;
   if (o.continueFrom) {
     parent = readMeta(o.continueFrom);
-    if (o.worker) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker");
+    if (o.worker || o.tier) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
-    if (parent.mode === "isolate" && (!parent.worktree || !fs16.existsSync(parent.worktree))) {
+    if (parent.mode === "isolate" && (!parent.worktree || !fs20.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
     }
     const ran = parent.ran ?? parent.worker;
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }
@@ -2250,27 +2657,27 @@ function prepareRun(o) {
     throw new UserError(`the ${backend.name} worker cannot attach files; put the content in the task`);
   }
   const mode = parent?.mode ?? o.mode;
-  const dir = path13.resolve(parent?.dir ?? o.dir);
-  if (!fs16.existsSync(dir) || !fs16.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
+  const dir = path17.resolve(parent?.dir ?? o.dir);
+  if (!fs20.existsSync(dir) || !fs20.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
   if (mode === "write" && !root && !o.allowNonGit) {
     throw new UserError("--write outside a git repo cannot be tracked or reverted; pass --allow-non-git to accept that", 3);
   }
-  const files = o.files.map((f) => path13.resolve(f));
-  for (const f of files) if (!fs16.existsSync(f)) throw new UserError(`file not found: ${f}`);
+  const files = o.files.map((f) => path17.resolve(f));
+  for (const f of files) if (!fs20.existsSync(f)) throw new UserError(`file not found: ${f}`);
   const meta = {
     id: newRunId(),
     version: VERSION2,
     mode,
-    task: o.task.trim(),
+    task: work.task,
     dir,
     cwd: parent?.cwd ?? dir,
     repoRoot: root,
     worker,
     fallback,
     parent: parent?.id,
-    group: o.group ?? parent?.group,
+    group: o.group ?? parent?.group ?? (work.plan ? planName(work.plan.file) : void 0),
     sessionId: parent?.sessionId,
     files,
     link: parent?.link ?? o.link,
@@ -2282,19 +2689,24 @@ function prepareRun(o) {
     warnings,
     // Follow-ups in an isolated copy accumulate into one patch against the original snapshot.
     baseTree: parent?.mode === "isolate" ? parent.baseTree : void 0,
-    worktree: parent?.mode === "isolate" ? parent.worktree : void 0
+    worktree: parent?.mode === "isolate" ? parent.worktree : void 0,
+    reviewOf: o.review?.of,
+    plan: work.plan ?? o.review?.plan ?? parent?.plan,
+    reviewKind: o.review?.kind,
+    packageFile: o.review?.packageFile
   };
   writeMeta(meta);
   if (mode === "write" && root) {
     try {
       acquireWriteLock(root, meta.id);
     } catch (e) {
-      fs16.rmSync(runDir(meta.id), { recursive: true, force: true });
+      fs20.rmSync(runDir(meta.id), { recursive: true, force: true });
       throw e;
     }
   }
-  fs16.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
+  fs20.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
 `);
+  if (work.brief) fs20.writeFileSync(runFile(meta.id, "brief.md"), work.brief);
   return meta;
 }
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2367,7 +2779,7 @@ async function execute(meta) {
       (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
-        if (fs16.existsSync(from)) fs16.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
+        if (fs20.existsSync(from)) fs20.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
       }
       writeMeta(meta);
     }
@@ -2387,9 +2799,9 @@ function prepareTree(meta) {
   if (root && meta.mode === "write") meta.baseTree = snapshotTree(root);
   if (root && meta.mode === "isolate" && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
-    meta.worktree = path13.join(worktreesDir(), meta.id);
+    meta.worktree = path17.join(worktreesDir(), meta.id);
     createIsolatedCopy(root, meta.baseTree, meta.worktree);
-    meta.cwd = path13.join(meta.worktree, path13.relative(root, meta.dir));
+    meta.cwd = path17.join(meta.worktree, path17.relative(root, meta.dir));
     const linked = linkIntoWorktree(root, meta.worktree, meta.link);
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(", ")}`);
   }
@@ -2412,7 +2824,7 @@ function attempt(meta, backend, target) {
     timeoutSec: meta.timeoutSec
   });
 }
-var read = (f) => fs16.existsSync(f) ? fs16.readFileSync(f, "utf8") : "";
+var read = (f) => fs20.existsSync(f) ? fs20.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   if (run.usage.steps > 0) return void 0;
@@ -2431,8 +2843,13 @@ function finalize(meta, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
-  fs16.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
+  fs20.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
 `);
+  if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run.finalText);
+  if (meta.reviewOf) {
+    meta.verdict = parseVerdict(run.finalText);
+    if (meta.packageFile) fs20.rmSync(meta.packageFile, { force: true });
+  }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, "stderr.log")), res.code);
     if (f) meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
@@ -2473,7 +2890,7 @@ function captureChanges(meta) {
   const d = diffTrees(target, meta.baseTree, meta.afterTree);
   meta.changes = d.changes;
   meta.stats = d.stats;
-  fs16.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
+  fs20.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
 function runVerify(meta) {
   const r = spawnSync5(meta.verify, {
@@ -2486,7 +2903,7 @@ function runVerify(meta) {
     env: { ...process.env, PWD: meta.cwd, PITROOM_ACTIVE: "1" }
   });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-  fs16.writeFileSync(runFile(meta.id, "verify.log"), output);
+  fs20.writeFileSync(runFile(meta.id, "verify.log"), output);
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
 function applyRun(meta) {
@@ -2520,14 +2937,11 @@ function discardRun(meta) {
   return `discarded the isolated copy of ${meta.id}; the patch stays in ${runFile(meta.id, "changes.patch")}`;
 }
 function cleanupWorktree(meta) {
-  if (meta.worktree && fs16.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
+  if (meta.worktree && fs20.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
 }
 
 // src/cli/commands.ts
-async function cmdRun(p) {
-  const opts = runOptions(p, readTask(p));
-  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
-  const meta = prepareRun(opts);
+async function launch(p, meta) {
   if (has(p, "bg")) {
     startInBackground(meta);
     console.log(
@@ -2541,14 +2955,69 @@ async function cmdRun(p) {
   console.log(has(p, "json") ? JSON.stringify(done, null, 2) : formatReport(done));
   return exitCodeFor(done);
 }
+async function cmdRun(p) {
+  const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
+  if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
+  return launch(p, prepareRun(opts));
+}
+async function cmdReview(p) {
+  const range = flag(p, "range");
+  if (range && p.positional.length) throw new UserError("review takes a run or --range A..B, not both");
+  if (flag(p, "plan") && !range) throw new UserError("--plan goes with --range (a run's review already knows its plan)");
+  if (has(p, "write") || has(p, "isolate")) throw new UserError("reviews are read-only; drop -w/-i");
+  if (has(p, "continue")) throw new UserError("to review a follow-up, pass its run id: pitroom review <run>");
+  const job = range ? rangeReview(range, flag(p, "dir") ?? process.cwd(), flag(p, "plan")) : runReview(resolveRun(p.positional[0]));
+  const packageFile = writePackage(job);
+  let meta;
+  try {
+    meta = prepareRun({
+      ...runOptions(p, fill(loadTemplate(TEMPLATE[job.kind]), { PACKAGE_FILE: packageFile })),
+      mode: "read",
+      dir: job.dir,
+      worker: flag(p, "worker") ?? (flag(p, "tier") ? void 0 : pickReviewer(job)),
+      group: flag(p, "group") ?? job.group,
+      review: { of: job.of, kind: job.kind, packageFile, plan: job.plan }
+    });
+    const automatic = !range && !flag(p, "worker") && !flag(p, "tier");
+    if (automatic && job.implementer && meta.worker.backend === job.implementer.backend) {
+      meta.warnings.push(
+        `reviewer runs on the same backend as the implementer (${job.implementer.backend}); configure tiers "standard" or "capable" for a second model`
+      );
+      writeMeta(meta);
+    }
+  } catch (e) {
+    fs21.rmSync(packageFile, { force: true });
+    throw e;
+  }
+  fs21.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  return launch(p, meta);
+}
+function cmdPlan(p) {
+  const [sub, file, ...rest] = p.positional;
+  if (sub === "status" && file) {
+    const s = planStatus(file);
+    console.log(
+      has(p, "json") ? JSON.stringify({ plan: s.plan.file, title: s.plan.title, tasks: s.tasks, rulings: s.rulings, notesFile: s.notesFile }, null, 2) : formatPlanStatus(s)
+    );
+    return 0;
+  }
+  if (sub === "note" && file && rest.length) {
+    console.log(`noted in ${addNote(file, rest.join(" "))}`);
+    return 0;
+  }
+  throw new UserError('usage: pitroom plan status PLAN.md [--json] | pitroom plan note PLAN.md "Task N: \u2026"');
+}
 function cmdCrew(p) {
   const file = flag(p, "task-file");
-  const tasks = (file ? fs17.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  const tasks = (file ? fs21.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
   }
   if (has(p, "continue")) throw new UserError("--continue applies to a single run; use pitroom run --continue");
+  if (has(p, "plan") || has(p, "step")) {
+    throw new UserError("start plan tasks with pitroom run -i --plan PLAN --step N --bg (they share the plan's group)");
+  }
   const group = flag(p, "group") ?? `crew-${(/* @__PURE__ */ new Date()).toISOString().slice(11, 19).replace(/:/g, "")}`;
   const metas = tasks.map((task) => startInBackground(prepareRun({ ...runOptions(p, task), group })));
   if (has(p, "json")) {
@@ -2621,7 +3090,7 @@ function cmdShow(p) {
   const meta = freshMeta(resolveRun(p.positional[0]));
   const dump = (name) => {
     const f = runFile(meta.id, name);
-    process.stdout.write(fs17.existsSync(f) ? fs17.readFileSync(f, "utf8") : `(no ${name})
+    process.stdout.write(fs21.existsSync(f) ? fs21.readFileSync(f, "utf8") : `(no ${name})
 `);
   };
   if (has(p, "patch")) dump("changes.patch");
@@ -2699,8 +3168,8 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs17.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path14.resolve(out)}`);
+    fs21.writeFileSync(out, card(t, period));
+    console.log(`card written to ${path18.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -2720,7 +3189,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs17.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs21.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -2743,7 +3212,7 @@ function cmdClean(p) {
   for (const id of old) {
     const m = readMeta(id);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
-    fs17.rmSync(runDir(id), { recursive: true, force: true });
+    fs21.rmSync(runDir(id), { recursive: true, force: true });
   }
   console.log(`removed ${old.length} run(s); the savings ledger is kept`);
   return 0;
@@ -2753,9 +3222,9 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 
 // src/core/doctor.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
-import fs18 from "node:fs";
+import fs22 from "node:fs";
 import os9 from "node:os";
-import path15 from "node:path";
+import path19 from "node:path";
 var MARK = { ok: "\u2714", warn: "!", fail: "\u2718" };
 var READ_ONLY_HOW = {
   "permission-rules": "per-run permission rules",
@@ -2769,7 +3238,7 @@ function doctor4(probe) {
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs18.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs22.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
   if (process.platform !== "win32") {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
@@ -2784,8 +3253,19 @@ function doctor4(probe) {
     add("fail", e.message);
   }
   if (chain.length) add("ok", `worker chain: ${chain.map(describeTarget).join(" \u2192 ")}`);
+  const tierTargets = [];
+  const tierNames = [];
+  for (const name of Object.keys(effective().tiers.value)) {
+    try {
+      tierTargets.push(resolveChain({ tier: name, noFallback: true }).worker);
+      tierNames.push(name);
+    } catch (e) {
+      add("fail", `tier "${name}": ${e.message}`);
+    }
+  }
+  if (tierNames.length) add("ok", `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i])}`).join(", ")}`);
   const byBackend = /* @__PURE__ */ new Map();
-  for (const t of chain) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
+  for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
   for (const [id, models] of byBackend) {
     let backend;
     try {
@@ -2836,19 +3316,26 @@ function skillChecks() {
   const checks = [];
   const all = skillNames();
   const viaPlugin = pluginInstalled();
+  const superpowers = superpowersInstalled();
+  if (superpowers) {
+    checks.push({
+      level: "warn",
+      message: `superpowers is installed too (${superpowers}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`
+    });
+  }
   for (const { base, names } of installedSkills()) {
     if (names.length === all.length) checks.push({ level: "ok", message: `skills in ${base}: ${names.join(", ")}` });
     else if (names.length) checks.push({ level: "warn", message: `skills in ${base}: only ${names.join(", ")} of ${all.length}; run \`pitroom install\`` });
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base}; run \`pitroom install\`` });
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path15.sep}.claude${path15.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path19.sep}.claude${path19.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
   }
   const launcher = launcherPath();
-  if (fs18.existsSync(launcher)) {
+  if (fs22.existsSync(launcher)) {
     const r = spawnSync6(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
@@ -2860,12 +3347,25 @@ function skillChecks() {
 }
 function pluginInstalled() {
   try {
-    const f = path15.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs18.readFileSync(f, "utf8")).plugins ?? {};
+    const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const plugins = JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
   }
+}
+function superpowersInstalled() {
+  try {
+    const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const key = Object.keys(JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {}).find((k) => k.startsWith("superpowers@"));
+    if (key) return `Claude Code plugin ${key}`;
+  } catch {
+  }
+  for (const base of [path19.join(os9.homedir(), ".agents", "skills"), path19.join(os9.homedir(), ".claude", "skills")]) {
+    const dir = path19.join(base, "using-superpowers");
+    if (fs22.existsSync(path19.join(dir, "SKILL.md"))) return dir;
+  }
+  return void 0;
 }
 
 // src/cli.ts
@@ -2877,6 +3377,11 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" \u2026
                                         start several workers in background as one group
+  pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
+                                        read-only review of a run's change (a follow-up: only its
+                                        fix round) or of a commit range; by default on another worker
+  pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
+  pitroom plan note PLAN "Task N: \u2026"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run\u2026 | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -2904,6 +3409,9 @@ Run options
   -f, --file PATH       attach a file (repeatable)
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
+      --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
+      --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
@@ -2924,10 +3432,12 @@ Workers: ${backendIds().join(", ")} (targets: "opencode", "opencode:provider/mod
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,
+  review: cmdReview,
+  plan: cmdPlan,
   status: cmdStatus,
   wait: cmdWait,
   watch: cmdWatch,

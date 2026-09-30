@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import type { Mode, Target, Usage } from '../backends/types.js';
 import { UserError } from './errors.js';
 import type { RefCheck } from './refs.js';
+import type { TaskStatus, Verdict } from './answers.js';
 
 export type State = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
 
@@ -56,6 +57,16 @@ export interface RunMeta {
   applied?: boolean;
   reverted?: boolean;
   discarded?: boolean;
+  /** For reviews: the reviewed run id, or the reviewed range "a..b". */
+  reviewOf?: string;
+  reviewKind?: 'task' | 'fix' | 'range';
+  /** The package copy the reviewer reads; removed when the review ends. */
+  packageFile?: string;
+  verdict?: Verdict;
+  /** For `--plan` runs and their follow-ups and reviews: the plan task. */
+  plan?: { file: string; step: number; title: string };
+  /** The implementer's STATUS line. */
+  taskStatus?: TaskStatus;
 }
 
 export const TERMINAL: State[] = ['done', 'failed', 'timeout', 'stopped'];

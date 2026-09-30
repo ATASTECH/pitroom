@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.6.0
+
+### Workflow skills
+Pitroom now ships a complete development workflow, adapted from [superpowers](https://github.com/obra/superpowers) so that its subagents are Pitroom workers (Credits in the README): `pitroom-brainstorming`, `pitroom-writing-plans`, `pitroom-driven-development`, `pitroom-worktrees`, `pitroom-review`, `pitroom-receiving-review`, `pitroom-finishing`, `pitroom-debugging`, `pitroom-tdd` and `pitroom-verification`, next to `pitroom-research`, `pitroom-implement` and `pitroom-crew`. `using-pitroom` is the bootstrap for all of them. `pitroom doctor` warns when superpowers is installed too.
+
+### Plan execution
+- `pitroom run -i --plan PLAN --step N`: the worker gets the implementer rules, the plan's context and Global Constraints and exactly one task; its `STATUS:` line (DONE, DONE_WITH_CONCERNS, NEEDS_CONTEXT, BLOCKED) is recorded. Runs join the plan's group.
+- `pitroom review <run>`: a read-only reviewer, by default on another backend, reads one package (brief, report, diff with context) and returns SPEC and QUALITY verdicts. Reviewing a follow-up is a scoped re-review (previous findings, fix report, only the fix diff). `pitroom review --range A..B [--plan PLAN]` reviews a branch with the plan and the notes from execution.
+- `pitroom plan status PLAN` rebuilds a plan's progress from the run records; `pitroom plan note PLAN "…"` records completions, deferred findings and rulings outside the repo.
+- Config `tiers` (`{"cheap": "opencode", "standard": "codex", "capable": "claude"}`) and `--tier NAME`; plan tasks pick their tier with a `**Worker:**` line.
+
 ## 0.5.0
 
 ### New workers

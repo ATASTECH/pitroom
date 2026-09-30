@@ -28,8 +28,8 @@ const fallback = fs.existsSync(launcher) ? `"${launcher}"` : `"${nodeOk ? proces
 const command = fs.existsSync(cli) || fs.existsSync(launcher) ? `\`pitroom\`, or if that is not on PATH: \`${fallback}\`` : '`pitroom`';
 
 const context = `<pitroom>
-You have Pitroom: cheap worker agents you can delegate to. Run it as ${command}.
-Below is the 'using-pitroom' skill; load the other pitroom-* skills with your Skill tool when they apply.
+You have Pitroom: a development workflow as skills, and cheap worker agents that read, search, implement and review for you. Run it as ${command}.
+Below is the 'using-pitroom' skill, your introduction; load the other pitroom-* skills with your Skill tool when they apply.
 
 ${body}
 </pitroom>`;

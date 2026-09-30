@@ -1079,14 +1079,144 @@ function inside(file, roots) {
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// src/core/templates.ts
+import fs6 from "node:fs";
+import path7 from "node:path";
+
+// src/core/install.ts
+import path6 from "node:path";
+import { fileURLToPath } from "node:url";
+function packageRoot() {
+  return path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+// src/core/templates.ts
+var FILES = {
+  implementer: "pitroom-driven-development/implementer-prompt.md",
+  "task-reviewer": "pitroom-driven-development/task-reviewer-prompt.md",
+  "re-review": "pitroom-driven-development/re-review-prompt.md",
+  "code-reviewer": "pitroom-review/code-reviewer.md"
+};
+function loadTemplate(name, root = packageRoot()) {
+  const file = path7.join(root, "skills", FILES[name]);
+  if (!fs6.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs6.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+}
+function fill(template, values) {
+  const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
+  if (missing.length) throw new UserError(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`, 3);
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
+}
+
+// src/core/answers.ts
+var TASK_STATUSES = ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"];
+function parseStatus(text) {
+  const value = /^\s*STATUS:\s*([A-Za-z_]+)/im.exec(text)?.[1]?.toUpperCase() ?? "";
+  return TASK_STATUSES.includes(value) ? value : "unknown";
+}
+function parseVerdict(text) {
+  const line = /^\s*SUMMARY:.*\bSPEC:.*$/im.exec(text)?.[0] ?? /^.*\bSPEC:.*$/im.exec(text)?.[0] ?? "";
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(line)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(line)?.[1]?.toUpperCase();
+  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(line)?.[1] ?? 0);
+  return {
+    spec: spec === "pass" || spec === "fail" ? spec : "unknown",
+    quality: quality === "APPROVED" ? "approved" : quality ? "needs-fixes" : "unknown",
+    critical: count("critical"),
+    important: count("important"),
+    minor: count("minor")
+  };
+}
+
+// src/core/plan.ts
+import fs7 from "node:fs";
+import path8 from "node:path";
+var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
+function structure(lines) {
+  const headings = [];
+  const rules = [];
+  const fenced = [];
+  let open;
+  lines.forEach((l, i) => {
+    const f = FENCE.exec(l);
+    if (f) {
+      fenced[i] = true;
+      const mark = f[1];
+      if (!open) open = mark;
+      else if (mark[0] === open[0] && mark.length >= open.length && !f[2].trim()) open = void 0;
+      return;
+    }
+    fenced[i] = !!open;
+    if (open) return;
+    const h = /^ {0,3}(#{1,6})\s+(.*?)\s*#*\s*$/.exec(l);
+    if (h) headings.push({ line: i, level: h[1].length, text: h[2] });
+    else if (RULE.test(l)) rules.push(i);
+  });
+  return { headings, rules, fenced };
+}
+function parsePlan(text, file = "") {
+  const lines = text.replace(/\r\n?/g, "\n").split("\n");
+  const { headings, rules, fenced } = structure(lines);
+  const after = (line) => Math.min(headings.find((h) => h.line > line)?.line ?? lines.length, rules.find((r) => r > line) ?? lines.length);
+  const titleHeading = headings.find((h) => h.level === 1);
+  const start = titleHeading ? titleHeading.line + 1 : 0;
+  const header = lines.slice(start, after(start - 1)).filter((l) => !/^\s*>/.test(l)).join("\n").trim();
+  const gc = headings.find((h) => /^global constraints\b/i.test(h.text));
+  const constraints = gc ? lines.slice(gc.line + 1, after(gc.line)).join("\n").trim() : "";
+  const tasks = [];
+  for (const h of headings) {
+    const m = /^Task\s+(\d+)\b\s*[:.)\-–—]?\s*(.*)$/i.exec(h.text);
+    if (!m) continue;
+    const end = headings.find((o) => o.line > h.line && o.level <= h.level)?.line ?? lines.length;
+    const body = lines.slice(h.line, end).join("\n").replace(/(\n\s*(?:---|\*\*\*|___)\s*)+$/, "").trimEnd();
+    const unfenced = lines.slice(h.line, end).filter((_, j) => !fenced[h.line + j]).join("\n");
+    const tier = /^\s*[-*]?\s*\*\*Worker:\*\*\s*`?([\w-]+)`?/m.exec(unfenced)?.[1]?.toLowerCase();
+    tasks.push({ step: Number(m[1]), title: m[2].trim(), text: body, ...tier ? { tier } : {} });
+  }
+  return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
+}
+function loadPlan(file) {
+  const abs = path8.resolve(file);
+  if (!fs7.existsSync(abs) || !fs7.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs7.readFileSync(abs, "utf8"), fs7.realpathSync(abs));
+  if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
+  return plan;
+}
+function planTask(plan, step) {
+  const t = plan.tasks.find((x) => x.step === step);
+  if (!t) throw new UserError(`no Task ${step} in ${plan.file}; it has ${plan.tasks.map((x) => `Task ${x.step}`).join(", ")}`);
+  return t;
+}
+function brief(plan, task) {
+  return `${[
+    `# ${plan.title || planName(plan.file)}`,
+    plan.header,
+    "## Global Constraints",
+    plan.constraints || "(none stated in the plan)",
+    task.text
+  ].filter(Boolean).join("\n\n")}
+`;
+}
+var planName = (file) => path8.basename(file).replace(/\.md$/i, "");
 export {
   DEFAULT_BACKEND,
   allBackends,
   backendIds,
+  brief,
   describeTarget,
   extractRefs,
+  fill,
   formatTarget,
   getBackend,
+  loadPlan,
+  loadTemplate,
+  parsePlan,
+  parseStatus,
   parseTarget,
+  parseVerdict,
+  planName,
+  planTask,
   verifyRefs
 };

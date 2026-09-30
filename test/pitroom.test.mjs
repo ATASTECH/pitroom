@@ -369,3 +369,51 @@ test('config "models" gives each worker a default model; explicit models win', (
   assert.equal(modelOf(), 'mock/configured');
   assert.match(s.run(['config']).stdout, /models\s+opencode=mock\/configured\s+\(config\)/);
 });
+
+test('config "tiers" names workers: --tier picks one, -W wins, unknown tiers warn', () => {
+  const s = sandbox();
+  s.config({ tiers: { cheap: 'opencode:mock/cheap', capable: 'opencode:mock/capable' } });
+  const modelOf = () => {
+    const c = s.calls().filter((x) => x.argv[0] === 'run').at(-1);
+    return c.argv.includes('--model') ? c.argv[c.argv.indexOf('--model') + 1] : 'default';
+  };
+  assert.equal(s.run(['run', '--tier', 'capable', 'x']).status, 0);
+  assert.equal(modelOf(), 'mock/capable');
+  assert.equal(s.run(['run', '--tier', 'capable', '-W', 'opencode:mock/explicit', 'y']).status, 0);
+  assert.equal(modelOf(), 'mock/explicit', '-W wins over --tier');
+  const r = s.run(['run', '--tier', 'nope', 'z']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(modelOf(), 'default');
+  assert.match(r.stdout, /warning: tier "nope" is not configured/);
+  const inherited = s.run(['run', '--tier', 'constructor', 'w']);
+  assert.equal(inherited.status, 0, inherited.stderr);
+  assert.match(inherited.stdout, /warning: tier "constructor" is not configured/);
+  assert.match(s.run(['config']).stdout, /tiers\s+cheap=opencode:mock\/cheap, capable=opencode:mock\/capable\s+\(config\)/);
+  assert.match(s.run(['doctor']).stdout, /tiers: cheap=opencode:mock\/cheap, capable=opencode:mock\/capable/);
+  const id = /run (\S+)/.exec(r.stdout)[1];
+  const c = s.run(['run', '--continue', id, '--tier', 'cheap', 'more']);
+  assert.equal(c.status, 2);
+  assert.match(c.stderr, /drop --worker\/--tier/);
+});
+
+test('doctor reports a broken tier and keeps checking the others', () => {
+  const s = sandbox();
+  s.config({ tiers: { broken: '  ', cheap: 'opencode:mock/cheap' } });
+  const d = s.run(['doctor']);
+  assert.equal(d.status, 1, d.stderr);
+  assert.match(d.stdout, /tier "broken": empty worker target/);
+  assert.match(d.stdout, /tiers: cheap=opencode:mock\/cheap/);
+});
+
+test('doctor warns when superpowers is installed too', () => {
+  const s = sandbox();
+  const home = path.join(s.base, 'user-home');
+  fs.mkdirSync(path.join(home, '.agents', 'skills', 'using-superpowers'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agents', 'skills', 'using-superpowers', 'SKILL.md'), '---\nname: using-superpowers\n---\n');
+  assert.match(s.run(['doctor'], { HOME: home }).stdout, /superpowers is installed too \(.*using-superpowers\).*keep one/);
+  const empty = path.join(s.base, 'empty-home');
+  fs.mkdirSync(empty);
+  const clean = s.run(['doctor'], { HOME: empty }).stdout;
+  assert.match(clean, /worker chain:/, 'doctor ran its checks');
+  assert.doesNotMatch(clean, /superpowers/);
+});

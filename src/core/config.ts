@@ -19,6 +19,8 @@ export interface PitroomConfig {
   maxParallel?: number;
   /** Default model per worker, used when a target names none: {"codex": "gpt-5.6-sol"}. */
   models?: Record<string, string>;
+  /** Worker targets by tier, for --tier and plan tasks: {"cheap": "opencode", "capable": "claude"}. */
+  tiers?: Record<string, string>;
 }
 
 const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record'> = {
@@ -31,6 +33,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   web: 'boolean',
   maxParallel: 'number',
   models: 'record',
+  tiers: 'record',
 };
 
 export function configPath(): string {
@@ -118,5 +121,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     web: setting<boolean>(undefined, undefined, c.web, false),
     maxParallel: setting<number>(undefined, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
     models: setting<Record<string, string>>(undefined, undefined, c.models, {}),
+    tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
   };
 }

@@ -14,6 +14,11 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" …
                                         start several workers in background as one group
+  pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
+                                        read-only review of a run's change (a follow-up: only its
+                                        fix round) or of a commit range; by default on another worker
+  pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
+  pitroom plan note PLAN "Task N: …"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run… | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -41,6 +46,9 @@ Run options
   -f, --file PATH       attach a file (repeatable)
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
+      --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
+      --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
@@ -61,13 +69,15 @@ Workers: ${backendIds().join(', ')} (targets: "opencode", "opencode:provider/mod
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 
 const COMMANDS: Record<string, Command> = {
   run: cmd.cmdRun,
   crew: cmd.cmdCrew,
+  review: cmd.cmdReview,
+  plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,

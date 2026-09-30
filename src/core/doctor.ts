@@ -9,7 +9,7 @@ import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
 import { resolveChain } from './chain.js';
-import { configPath, loadConfig } from './config.js';
+import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { VERSION } from './run.js';
 import { home } from './store.js';
@@ -48,8 +48,21 @@ export function doctor(probe: boolean): number {
     add('fail', (e as Error).message);
   }
   if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
+  // Tier workers (config "tiers") are checked like the chain's; a broken tier is one failed
+  // check, not the end of the diagnosis.
+  const tierTargets: Target[] = [];
+  const tierNames: string[] = [];
+  for (const name of Object.keys(effective().tiers.value)) {
+    try {
+      tierTargets.push(resolveChain({ tier: name, noFallback: true }).worker);
+      tierNames.push(name);
+    } catch (e) {
+      add('fail', `tier "${name}": ${(e as Error).message}`);
+    }
+  }
+  if (tierNames.length) add('ok', `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i]!)}`).join(', ')}`);
   const byBackend = new Map<string, (string | undefined)[]>();
-  for (const t of chain) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
+  for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
   for (const [id, models] of byBackend) {
     let backend;
     try {
@@ -106,6 +119,13 @@ function skillChecks(): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const all = skillNames();
   const viaPlugin = pluginInstalled();
+  const superpowers = superpowersInstalled();
+  if (superpowers) {
+    checks.push({
+      level: 'warn',
+      message: `superpowers is installed too (${superpowers}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`,
+    });
+  }
   for (const { base, names } of installedSkills()) {
     if (names.length === all.length) checks.push({ level: 'ok', message: `skills in ${base}: ${names.join(', ')}` });
     else if (names.length) checks.push({ level: 'warn', message: `skills in ${base}: only ${names.join(', ')} of ${all.length}; run \`pitroom install\`` });
@@ -141,4 +161,20 @@ function pluginInstalled(): boolean {
   } catch {
     return false;
   }
+}
+
+/** Where superpowers is installed next to Pitroom, if it is. */
+function superpowersInstalled(): string | undefined {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
+    const key = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).plugins ?? {}).find((k) => k.startsWith('superpowers@'));
+    if (key) return `Claude Code plugin ${key}`;
+  } catch {
+    // no Claude Code plugins
+  }
+  for (const base of [path.join(os.homedir(), '.agents', 'skills'), path.join(os.homedir(), '.claude', 'skills')]) {
+    const dir = path.join(base, 'using-superpowers');
+    if (fs.existsSync(path.join(dir, 'SKILL.md'))) return dir;
+  }
+  return undefined;
 }

@@ -36,8 +36,8 @@ A real run on a free OpenCode Zen model: your agent reads ~554 tokens instead of
 - **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
 - **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
 - **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
-- **Works with any agent.** Five [Agent Skills](https://agentskills.io) (`using-pitroom` decides when to delegate, then `pitroom-research`, `-crew`, `-implement`, `-review`) plus a CLI, and a Claude Code / Codex plugin whose session-start hook makes your agent consider delegating before it starts reading. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
-- **Small.** About 3,700 lines of TypeScript, one ~113 KB bundled file, zero runtime dependencies.
+- **Works with any agent.** Fourteen [Agent Skills](https://agentskills.io): the superpowers development workflow run by workers, plus delegation (`using-pitroom`, `pitroom-research`, `-crew`, `-implement`), a CLI, and a Claude Code / Codex plugin whose session-start hook loads the workflow. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
+- **Small.** About 4,400 lines of TypeScript, one ~135 KB bundled file, zero runtime dependencies.
 
 ## Quick start
 
@@ -78,6 +78,26 @@ pitroom run --continue last "Now handle the empty-page case too"
 
 Long jobs: `--bg` returns immediately; `pitroom wait <id>` blocks for up to 9 minutes (made for agents with 10-minute tool limits; exit code 75 means "call wait again").
 
+## Workflow
+
+Pitroom ships a full development methodology as skills, adapted from [superpowers](https://github.com/obra/superpowers) so that its subagents are cheap workers: your agent brainstorms and plans with you, then executes the plan task by task while workers do the typing and a second model does the reviewing.
+
+```text
+pitroom-brainstorming ──► spec (docs/pitroom/specs/)
+pitroom-writing-plans ──► plan (docs/pitroom/plans/), every task tagged with a worker tier
+pitroom-driven-development, per task:
+  pitroom run -i --plan PLAN --step N    implementer worker, isolated copy, TDD evidence, STATUS line
+  pitroom review <run>                   read-only reviewer on another backend: SPEC and QUALITY verdicts
+  pitroom run --continue <run> "…"       fix rounds; the re-review sees only the fix diff
+  pitroom apply <run> · tests · commit   the primary lands it; workers never commit
+pitroom review --range main..HEAD --plan PLAN   whole-branch review on the capable tier
+pitroom-finishing ──► merge, PR or keep (asked, never automatic)
+```
+
+A review package holds the diff under review with 10 lines of context, and the reviewer's CLI sends it to that worker's model provider. Pitroom does not filter it: secrets committed in a reviewed range go along as they are.
+
+Tiers map plan tasks to workers: `"tiers": {"cheap": "opencode", "standard": "codex", "capable": "claude"}`. `pitroom plan status PLAN` rebuilds where a plan stands from the run records (it survives context compaction), and `pitroom plan note` keeps completions and rulings outside the repo.
+
 ## Crews
 
 A real crew over this repository, four questions at once on a free OpenCode Zen model:
@@ -115,11 +135,20 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 
 | Skill | Your agent uses it to |
 |---|---|
-| `using-pitroom` | decide whether to delegate at all, and which skill fits (injected at session start by the plugin) |
+| `using-pitroom` | follow the workflow and decide what to delegate (injected at session start by the plugin) |
+| `pitroom-brainstorming` | turn an idea into an approved design before any code |
+| `pitroom-writing-plans` | write a task-by-task plan with a worker tier per task |
+| `pitroom-driven-development` | execute a plan: worker per task, review on another model, fix loop, apply, commit |
+| `pitroom-worktrees` | isolate its own branch for the work |
+| `pitroom-tdd` | test first, for itself and the workers it briefs |
+| `pitroom-debugging` | find root causes, with workers gathering the evidence |
+| `pitroom-verification` | run the checks before claiming anything is done |
+| `pitroom-review` | get a change, a fix round, a branch or a PR reviewed by another model |
+| `pitroom-receiving-review` | weigh review findings with technical rigor |
+| `pitroom-finishing` | merge, open a PR or keep the branch, as the user chooses |
 | `pitroom-research` | find, map or explain code through a read-only worker |
-| `pitroom-crew` | split independent work across parallel workers, watch them, merge results |
-| `pitroom-implement` | get a change made in an isolated copy, review the diff, apply it |
-| `pitroom-review` | get a second opinion on a diff or pull request |
+| `pitroom-implement` | get a one-off change made in an isolated copy |
+| `pitroom-crew` | split independent work across parallel workers and merge the results |
 
 ## Commands
 
@@ -127,6 +156,9 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD] [--link a,b] [--bg] "task"
 pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
+pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
+pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
+pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json --interval
 pitroom show [run]                                --patch --events --full --json
 pitroom apply [run | -g NAME] · pitroom discard|revert [run] · pitroom stop [run | -g NAME]
@@ -188,13 +220,14 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 | `PITROOM_HOME` | `~/.local/state/pitroom` | Where run records and the ledger live |
 | `PITROOM_<WORKER>_BIN` | on PATH | Path to a worker CLI, e.g. `PITROOM_OPENCODE_BIN` |
 
-Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins:
+Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins. `tiers` names workers for `--tier` and for plan tasks' `**Worker:**` lines:
 
 ```json
 {
   "worker": "opencode",
   "fallback": ["opencode:opencode/space-bunny-free", "codex"],
   "models": { "codex": "gpt-6.1-sol", "claude": "claude-sonnet-5-5" },
+  "tiers": { "cheap": "opencode", "standard": "codex", "capable": "claude" },
   "timeout": "20m",
   "primary": "opus",
   "link": ["node_modules"],
@@ -220,4 +253,16 @@ npm test          # end-to-end tests against a fake worker CLI + adapter contrac
 npm run typecheck
 ```
 
-MIT licensed.
+## Credits
+
+The workflow skills (brainstorming, planning, worker-driven development, review, debugging, TDD, verification, worktrees, finishing) are adapted from [superpowers](https://github.com/obra/superpowers) by Jesse Vincent, used under the MIT License:
+
+> Copyright (c) 2025 Jesse Vincent
+>
+> Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+>
+> The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+>
+> THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+Pitroom itself is MIT licensed.
