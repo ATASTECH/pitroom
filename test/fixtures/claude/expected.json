@@ -1,5 +1,22 @@
 {
-  "events": {},
+  "events": {
+    "read-haiku.jsonl": {
+      "sessionId": "724c1912-b5a0-4c33-b6e1-2da2dda7ec6f",
+      "steps": 3,
+      "total": 23854,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "**SUMMARY:**\nconsts.js exports PI constant"
+    },
+    "isolate-edit.jsonl": {
+      "sessionId": "3ec389b4-392e-4ad4-a33b-46ffd70497a6",
+      "steps": 7,
+      "total": 83280,
+      "denied": 0,
+      "edits": 1,
+      "finalTextStartsWith": "SUMMARY: Added exported divide(a, b) function to math.js"
+    }
+  },
   "failures": {
     "auth-expired": { "exitCode": 1, "kind": "auth", "messageIncludes": "OAuth session expired" }
   }
