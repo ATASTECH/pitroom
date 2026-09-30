@@ -44,6 +44,18 @@ test('review <run>: one package (brief, report, diff) for a read-only reviewer o
   assert.match(s.run(['show', impl]).stdout, new RegExp(`review:\\s+pitroom review ${impl}`));
 });
 
+test('review warns when the reviewer falls back to the implementer backend', () => {
+  const s = sandbox();
+  s.config({ tiers: { standard: 'opencode:mock/a', capable: 'opencode:mock/b' }, fallback: ['opencode:mock/c'] });
+  const impl = runId(s.run(['run', '-i', 'add one [[mock:append:app.txt:one;answer:SUMMARY: added one]]']));
+  const r = s.run(['review', impl], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /reviewer runs on the same backend as the implementer \(opencode\); configure tiers "standard" or "capable" for a second model/);
+  const named = s.run(['review', impl, '-W', 'opencode:mock/a'], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.equal(named.status, 0, named.stdout + named.stderr);
+  assert.doesNotMatch(named.stdout, /reviewer runs on the same backend/);
+});
+
 test('review of a follow-up is a scoped re-review: previous findings, fix report, only the fix diff', () => {
   const s = sandbox();
   const impl = runId(s.run(['run', '-i', 'add one [[mock:append:app.txt:one;answer:SUMMARY: added one]]']));

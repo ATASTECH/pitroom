@@ -38,4 +38,4 @@ In DETAILS, in this order:
 - FINDING VERDICTS: for each finding, in order, the finding in one line, then ADDRESSED or NOT ADDRESSED with file:line evidence. "Attempted" is not addressed: the specific defect must no longer exist.
 - NEW BREAKAGE: problems the fix introduced, with severity and file:line, or "none".
 - OUT OF SCOPE: issues entirely outside the fix diff, or "none".
-No preamble and no closing summary.
+A file:line is the project file's path and its line number after the change (from the diff's hunk headers), never a line of the package file. No preamble and no closing summary.

@@ -94,6 +94,8 @@ pitroom review --range main..HEAD --plan PLAN   whole-branch review on the capab
 pitroom-finishing ──► merge, PR or keep (asked, never automatic)
 ```
 
+A review package holds the diff under review with 10 lines of context, and the reviewer's CLI sends it to that worker's model provider. Pitroom does not filter it: secrets committed in a reviewed range go along as they are.
+
 Tiers map plan tasks to workers: `"tiers": {"cheap": "opencode", "standard": "codex", "capable": "claude"}`. `pitroom plan status PLAN` rebuilds where a plan stands from the run records (it survives context compaction), and `pitroom plan note` keeps completions and rulings outside the repo.
 
 ## Crews

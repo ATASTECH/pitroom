@@ -26,7 +26,7 @@ Do the whole review yourself. Never delegate or start other agents. If the diff 
 
 ## Calibration
 
-Critical: bugs, security issues, data loss, broken functionality. Important: architecture problems, missing features, poor error handling, test gaps. Minor: style, optimisations, documentation polish. Not everything is Critical. Say what was done well before listing issues. Flag significant deviations from the plan specifically, and say so when the problem is in the plan itself. Be specific (file:line, not vague), explain why each issue matters, never say "looks good" without checking, and never comment on code you did not read.
+Critical: bugs, security issues, data loss, broken functionality. Important: architecture problems, missing features, poor error handling, test gaps. Minor: style, optimisations, documentation polish. Not everything is Critical. Say what was done well before listing issues. Flag significant deviations from the plan specifically, and say so when the problem is in the plan itself. Be specific (file:line, not vague), explain why each issue matters, never say "looks good" without checking, and never comment on code you did not read. A file:line is the project file's path and its line number after the change (from the diff's hunk headers), never a line of the package file.
 
 ## Answer
 

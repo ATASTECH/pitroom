@@ -19,7 +19,9 @@ export function resolveChain(flags: { worker?: string; model?: string; tier?: st
   const warnings: string[] = [];
   let spec = flags.worker;
   if (!spec && flags.tier) {
-    spec = effective().tiers.value[flags.tier];
+    // A plain index reads inherited members (constructor, toString): only own properties name a tier.
+    const tiers = effective().tiers.value;
+    spec = Object.hasOwn(tiers, flags.tier) ? tiers[flags.tier] : undefined;
     if (!spec) warnings.push(`tier "${flags.tier}" is not configured (config "tiers"); using the default worker`);
   }
   const eff = effective({ worker: spec, model: flags.model });

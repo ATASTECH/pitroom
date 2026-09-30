@@ -43,7 +43,7 @@ If the brief lists several files each with its own change, check that every list
 - Tests verify real behaviour (not mocks) and cover the task's edge cases.
 - Each file has one clear responsibility; the plan's file structure is followed; the change does not create files that are already large or grow existing files much (pre-existing size is not a finding).
 
-Cite file:line for every finding, and for every check you would otherwise answer with a bare "yes".
+Cite file:line for every finding, and for every check you would otherwise answer with a bare "yes". A file:line is the project file's path and its line number after the change (from the diff's hunk headers), never a line of the package file.
 
 ## Calibration
 

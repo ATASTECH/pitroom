@@ -385,6 +385,9 @@ test('config "tiers" names workers: --tier picks one, -W wins, unknown tiers war
   assert.equal(r.status, 0, r.stderr);
   assert.equal(modelOf(), 'default');
   assert.match(r.stdout, /warning: tier "nope" is not configured/);
+  const inherited = s.run(['run', '--tier', 'constructor', 'w']);
+  assert.equal(inherited.status, 0, inherited.stderr);
+  assert.match(inherited.stdout, /warning: tier "constructor" is not configured/);
   assert.match(s.run(['config']).stdout, /tiers\s+cheap=opencode:mock\/cheap, capable=opencode:mock\/capable\s+\(config\)/);
   assert.match(s.run(['doctor']).stdout, /tiers: cheap=opencode:mock\/cheap, capable=opencode:mock\/capable/);
   const id = /run (\S+)/.exec(r.stdout)[1];

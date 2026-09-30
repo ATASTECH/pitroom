@@ -12,7 +12,7 @@ import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '..
 import { fill, loadTemplate } from '../core/templates.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
-  type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile,
+  type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
 import { type Parsed, exitCodeFor, flag, has, parseDuration, planStep, readTask, runOptions } from './args.js';
 
@@ -58,6 +58,17 @@ export async function cmdReview(p: Parsed): Promise<number> {
       group: flag(p, 'group') ?? job.group,
       review: { of: job.of, kind: job.kind, packageFile, plan: job.plan },
     });
+    // The reviewer defaults to another backend than the implementer; when none
+    // differs it falls back to the default worker, possibly the same model
+    // grading itself. Say so on the report, but only for automatic picks: an
+    // explicitly named reviewer (-W/--tier) and range reviews need no warning.
+    const automatic = !range && !flag(p, 'worker') && !flag(p, 'tier');
+    if (automatic && job.implementer && meta.worker.backend === job.implementer.backend) {
+      meta.warnings.push(
+        `reviewer runs on the same backend as the implementer (${job.implementer.backend}); configure tiers "standard" or "capable" for a second model`,
+      );
+      writeMeta(meta);
+    }
   } catch (e) {
     fs.rmSync(packageFile, { force: true });
     throw e;

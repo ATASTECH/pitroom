@@ -2150,7 +2150,7 @@ function loadTemplate(name, root = packageRoot()) {
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
-  if (missing.length) throw new Error(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`);
+  if (missing.length) throw new UserError(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`, 3);
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
 }
 
@@ -2164,7 +2164,8 @@ function resolveChain(flags = {}) {
   const warnings = [];
   let spec = flags.worker;
   if (!spec && flags.tier) {
-    spec = effective().tiers.value[flags.tier];
+    const tiers = effective().tiers.value;
+    spec = Object.hasOwn(tiers, flags.tier) ? tiers[flags.tier] : void 0;
     if (!spec) warnings.push(`tier "${flags.tier}" is not configured (config "tiers"); using the default worker`);
   }
   const eff = effective({ worker: spec, model: flags.model });
@@ -2977,6 +2978,13 @@ async function cmdReview(p) {
       group: flag(p, "group") ?? job.group,
       review: { of: job.of, kind: job.kind, packageFile, plan: job.plan }
     });
+    const automatic = !range && !flag(p, "worker") && !flag(p, "tier");
+    if (automatic && job.implementer && meta.worker.backend === job.implementer.backend) {
+      meta.warnings.push(
+        `reviewer runs on the same backend as the implementer (${job.implementer.backend}); configure tiers "standard" or "capable" for a second model`
+      );
+      writeMeta(meta);
+    }
   } catch (e) {
     fs21.rmSync(packageFile, { force: true });
     throw e;

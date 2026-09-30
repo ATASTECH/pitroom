@@ -1105,7 +1105,7 @@ function loadTemplate(name, root = packageRoot()) {
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
-  if (missing.length) throw new Error(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`);
+  if (missing.length) throw new UserError(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`, 3);
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
 }
 
