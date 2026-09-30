@@ -3,6 +3,15 @@
   "version": "0.6.0",
   "description": "A free pit crew for your expensive coding agent: the superpowers development workflow, run by cheap workers. Delegate research, fixes, tests, reviews and whole plans from Claude Code, Codex or any agent to OpenCode, Codex or Claude Code workers, with receipts that prove the savings.",
   "type": "module",
+  "author": "TahaAtas",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ATASTECH/pitroom.git"
+  },
+  "homepage": "https://github.com/ATASTECH/pitroom#readme",
+  "bugs": {
+    "url": "https://github.com/ATASTECH/pitroom/issues"
+  },
   "bin": {
     "pitroom": "dist/pitroom.mjs"
   },
@@ -12,7 +21,7 @@
     "hooks",
     ".claude-plugin",
     ".codex-plugin",
-    "docs",
+    "docs/backends.md",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"

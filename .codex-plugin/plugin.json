@@ -5,6 +5,8 @@
   "author": {
     "name": "TahaAtas"
   },
+  "homepage": "https://github.com/ATASTECH/pitroom",
+  "repository": "https://github.com/ATASTECH/pitroom",
   "license": "MIT",
   "keywords": [
     "claude-code",
