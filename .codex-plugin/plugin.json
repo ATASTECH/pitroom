@@ -1,0 +1,18 @@
+{
+  "name": "pitroom",
+  "version": "0.4.0",
+  "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests and parallel investigations to cheap OpenCode workers, with verified answers, exact diffs and cost receipts.",
+  "author": {
+    "name": "TahaAtas"
+  },
+  "license": "MIT",
+  "keywords": ["opencode", "delegation", "subagents", "parallel", "cost", "workers"],
+  "skills": "./skills/",
+  "hooks": {},
+  "interface": {
+    "displayName": "Pitroom",
+    "shortDescription": "Cheap OpenCode workers for research, fixes and parallel tasks",
+    "longDescription": "Pitroom lets the primary agent hand bounded work to OpenCode workers running the user's own free, paid or local models: read-only research, isolated code changes, second-opinion reviews and parallel crews, with per-run permission profiles, a git guard, verified file references, exact diffs and cost receipts.",
+    "category": "Developer Tools"
+  }
+}

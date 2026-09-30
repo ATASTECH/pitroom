@@ -1,0 +1,47 @@
+{
+  "name": "pitroom",
+  "version": "0.4.0",
+  "description": "A free pit crew for your expensive coding agent. Delegate research, fixes, tests and grunt work from Claude Code, Codex or any agent to OpenCode, with receipts that prove the savings.",
+  "type": "module",
+  "bin": {
+    "pitroom": "dist/pitroom.mjs"
+  },
+  "files": [
+    "dist",
+    "skills",
+    "hooks",
+    ".claude-plugin",
+    ".codex-plugin",
+    "docs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test test/*.test.mjs",
+    "prepublishOnly": "npm run typecheck && npm test"
+  },
+  "keywords": [
+    "opencode",
+    "claude-code",
+    "codex",
+    "agent",
+    "subagent",
+    "delegation",
+    "agent-skills",
+    "llm",
+    "cost",
+    "tokens"
+  ],
+  "license": "MIT",
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.25.0",
+    "typescript": "^5.7.0"
+  }
+}

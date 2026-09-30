@@ -1,0 +1,104 @@
+// The skill pack and its packaging: Agent Skills rules, the SessionStart hook,
+// plugin manifests, and install/uninstall in a throwaway HOME.
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { test } from 'node:test';
+import { CLI, root } from './helpers.mjs';
+
+const skillsDir = path.join(root, 'skills');
+const skills = fs.readdirSync(skillsDir).filter((d) => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')));
+const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+const json = (rel) => JSON.parse(fs.readFileSync(path.join(root, rel), 'utf8'));
+
+function frontmatter(file) {
+  const m = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(fs.readFileSync(file, 'utf8'));
+  assert.ok(m, `${file} has frontmatter`);
+  const fields = Object.fromEntries(m[1].split('\n').map((l) => [l.slice(0, l.indexOf(':')), l.slice(l.indexOf(':') + 1).trim()]));
+  return { fields, body: m[2] };
+}
+
+test('the pack: using-pitroom plus focused pitroom-* skills', () => {
+  assert.deepEqual(skills.sort(), ['pitroom-crew', 'pitroom-implement', 'pitroom-research', 'pitroom-review', 'using-pitroom']);
+});
+
+for (const name of skills) {
+  test(`skill ${name} follows the Agent Skills rules`, () => {
+    const { fields, body } = frontmatter(path.join(skillsDir, name, 'SKILL.md'));
+    assert.equal(fields.name, name, 'name matches the folder');
+    assert.match(fields.name, /^[a-z0-9]+(-[a-z0-9]+)*$/);
+    assert.ok(fields.name.length <= 64);
+    assert.ok(fields.description && fields.description.length <= 1024, 'description present, at most 1024 chars');
+    assert.match(fields.description, /^Use (when|at|for)/, 'description says when to use it');
+    assert.ok(body.trim().length > 200);
+    assert.doesNotMatch(body, /references\//, 'no links to files that do not exist');
+  });
+}
+
+test('using-pitroom routes to every other skill', () => {
+  const { body } = frontmatter(path.join(skillsDir, 'using-pitroom', 'SKILL.md'));
+  for (const s of skills.filter((n) => n !== 'using-pitroom')) assert.ok(body.includes(`\`${s}\``), s);
+});
+
+test('session-start hook injects using-pitroom (and nothing inside a worker)', () => {
+  const hook = path.join(root, 'hooks', 'session-start.mjs');
+  const env = { ...process.env };
+  delete env.PITROOM_ACTIVE;
+  delete env.CURSOR_PLUGIN_ROOT;
+  const r = spawnSync(process.execPath, [hook], { encoding: 'utf8', env });
+  assert.equal(r.status, 0, r.stderr);
+  const out = JSON.parse(r.stdout);
+  assert.equal(out.hookSpecificOutput.hookEventName, 'SessionStart');
+  const ctx = out.hookSpecificOutput.additionalContext;
+  assert.match(ctx, /# Using Pitroom/);
+  assert.doesNotMatch(ctx, /^name: using-pitroom/m, 'frontmatter stripped');
+  assert.ok(ctx.length < 6000, 'kept short: it is paid for in every session');
+  const cursor = JSON.parse(spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...env, CURSOR_PLUGIN_ROOT: root } }).stdout);
+  assert.ok(cursor.additional_context && !cursor.hookSpecificOutput, 'one field per host, never both');
+  const inWorker = spawnSync(process.execPath, [hook], { encoding: 'utf8', env: { ...env, PITROOM_ACTIVE: '1' } });
+  assert.equal(inWorker.stdout, '');
+});
+
+test('plugin manifests are valid and agree on the version', () => {
+  const hooks = json('hooks/hooks.json');
+  const cmd = hooks.hooks.SessionStart[0].hooks[0].command;
+  assert.match(cmd, /hooks\/session-start\.mjs/);
+  assert.equal(json('.claude-plugin/plugin.json').name, 'pitroom');
+  assert.equal(json('.claude-plugin/plugin.json').version, version);
+  const market = json('.claude-plugin/marketplace.json');
+  assert.equal(market.plugins[0].source, './');
+  assert.equal(market.plugins[0].version, version);
+  const codex = json('.codex-plugin/plugin.json');
+  assert.equal(codex.version, version);
+  assert.ok(fs.existsSync(path.join(root, codex.skills)));
+});
+
+test('install links every skill and a working launcher; uninstall removes only those', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-home-'));
+  fs.mkdirSync(path.join(home, '.claude'));
+  const agents = path.join(home, '.agents', 'skills');
+  fs.mkdirSync(agents, { recursive: true });
+  fs.writeFileSync(path.join(agents, 'someone-else'), 'keep me');
+  // An old single-skill link from earlier versions is cleaned up.
+  fs.symlinkSync(path.join(root, 'skills', 'using-pitroom'), path.join(agents, 'pitroom'));
+  const env = { ...process.env, HOME: home };
+  const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env });
+
+  const i = run('install');
+  assert.equal(i.status, 0, i.stderr);
+  assert.match(i.stdout, /removed old link .*pitroom$/m);
+  for (const base of [agents, path.join(home, '.claude', 'skills')]) {
+    for (const s of skills) assert.ok(fs.existsSync(path.join(base, s, 'SKILL.md')), `${base}/${s}`);
+  }
+  const launcher = path.join(home, '.local', 'bin', 'pitroom');
+  const v = spawnSync(launcher, ['--version'], { encoding: 'utf8', env: { ...env, PATH: '/usr/bin:/bin' } });
+  assert.equal(v.stdout.trim(), version, 'launcher finds a Node 18+ even when none is on PATH');
+
+  const u = run('uninstall');
+  assert.equal(u.status, 0, u.stderr);
+  for (const s of skills) assert.ok(!fs.existsSync(path.join(agents, s)));
+  assert.ok(!fs.existsSync(launcher));
+  assert.equal(fs.readFileSync(path.join(agents, 'someone-else'), 'utf8'), 'keep me');
+});

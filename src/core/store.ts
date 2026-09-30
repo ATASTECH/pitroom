@@ -1,0 +1,135 @@
+// Run records live outside the repo so delegation never pollutes the project
+// (no .gitignore edits, nothing to accidentally commit).
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import type { Mode, Target, Usage } from '../backends/types.js';
+import { UserError } from './errors.js';
+import type { RefCheck } from './refs.js';
+
+export type State = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
+
+export interface Change {
+  status: string; // A, M, D, T
+  path: string;
+}
+
+export interface RunMeta {
+  id: string;
+  version: string;
+  mode: Mode;
+  task: string;
+  dir: string; // directory the user asked to work in
+  cwd: string; // directory the worker actually runs in (worktree for isolate)
+  repoRoot?: string;
+  worker: Target; // preferred worker
+  fallback: Target[]; // tried in order on model/provider failures
+  ran?: Target; // the target of the final attempt
+  resolvedModel?: string; // what the worker CLI actually used
+  attempts?: { target: string; error: string }[];
+  parent?: string;
+  group?: string; // runs started together (`pitroom crew`, `--group`)
+  sessionId?: string;
+  files: string[];
+  link: string[];
+  timeoutSec: number;
+  verify?: string;
+  web?: boolean;
+  state: State;
+  pid?: number;
+  startedAt: string;
+  endedAt?: string;
+  exitCode?: number;
+  error?: string;
+  warnings: string[];
+  baseTree?: string;
+  afterTree?: string;
+  worktree?: string;
+  changes?: Change[];
+  stats?: { files: number; insertions: number; deletions: number };
+  verifyResult?: { ok: boolean; code: number | null; tail: string };
+  refs?: RefCheck;
+  usage?: Usage;
+  returnedTokens?: number;
+  savedUsd?: number;
+  applied?: boolean;
+  reverted?: boolean;
+  discarded?: boolean;
+}
+
+export const TERMINAL: State[] = ['done', 'failed', 'timeout', 'stopped'];
+export const isActive = (s: State) => !TERMINAL.includes(s);
+
+export function home(): string {
+  if (process.env.PITROOM_HOME) return path.resolve(process.env.PITROOM_HOME);
+  if (process.platform === 'win32') {
+    return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), 'AppData', 'Local'), 'pitroom');
+  }
+  return path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), '.local', 'state'), 'pitroom');
+}
+
+export const runsDir = () => path.join(home(), 'runs');
+export const worktreesDir = () => path.join(home(), 'worktrees');
+export const ledgerFile = () => path.join(home(), 'ledger.jsonl');
+export const runDir = (id: string) => path.join(runsDir(), id);
+export const runFile = (id: string, name: string) => path.join(runDir(id), name);
+
+export function newRunId(now = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${stamp}-${crypto.randomBytes(2).toString('hex')}`;
+}
+
+export function writeMeta(meta: RunMeta): void {
+  fs.mkdirSync(runDir(meta.id), { recursive: true });
+  const file = runFile(meta.id, 'meta.json');
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2));
+  fs.renameSync(tmp, file);
+}
+
+export function readMeta(id: string): RunMeta {
+  return JSON.parse(fs.readFileSync(runFile(id, 'meta.json'), 'utf8')) as RunMeta;
+}
+
+export function listRunIds(): string[] {
+  if (!fs.existsSync(runsDir())) return [];
+  return fs
+    .readdirSync(runsDir())
+    .filter((d) => fs.existsSync(runFile(d, 'meta.json')))
+    .sort();
+}
+
+/** Resolves "latest"/"last", a full id, or a unique suffix/prefix of an id. */
+export function resolveRun(ref: string | undefined): string {
+  const ids = listRunIds();
+  if (!ids.length) throw new UserError('no runs yet');
+  if (!ref || ref === 'latest' || ref === 'last') return ids[ids.length - 1]!;
+  if (ids.includes(ref)) return ref;
+  const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
+  if (hits.length === 1) return hits[0]!;
+  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(', ')}` : `unknown run "${ref}"`);
+}
+
+export function isAlive(pid: number | undefined): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** A run marked running whose process is gone crashed; report it as failed. */
+export function freshMeta(id: string): RunMeta {
+  const meta = readMeta(id);
+  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
+    meta.state = 'failed';
+    meta.error ??= 'worker process exited unexpectedly';
+    meta.endedAt ??= new Date().toISOString();
+    writeMeta(meta);
+  }
+  return meta;
+}

@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="600" height="220" viewBox="0 0 600 220" role="img" aria-label="pitroom saved $0.494">
+<style>
+text{font-family:ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#ede9fe}
+.h{font-size:15px;font-weight:600;fill:#a78bfa;letter-spacing:.08em}
+.big{font-size:54px;font-weight:800;fill:#fff}
+.sub{font-size:15px;fill:#c4b5fd}
+.v{font-size:22px;font-weight:700;fill:#fff}
+.l{font-size:12px;fill:#a78bfa}
+.f{font-size:11px;fill:#8b5cf6}
+</style>
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/><stop offset="1" stop-color="#3b0764"/></linearGradient></defs>
+<rect width="600" height="220" rx="18" fill="url(#g)"/>
+<text x="32" y="42" class="h">PITROOM · ALL TIME</text>
+<text x="32" y="98" class="big">$0.494</text>
+<text x="240" y="98" class="sub">saved on my main coding agent</text>
+<text x="32" y="148" class="v">386k</text><text x="32" y="170" class="l">tokens offloaded</text>
+<text x="200" y="148" class="v">201×</text><text x="200" y="170" class="l">context compression</text>
+<text x="380" y="148" class="v">4</text><text x="380" y="170" class="l">delegated tasks</text>
+<text x="32" y="202" class="f">estimated vs. Claude Sonnet pricing · npx pitroom</text>
+</svg>

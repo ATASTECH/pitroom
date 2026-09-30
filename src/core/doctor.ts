@@ -1,0 +1,144 @@
+// `pitroom doctor`: core checks (git, config, guard, skill) plus each worker
+// backend in the configured chain checking itself.
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { DEFAULT_BACKEND, getBackend } from '../backends/index.js';
+import type { DoctorCheck, Target } from '../backends/types.js';
+import { gitAvailable } from '../vcs/git.js';
+import { guardEnv, shimDir } from '../vcs/guard.js';
+import { configPath, effective, loadConfig } from './config.js';
+import { installedSkills, launcherPath, skillNames } from './install.js';
+import { VERSION } from './run.js';
+import { home } from './store.js';
+import { describeTarget, parseTarget } from './target.js';
+
+const MARK: Record<DoctorCheck['level'], string> = { ok: '✔', warn: '!', fail: '✘' };
+
+const READ_ONLY_HOW: Record<string, string> = {
+  'permission-rules': 'per-run permission rules',
+  'os-sandbox': 'an OS sandbox',
+  'tool-allowlist': 'a tool allowlist',
+  'approval-mode': "the CLI's read-only approval mode",
+};
+
+export function doctor(probe: boolean): number {
+  const checks: DoctorCheck[] = [];
+  const add = (level: DoctorCheck['level'], message: string) => checks.push({ level, message });
+
+  add('ok', `pitroom ${VERSION} · node ${process.versions.node} · state in ${home()}`);
+  add(gitAvailable() ? 'ok' : 'warn', gitAvailable() ? 'git available' : 'git not found: --write/--isolate tracking disabled');
+  const cfg = loadConfig();
+  add(cfg.warnings.length ? 'warn' : 'ok', `config: ${configPath()}${fs.existsSync(configPath()) ? '' : ' (not present, defaults in use)'}`);
+  for (const w of cfg.warnings) add('warn', w);
+  if (process.platform !== 'win32') {
+    const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
+    add(guarded ? 'ok' : 'warn', guarded ? 'git guard shim ready' : 'git guard unavailable (git not on PATH)');
+  }
+
+  // The worker chain, grouped per backend so each backend checks its own models once.
+  const eff = effective();
+  const chain: Target[] = [];
+  try {
+    const worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
+    chain.push(eff.model.value ? { ...worker, model: eff.model.value } : worker);
+    for (const spec of eff.fallback.value) chain.push(parseTarget(spec, worker.backend));
+  } catch (e) {
+    add('fail', (e as Error).message);
+  }
+  if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
+  const byBackend = new Map<string, (string | undefined)[]>();
+  for (const t of chain) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
+  for (const [id, models] of byBackend) {
+    let backend;
+    try {
+      backend = getBackend(id);
+    } catch (e) {
+      add('fail', (e as Error).message);
+      continue;
+    }
+    checks.push(...backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
+    add('ok', `${backend.name}: read-only runs enforced by ${READ_ONLY_HOW[backend.capabilities.readOnly]}`);
+  }
+
+  checks.push(...skillChecks());
+
+  if (probe && chain[0]) checks.push(liveProbe(chain[0]));
+  for (const c of checks) console.log(`${MARK[c.level]} ${c.message}`);
+  return checks.some((c) => c.level === 'fail') ? 1 : 0;
+}
+
+/** One real, read-only round trip through the preferred worker. */
+function liveProbe(target: Target): DoctorCheck {
+  let backend;
+  try {
+    backend = getBackend(target.backend);
+  } catch (e) {
+    return { level: 'fail', message: (e as Error).message };
+  }
+  const inv = backend.invocation({
+    mode: 'read',
+    prompt: 'Reply with exactly: PONG',
+    cwd: process.cwd(),
+    model: target.model,
+    files: [],
+    web: false,
+    title: 'pitroom doctor probe',
+  });
+  const t0 = Date.now();
+  const r = spawnSync(inv.command, inv.args, {
+    encoding: 'utf8',
+    timeout: 300_000,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 64 * 1024 * 1024,
+    env: guardEnv({ ...process.env, ...inv.env, PWD: process.cwd(), PITROOM_ACTIVE: '1' }),
+  });
+  const secs = ((Date.now() - t0) / 1000).toFixed(1);
+  const run = backend.parse(r.stdout ?? '');
+  if (run.finalText.includes('PONG')) return { level: 'ok', message: `live probe (${describeTarget(target)}) answered in ${secs}s` };
+  const why = backend.failure(run, r.stderr ?? '', r.status)?.message ?? run.finalText.slice(0, 200);
+  return { level: 'fail', message: `live probe (${describeTarget(target)}) failed after ${secs}s: ${why}` };
+}
+
+/** Are the skills and the CLI reachable for agents, and is there exactly one copy of the skills? */
+function skillChecks(): DoctorCheck[] {
+  const checks: DoctorCheck[] = [];
+  const all = skillNames();
+  const viaPlugin = pluginInstalled();
+  for (const { base, names } of installedSkills()) {
+    if (names.length === all.length) checks.push({ level: 'ok', message: `skills in ${base}: ${names.join(', ')}` });
+    else if (names.length) checks.push({ level: 'warn', message: `skills in ${base}: only ${names.join(', ')} of ${all.length}; run \`pitroom install\`` });
+    else if (!viaPlugin) checks.push({ level: 'warn', message: `no Pitroom skills in ${base}; run \`pitroom install\`` });
+  }
+  if (viaPlugin) {
+    const linked = installedSkills().some((i) => i.base.includes(`${path.sep}.claude${path.sep}`) && i.names.length);
+    checks.push(
+      linked
+        ? { level: 'warn', message: 'Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin' }
+        : { level: 'ok', message: 'Claude Code plugin installed (skills + session-start hook)' },
+    );
+  }
+  const launcher = launcherPath();
+  if (fs.existsSync(launcher)) {
+    const r = spawnSync(launcher, ['--version'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    checks.push(
+      r.status === 0
+        ? { level: 'ok', message: `launcher ${launcher} → pitroom ${r.stdout.trim()}` }
+        : { level: 'fail', message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` },
+    );
+  } else {
+    checks.push({ level: 'warn', message: 'no `pitroom` launcher on PATH: run `pitroom install`' });
+  }
+  return checks;
+}
+
+function pluginInstalled(): boolean {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
+    const plugins = JSON.parse(fs.readFileSync(f, 'utf8')).plugins ?? {};
+    return Object.keys(plugins).some((k) => k.startsWith('pitroom@'));
+  } catch {
+    return false;
+  }
+}

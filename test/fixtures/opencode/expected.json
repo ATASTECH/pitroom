@@ -1,0 +1,36 @@
+{
+  "events": {
+    "v2-read-denied-shell.jsonl": {
+      "sessionId": "ses_f10ab5804ffepuw3C6VtIRGx2g",
+      "steps": 2,
+      "total": 6490,
+      "denied": 1,
+      "edits": 0,
+      "finalTextStartsWith": "1) `touch v2probe.txt` result verbatim"
+    },
+    "v2-write-edit.jsonl": {
+      "sessionId": "ses_f10a953f0ffeOmeX4X49E3EwmG",
+      "steps": 3,
+      "total": 58691,
+      "denied": 0,
+      "edits": 2,
+      "finalTextStartsWith": "Both file tasks are done"
+    },
+    "v1-read-research.jsonl": {
+      "sessionId": "ses_f10c710faffe7Y3SKyuxwYpTb1",
+      "steps": 4,
+      "total": 113038,
+      "finalTextStartsWith": "SUMMARY: Pitroom injects `pitroom-read`"
+    },
+    "v1-write-bash.jsonl": {
+      "sessionId": "ses_f10d1d139ffezoXfzIrPKdO00t",
+      "steps": 3,
+      "total": 90502,
+      "finalTextStartsWith": "SUMMARY: Ran (1) and (3)"
+    }
+  },
+  "failures": {
+    "v2-free-tier": { "exitCode": 1, "kind": "auth", "messageIncludes": "free tier can only be used from within OpenCode" },
+    "v1-model-not-found": { "exitCode": 1, "kind": "model-unavailable", "messageIncludes": "Model not found" }
+  }
+}
