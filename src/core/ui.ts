@@ -49,11 +49,25 @@ function kind(m: RunMeta): string {
   return m.mode === 'read' ? 'research' : m.mode === 'isolate' ? 'change (isolated copy)' : 'change';
 }
 
+const SUBJECT_MAX = 48;
+
+/** A card-sized subject: no backticks or markdown heading marks, cut at a word boundary. */
+function short(text: string): string {
+  const s = text.replace(/`/g, '').replace(/^#+\s*/, '').replace(/\s+/g, ' ').trim();
+  if (s.length <= SUBJECT_MAX) return s;
+  const cut = s.slice(0, SUBJECT_MAX);
+  const space = cut.lastIndexOf(' ');
+  return `${(space > SUBJECT_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:·-]+$/, '')}…`;
+}
+
 function what(m: RunMeta): string {
-  if (m.plan) return `Task ${m.plan.step}: ${m.plan.title}`;
+  if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
   if (m.reviewOf) return `of ${m.reviewOf}`;
   const line = m.task.split('\n').find((l) => l.trim()) ?? '';
-  return line.length > 70 ? `${line.slice(0, 69)}…` : line;
+  // A hand-written plan brief opens with this boilerplate; the task and the plan are what count.
+  const brief = /^You are implementing Task (\d+)\b.*?\bplan\s+(\S+)/i.exec(line);
+  if (brief) return short(`Task ${brief[1]} · ${brief[2]!.split('/').pop()!.replace(/\.md\W*$/, '')}`);
+  return short(line);
 }
 
 function duration(m: RunMeta): string {

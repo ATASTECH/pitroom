@@ -482,6 +482,15 @@ test('hook-card: one card per phase after a Bash pitroom command, silence otherw
   assert.equal(hook(`cat ~/.local/state/pitroom/runs/${id}/meta.json`, id).stdout, '', 'a path is not a call');
   assert.equal(hook('pitroom status', id, 'Read').stdout, '', 'only Bash');
   assert.equal(s.run(['hook-card'], {}, 'not json').status, 0, 'never fails the host');
+  // Subjects stay short: cut at a word boundary, and a plan brief's boilerplate becomes the task and plan.
+  const subject = (task) => {
+    const run = s.run(['run', task]);
+    return JSON.parse(hook('pitroom run x', run.stdout).stdout).systemMessage.split(' · ')[1];
+  };
+  const long = subject('Find every place where the `session cookie` is read outside the auth module and list them');
+  assert.ok(long.length <= 49 && long.endsWith('…') && !long.includes('`'), long);
+  const briefRun = s.run(['run', 'You are implementing Task 3 of the plan docs/pitroom/plans/2026-09-30-widgets.md (in your copy).']);
+  assert.match(JSON.parse(hook('pitroom run x', briefRun.stdout).stdout).systemMessage, / · Task 3 · 2026-09-30-widgets · /);
 });
 
 test('statusline: the user\'s own line first, then Pitroom\'s when it has something to say', () => {

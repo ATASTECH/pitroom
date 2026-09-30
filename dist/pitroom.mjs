@@ -2190,11 +2190,21 @@ function kind(m) {
   if (m.reviewOf) return m.reviewKind === "range" ? "branch review" : m.reviewKind === "fix" ? "re-review" : "review";
   return m.mode === "read" ? "research" : m.mode === "isolate" ? "change (isolated copy)" : "change";
 }
+var SUBJECT_MAX = 48;
+function short(text) {
+  const s = text.replace(/`/g, "").replace(/^#+\s*/, "").replace(/\s+/g, " ").trim();
+  if (s.length <= SUBJECT_MAX) return s;
+  const cut = s.slice(0, SUBJECT_MAX);
+  const space = cut.lastIndexOf(" ");
+  return `${(space > SUBJECT_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:·-]+$/, "")}\u2026`;
+}
 function what(m) {
-  if (m.plan) return `Task ${m.plan.step}: ${m.plan.title}`;
+  if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
   if (m.reviewOf) return `of ${m.reviewOf}`;
   const line = m.task.split("\n").find((l) => l.trim()) ?? "";
-  return line.length > 70 ? `${line.slice(0, 69)}\u2026` : line;
+  const brief2 = /^You are implementing Task (\d+)\b.*?\bplan\s+(\S+)/i.exec(line);
+  if (brief2) return short(`Task ${brief2[1]} \xB7 ${brief2[2].split("/").pop().replace(/\.md\W*$/, "")}`);
+  return short(line);
 }
 function duration2(m) {
   const s = Math.round((Date.parse(m.endedAt ?? "") - Date.parse(m.startedAt)) / 1e3);
