@@ -13,7 +13,7 @@ export interface Parsed {
 
 const VALUE_FLAGS: Record<string, string> = {
   '-d': 'dir', '--dir': 'dir', '-f': 'file', '--file': 'file', '-m': 'model', '--model': 'model',
-  '-W': 'worker', '--worker': 'worker', '-g': 'group', '--group': 'group',
+  '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '-g': 'group', '--group': 'group',
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval',
@@ -104,6 +104,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
       : effective().link.value,
     worker: flag(p, 'worker'),
     model: flag(p, 'model'),
+    tier: flag(p, 'tier'),
     timeoutSec: parseDuration(effective({ timeout: flag(p, 'timeout') }).timeout.value),
     verify: flag(p, 'verify'),
     continueFrom: cont ? resolveRun(cont) : undefined,

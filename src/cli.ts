@@ -41,6 +41,7 @@ Run options
   -f, --file PATH       attach a file (repeatable)
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
+      --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
@@ -61,7 +62,7 @@ Workers: ${backendIds().join(', ')} (targets: "opencode", "opencode:provider/mod
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 

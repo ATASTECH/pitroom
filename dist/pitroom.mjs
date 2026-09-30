@@ -975,7 +975,8 @@ var SCHEMA = {
   link: "string[]",
   web: "boolean",
   maxParallel: "number",
-  models: "record"
+  models: "record",
+  tiers: "record"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path5.resolve(process.env.PITROOM_CONFIG);
@@ -1043,7 +1044,8 @@ function effective(flags = {}) {
     link: setting(void 0, void 0, c.link, []),
     web: setting(void 0, void 0, c.web, false),
     maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
-    models: setting(void 0, void 0, c.models, {})
+    models: setting(void 0, void 0, c.models, {}),
+    tiers: setting(void 0, void 0, c.tiers, {})
   };
 }
 
@@ -1134,6 +1136,7 @@ var VALUE_FLAGS = {
   "--model": "model",
   "-W": "worker",
   "--worker": "worker",
+  "--tier": "tier",
   "-g": "group",
   "--group": "group",
   "-t": "timeout",
@@ -1243,6 +1246,7 @@ function runOptions(p, task) {
     link: p.flags.has("link") ? (p.flags.get("link") ?? []).flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean) : effective().link.value,
     worker: flag(p, "worker"),
     model: flag(p, "model"),
+    tier: flag(p, "tier"),
     timeoutSec: parseDuration(effective({ timeout: flag(p, "timeout") }).timeout.value),
     verify: flag(p, "verify"),
     continueFrom: cont ? resolveRun(cont) : void 0,
@@ -1798,22 +1802,27 @@ function applyPatch(root, patchFile, reverse) {
 
 // src/core/chain.ts
 function resolveChain(flags = {}) {
-  const eff = effective({ worker: flags.worker, model: flags.model });
+  const warnings = [];
+  let spec = flags.worker;
+  if (!spec && flags.tier) {
+    spec = effective().tiers.value[flags.tier];
+    if (!spec) warnings.push(`tier "${flags.tier}" is not configured (config "tiers"); using the default worker`);
+  }
+  const eff = effective({ worker: spec, model: flags.model });
   const models = eff.models.value;
   const withDefault = (t) => t.model || !models[t.backend] ? t : { ...t, model: models[t.backend] };
   let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
   if (eff.model.value) worker = { ...worker, model: eff.model.value };
   worker = withDefault(worker);
   const fallback = [];
-  const warnings = [];
   if (!flags.noFallback) {
-    for (const spec of eff.fallback.value) {
-      const t = withDefault(parseTarget(spec, worker.backend));
+    for (const s of eff.fallback.value) {
+      const t = withDefault(parseTarget(s, worker.backend));
       try {
         getBackend(t.backend);
         fallback.push(t);
       } catch (e) {
-        warnings.push(`fallback ${spec} skipped: ${e.message}`);
+        warnings.push(`fallback ${s} skipped: ${e.message}`);
       }
     }
   }
@@ -2229,7 +2238,7 @@ function prepareRun(o) {
   let fallback;
   if (o.continueFrom) {
     parent = readMeta(o.continueFrom);
-    if (o.worker) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker");
+    if (o.worker || o.tier) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
     if (parent.mode === "isolate" && (!parent.worktree || !fs16.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
@@ -2238,7 +2247,7 @@ function prepareRun(o) {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: o.tier, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }
@@ -2784,8 +2793,11 @@ function doctor4(probe) {
     add("fail", e.message);
   }
   if (chain.length) add("ok", `worker chain: ${chain.map(describeTarget).join(" \u2192 ")}`);
+  const tiers = Object.keys(effective().tiers.value);
+  const tierTargets = tiers.map((name) => resolveChain({ tier: name, noFallback: true }).worker);
+  if (tiers.length) add("ok", `tiers: ${tiers.map((name, i) => `${name}=${describeTarget(tierTargets[i])}`).join(", ")}`);
   const byBackend = /* @__PURE__ */ new Map();
-  for (const t of chain) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
+  for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
   for (const [id, models] of byBackend) {
     let backend;
     try {
@@ -2904,6 +2916,7 @@ Run options
   -f, --file PATH       attach a file (repeatable)
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
+      --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
@@ -2924,7 +2937,7 @@ Workers: ${backendIds().join(", ")} (targets: "opencode", "opencode:provider/mod
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,

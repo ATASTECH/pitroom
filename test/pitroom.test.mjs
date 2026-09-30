@@ -369,3 +369,26 @@ test('config "models" gives each worker a default model; explicit models win', (
   assert.equal(modelOf(), 'mock/configured');
   assert.match(s.run(['config']).stdout, /models\s+opencode=mock\/configured\s+\(config\)/);
 });
+
+test('config "tiers" names workers: --tier picks one, -W wins, unknown tiers warn', () => {
+  const s = sandbox();
+  s.config({ tiers: { cheap: 'opencode:mock/cheap', capable: 'opencode:mock/capable' } });
+  const modelOf = () => {
+    const c = s.calls().filter((x) => x.argv[0] === 'run').at(-1);
+    return c.argv.includes('--model') ? c.argv[c.argv.indexOf('--model') + 1] : 'default';
+  };
+  assert.equal(s.run(['run', '--tier', 'capable', 'x']).status, 0);
+  assert.equal(modelOf(), 'mock/capable');
+  assert.equal(s.run(['run', '--tier', 'capable', '-W', 'opencode:mock/explicit', 'y']).status, 0);
+  assert.equal(modelOf(), 'mock/explicit', '-W wins over --tier');
+  const r = s.run(['run', '--tier', 'nope', 'z']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(modelOf(), 'default');
+  assert.match(r.stdout, /warning: tier "nope" is not configured/);
+  assert.match(s.run(['config']).stdout, /tiers\s+cheap=opencode:mock\/cheap, capable=opencode:mock\/capable\s+\(config\)/);
+  assert.match(s.run(['doctor']).stdout, /tiers: cheap=opencode:mock\/cheap, capable=opencode:mock\/capable/);
+  const id = /run (\S+)/.exec(r.stdout)[1];
+  const c = s.run(['run', '--continue', id, '--tier', 'cheap', 'more']);
+  assert.equal(c.status, 2);
+  assert.match(c.stderr, /drop --worker\/--tier/);
+});

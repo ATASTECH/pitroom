@@ -9,7 +9,7 @@ import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
 import { resolveChain } from './chain.js';
-import { configPath, loadConfig } from './config.js';
+import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { VERSION } from './run.js';
 import { home } from './store.js';
@@ -48,8 +48,12 @@ export function doctor(probe: boolean): number {
     add('fail', (e as Error).message);
   }
   if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
+  // Tier workers (config "tiers") are checked like the chain's.
+  const tiers = Object.keys(effective().tiers.value);
+  const tierTargets = tiers.map((name) => resolveChain({ tier: name, noFallback: true }).worker);
+  if (tiers.length) add('ok', `tiers: ${tiers.map((name, i) => `${name}=${describeTarget(tierTargets[i]!)}`).join(', ')}`);
   const byBackend = new Map<string, (string | undefined)[]>();
-  for (const t of chain) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
+  for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
   for (const [id, models] of byBackend) {
     let backend;
     try {

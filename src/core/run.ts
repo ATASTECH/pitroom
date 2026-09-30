@@ -31,6 +31,8 @@ export interface RunOptions {
   link: string[];
   worker?: string;
   model?: string;
+  /** A worker from the config's "tiers"; -W wins. */
+  tier?: string;
   timeoutSec: number;
   verify?: string;
   continueFrom?: string;
@@ -53,7 +55,7 @@ export function prepareRun(o: RunOptions): RunMeta {
 
   if (o.continueFrom) {
     parent = readMeta(o.continueFrom);
-    if (o.worker) throw new UserError('a follow-up runs on the same worker as its parent; drop --worker');
+    if (o.worker || o.tier) throw new UserError('a follow-up runs on the same worker as its parent; drop --worker/--tier');
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
     if (parent.mode === 'isolate' && (!parent.worktree || !fs.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
@@ -63,7 +65,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: o.tier, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }
