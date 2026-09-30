@@ -14,9 +14,11 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" …
                                         start several workers in background as one group
-  pitroom review [run | --range A..B] [--tier T | -W T] [--bg]
+  pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
                                         read-only review of a run's change (a follow-up: only its
                                         fix round) or of a commit range; by default on another worker
+  pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
+  pitroom plan note PLAN "Task N: …"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run… | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -75,6 +77,7 @@ const COMMANDS: Record<string, Command> = {
   run: cmd.cmdRun,
   crew: cmd.cmdCrew,
   review: cmd.cmdReview,
+  plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,

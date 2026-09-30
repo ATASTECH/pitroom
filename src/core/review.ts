@@ -13,6 +13,8 @@ import type { Target } from '../backends/types.js';
 import { commitOf, gitDir, rangeDiff, repoRoot, reviewDiff } from '../vcs/git.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
+import { loadPlan, planName } from './plan.js';
+import { readNotes } from './plan-status.js';
 import { readSummary } from './report.js';
 import { type RunMeta, freshMeta, isActive, listRunIds, readMeta, runFile } from './store.js';
 import { parseTarget } from './target.js';
@@ -113,7 +115,7 @@ export function runReview(id: string): ReviewJob {
   };
 }
 
-export function rangeReview(range: string, dir: string): ReviewJob {
+export function rangeReview(range: string, dir: string, planFile?: string): ReviewJob {
   const root = repoRoot(dir);
   if (!root) throw new UserError('--range needs a git repository');
   const i = range.indexOf('..');
@@ -121,14 +123,27 @@ export function rangeReview(range: string, dir: string): ReviewJob {
   const b = i > 0 ? range.slice(i + 2) || 'HEAD' : '';
   if (!a || b.startsWith('.')) throw new UserError(`--range takes A..B (e.g. main..HEAD), not "${range}"`);
   for (const ref of [a, b]) if (!commitOf(root, ref)) throw new UserError(`not a commit: ${ref}`);
+  const plan = planFile ? loadPlan(planFile) : undefined;
+  const notes = plan ? readNotes(plan) : [];
+  const requirements = plan
+    ? [
+        `Plan: ${plan.file}`,
+        '### Global Constraints',
+        plan.constraints || '(none stated in the plan)',
+        '### Tasks',
+        plan.tasks.map((t) => `- Task ${t.step}: ${t.title}`).join('\n'),
+      ].join('\n\n')
+    : '(none given; judge the change on its own terms)';
   return {
     kind: 'range',
     of: `${a}..${b}`,
     dir: root,
+    group: plan ? planName(plan.file) : undefined,
     package: [
       `# Review package · ${a}..${b}\n`,
-      section('WHAT WAS IMPLEMENTED', 'The commits below.'),
-      section('REQUIREMENTS', '(none given; judge the change on its own terms)'),
+      section('WHAT WAS IMPLEMENTED', plan ? `${plan.title}\n\n${plan.header}` : 'The commits below.'),
+      section('REQUIREMENTS', requirements),
+      ...(notes.length ? [section('NOTES FROM EXECUTION', notes.map((n) => `- ${n.text}`).join('\n'))] : []),
       rangeDiff(root, a, b),
     ].join('\n'),
   };

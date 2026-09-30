@@ -6,6 +6,7 @@ import { UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
+import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress } from '../core/report.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
@@ -42,9 +43,10 @@ export async function cmdRun(p: Parsed): Promise<number> {
 export async function cmdReview(p: Parsed): Promise<number> {
   const range = flag(p, 'range');
   if (range && p.positional.length) throw new UserError('review takes a run or --range A..B, not both');
+  if (flag(p, 'plan') && !range) throw new UserError("--plan goes with --range (a run's review already knows its plan)");
   if (has(p, 'write') || has(p, 'isolate')) throw new UserError('reviews are read-only; drop -w/-i');
   if (has(p, 'continue')) throw new UserError('to review a follow-up, pass its run id: pitroom review <run>');
-  const job = range ? rangeReview(range, flag(p, 'dir') ?? process.cwd()) : runReview(resolveRun(p.positional[0]));
+  const job = range ? rangeReview(range, flag(p, 'dir') ?? process.cwd(), flag(p, 'plan')) : runReview(resolveRun(p.positional[0]));
   const packageFile = writePackage(job);
   let meta: RunMeta;
   try {
@@ -62,6 +64,25 @@ export async function cmdReview(p: Parsed): Promise<number> {
   }
   fs.writeFileSync(runFile(meta.id, 'package.md'), job.package);
   return launch(p, meta);
+}
+
+/** `pitroom plan status PLAN` / `pitroom plan note PLAN "Task N: …"`. */
+export function cmdPlan(p: Parsed): number {
+  const [sub, file, ...rest] = p.positional;
+  if (sub === 'status' && file) {
+    const s = planStatus(file);
+    console.log(
+      has(p, 'json')
+        ? JSON.stringify({ plan: s.plan.file, title: s.plan.title, tasks: s.tasks, rulings: s.rulings, notesFile: s.notesFile }, null, 2)
+        : formatPlanStatus(s),
+    );
+    return 0;
+  }
+  if (sub === 'note' && file && rest.length) {
+    console.log(`noted in ${addNote(file, rest.join(' '))}`);
+    return 0;
+  }
+  throw new UserError('usage: pitroom plan status PLAN.md [--json] | pitroom plan note PLAN.md "Task N: …"');
 }
 
 /** Several tasks as one group of background workers. */

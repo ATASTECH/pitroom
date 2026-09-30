@@ -94,3 +94,41 @@ test("a plan task's review gets the plan brief and stays with the task", () => {
   assert.equal(meta(s, rid).plan.step, 1);
   assert.equal(meta(s, rid).group, 'demo-plan');
 });
+
+test('plan status rebuilds progress from runs and notes; notes stay outside the project', () => {
+  const s = planSandbox();
+  const impl = runId(s.run(['run', '-i', '--plan', s.plan, '--step', '1']));
+  s.run(['review', impl], { MOCK_ACTIONS: 'answer:SUMMARY: SPEC: PASS · QUALITY: APPROVED · ISSUES: critical=0 important=0 minor=1' });
+  assert.equal(s.run(['apply', impl]).status, 0);
+  assert.equal(s.run(['plan', 'note', s.plan, 'Task 1: complete (aaaaaaa..bbbbbbb)']).status, 0);
+  assert.equal(s.run(['plan', 'note', s.plan, 'Task 2: Ruling: skip the renderer — out of scope — costs a follow-up']).status, 0);
+  const st = s.run(['plan', 'status', s.plan]);
+  assert.equal(st.status, 0, st.stderr);
+  assert.match(st.stdout, /^1\s+done\s+DONE\s+pass\/approved \(c0 i0 m1\)\s+0\s+yes\s+First line\s+Task 1: complete/m);
+  assert.match(st.stdout, /^2\s+-\s+-\s+-\s+-\s+-\s+Second line/m);
+  assert.match(st.stdout, /Rulings:\n\s+\d{4}-\d\d-\d\d \d\d:\d\d Task 2: Ruling: skip the renderer/);
+  const j = JSON.parse(s.run(['plan', 'status', s.plan, '--json']).stdout);
+  assert.equal(j.tasks[0].applied, true);
+  assert.equal(j.tasks[0].review.verdict.minor, 1);
+  assert.equal(j.tasks[1].runs, 0);
+  assert.ok(j.notesFile.startsWith(path.join(s.base, 'home')), 'notes live in the Pitroom home, not the project');
+  assert.equal(s.run(['plan', 'status']).status, 2);
+  assert.equal(s.run(['plan', 'frob', s.plan]).status, 2);
+});
+
+test('review --range --plan adds the plan and the notes from execution', () => {
+  const s = planSandbox();
+  s.git('add', '-A');
+  s.git('commit', '-qm', 'wip');
+  fs.appendFileSync(path.join(s.repo, 'app.txt'), 'one\n');
+  s.git('commit', '-qam', 'feat: one');
+  s.run(['plan', 'note', s.plan, 'Task 1: minor (deferred): name the constant']);
+  const r = s.run(['review', '--range', 'HEAD~1..HEAD', '--plan', s.plan], { MOCK_ACTIONS: APPROVED });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const pkg = fs.readFileSync(path.join(s.base, 'home', 'runs', runId(r), 'package.md'), 'utf8');
+  assert.match(pkg, /## WHAT WAS IMPLEMENTED\n\nDemo Implementation Plan/);
+  assert.match(pkg, /Keep app\.txt lines lowercase/);
+  assert.match(pkg, /- Task 2: Second line/);
+  assert.match(pkg, /## NOTES FROM EXECUTION\n\n- Task 1: minor \(deferred\): name the constant/);
+  assert.match(s.run(['review', 'latest', '--plan', s.plan]).stderr, /--plan goes with --range/);
+});
