@@ -19,23 +19,6 @@ codex plugin marketplace add ATASTECH/pitroom && codex plugin add pitroom@pitroo
 
 Try both in a throwaway home before a release: `CLAUDE_CONFIG_DIR=$(mktemp -d)` and `CODEX_HOME=$(mktemp -d)` keep your own settings untouched.
 
-## Anthropic's plugin directory
+## Vendor directories
 
-Listing reaches claude.ai, Cowork and Claude Code. It needs a paid claude.ai plan and a GitHub repository holding the plugin.
-
-1. `claude plugin validate . --strict`, then fix what it reports.
-2. Open the developer portal at <https://claude.ai/directory/manage>, run **Validate**, fix every **Blocking** finding, then submit.
-3. Expect a reviewer hold for two things in this repository: the `package.json` with `package-lock.json` at the plugin root (Claude Code installs a lockfile's packages), and the hook commands that run `dist/pitroom.mjs` (a non-shell file). Both are explained in the pre-submission checklist: <https://claude.com/docs/plugins/pre-submission-checklist>.
-4. The plugin only works where a shell and the `pitroom` command exist, so on claude.ai and Cowork it is listed for Claude Code only.
-
-## OpenAI's plugin directory (ChatGPT and Codex)
-
-1. Build the package from the published files only. The directory rejects lifecycle hooks, so leave `hooks/` out:
-
-   ```bash
-   zip -r pitroom-codex.zip .codex-plugin skills assets LICENSE
-   ```
-
-2. Upload the ZIP at the plugin submission portal (<https://developers.openai.com/plugins/deploy/submission>) as an organization owner of a verified OpenAI organization.
-3. The listing fields come from `.codex-plugin/plugin.json` (`interface`), the icon from `assets/`, the privacy policy from `PRIVACY.md`. The name, descriptions and keywords must not mention other assistants, models or platforms (the portal warns). Each upload needs a new `version`.
-4. The skills call the `pitroom` command, which is installed separately (`npm i -g pitroom`). The long description says so.
+Pitroom is deliberately **not** submitted to Anthropic's or OpenAI's plugin directories: listing it there would add support and review obligations for a tool people can already install from npm or the marketplace above. The manifests still carry the listing fields (icon, privacy policy URL, neutral descriptions), so a submission stays possible; the requirements are in those vendors' submission docs, and the git history of this file has the steps that were prepared (a ZIP of `.codex-plugin`, `skills`, `assets` and `LICENSE` without hooks for OpenAI; the `claude plugin validate . --strict` check and the developer portal for Anthropic).

@@ -1,0 +1,50 @@
+# Contributing to Pitroom
+
+Thanks for helping. Issues and pull requests are welcome. For a vulnerability, do not open an issue: follow [SECURITY.md](SECURITY.md).
+
+## Set up
+
+You need Node.js 18 or newer and git. Worker CLIs are optional for development: the tests use a fake worker.
+
+```bash
+git clone https://github.com/ATASTECH/pitroom && cd pitroom
+npm install
+npm run typecheck
+npm test          # builds dist/ first, then runs every test
+```
+
+The tests are end-to-end against the built CLI with fake worker CLIs, plus adapter contract tests on recorded real streams. Run them on Node 18 and on a current Node; CI repeats them on Ubuntu and macOS.
+
+## Where things live
+
+| Path | What |
+|---|---|
+| `src/core`, `src/cli` | run lifecycle, reviews, plans, the CLI commands |
+| `src/backends/<worker>` | one adapter per worker CLI ([how adapters work](docs/backends.md)) |
+| `src/vcs` | the git snapshot, isolation and git guard |
+| `skills/` | the `pitroom-*` agent skills and `using-pitroom` |
+| `.claude-plugin`, `.codex-plugin`, `hooks` | plugin manifests and the session-start hook |
+| `test/` | `*.test.mjs` (Node's test runner) and `fixtures/` |
+
+## Changes
+
+- **Open an issue first** for anything bigger than a fix, so we agree on the direction. A new worker adapter is the easiest big contribution.
+- **Tests come with the change.** A bug fix starts with a test that fails for the right reason. Keep test output free of warnings.
+- **`dist/` is generated.** `npm test` rebuilds it; commit the rebuilt files with your change and never edit them by hand. They are marked as generated in `.gitattributes`.
+- **No runtime dependencies.** Pitroom ships as one bundle with none; keep it that way.
+- **Match the code around you:** 2-space indent, single quotes, `node:` imports, comments that say why, `UserError` for failures the user can act on.
+- **Safety is not negotiable.** Do not add flags or instructions that weaken a worker's permissions, the git guard or the apply checks. Changes in that area need a test that shows the protection still holds.
+
+## Skills
+
+Skills live in `skills/<name>/SKILL.md` with frontmatter: `name` equals the folder name, and `description` starts with "Use" and says when to use it. A test checks the rules and that every relative link resolves. Keep the session-start text under 8,192 characters (also tested).
+
+## Commits and pull requests
+
+Commit messages follow `type(scope): summary` with types such as `feat`, `fix`, `docs`, `test`, `chore`, `ci`. Explain why in the body when it is not obvious. In the pull request, say what changed, how you tested it, and which Node versions you ran.
+
+By contributing you agree that your contribution is licensed under the [MIT License](LICENSE).
+
+## Releases
+
+Maintainers: see [docs/releasing.md](docs/releasing.md).

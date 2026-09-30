@@ -24,6 +24,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 [Skills](#skills) ·
 [Commands](#commands) ·
 [Workers](#workers) ·
+[Responsibility](#responsibility) ·
 [Write an adapter](docs/backends.md)
 
 <br />
@@ -108,7 +109,7 @@ In isolate mode nothing reaches your tree until you apply it.
 
 ### How it stays safe
 
-Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, a file-reading tool that refuses `.env` and key files (OpenCode and Claude Code workers), no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched.
+Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, a file-reading tool that refuses `.env` and key files (OpenCode and Claude Code workers), no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched. These safeguards reduce risk; they are not a security boundary (see [Responsibility](#responsibility) and [SECURITY.md](SECURITY.md)).
 
 ---
 
@@ -272,6 +273,9 @@ pitroom crew -g v04-demo \
 pitroom watch -g v04-demo --json   # what the primary agent follows, one line per change:
 ```
 
+<details>
+<summary>What the crew prints: the stream your agent follows and the status table</summary>
+
 ```text
 {"event":"started","run":"20260930-102812-a65d","mode":"read","task":"Where does Pitroom enforce the maxParallel queue, and how d…"}
 {"event":"progress","run":"20260930-102812-a65d","steps":3,"tools":4,"last":"grep SIGINT|SIGTERM|stop.*queued|stopped.*queued"}
@@ -287,6 +291,8 @@ RUN                   STATE  MODE  TIME  STEPS  WORKER                    NOW / 
 20260930-102812-a563  done   read  21s   2      opencode (default model)  The shim resolves `alias.<sub>` via `real git c…
 20260930-102812-a65d  done   read  39s   7      opencode (default model)  maxParallel is enforced by file-based slots (`s…
 ```
+
+</details>
 
 Humans get the same table live with `pitroom watch -g NAME`; `pitroom wait -g NAME --brief` prints one line per worker, `pitroom show <run>` the full answer.
 
@@ -317,6 +323,9 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 
 ## Commands
 
+<details>
+<summary>All commands and exit codes</summary>
+
 ```text
 pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD] [--link a,b] [--bg] "task"
 pitroom run --continue <run|last> "follow-up"
@@ -334,6 +343,8 @@ pitroom doctor [--probe] · pitroom config · pitroom install [--copy] [--force]
 ```
 
 Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4` timeout · `5` read-only violation · `6` verify failed · `75` still running.
+
+</details>
 
 ### Seeing Pitroom at work in Claude Code
 
@@ -366,7 +377,12 @@ primary agent ──(skill: "delegate?")──► pitroom run "task"
                      final answer · exact diff · receipt ──► primary agent verifies / applies
 ```
 
-Known headless footguns handled for every worker: `opencode run` blocks forever on an open stdin pipe; `ask` permissions stall headless runs; default output carries ANSI and banners; and in OpenCode v2 a plain `run` attaches to the shared background service, where per-run permissions and the git guard would not apply. Pitroom closes stdin, uses allow/deny-only profiles, parses `--format json` and always runs a private `--standalone` server.
+<details>
+<summary>Headless problems Pitroom handles for every worker</summary>
+
+Handled for every worker: `opencode run` blocks forever on an open stdin pipe; `ask` permissions stall headless runs; default output carries ANSI and banners; and in OpenCode v2 a plain `run` attaches to the shared background service, where per-run permissions and the git guard would not apply. Pitroom closes stdin, uses allow/deny-only profiles, parses `--format json` and always runs a private `--standalone` server.
+
+</details>
 
 ---
 
@@ -395,6 +411,9 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 
 ## Configuration
 
+<details>
+<summary>Environment variables</summary>
+
 | Env | Default | |
 |---|---|---|
 | `PITROOM_WORKER` | `opencode` | Preferred worker target: `backend[:model]` |
@@ -406,6 +425,8 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 | `PITROOM_PRICE` | | Custom primary price, USD per 1M tokens: `"in,out[,cachedIn]"` |
 | `PITROOM_HOME` | `~/.local/state/pitroom` | Where run records and the ledger live |
 | `PITROOM_<WORKER>_BIN` | on PATH | Path to a worker CLI, e.g. `PITROOM_OPENCODE_BIN` |
+
+</details>
 
 Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins. `tiers` names workers for `--tier` and for plan tasks' `**Worker:**` lines:
 
@@ -436,9 +457,17 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 
 ---
 
+## Responsibility
+
+Pitroom is provided as is, under the [MIT License](LICENSE), and is an independent project: it is not affiliated with or endorsed by OpenAI, Anthropic, OpenCode or the other tools it can drive.
+
+**You are responsible for how you use it.** You decide what you delegate and to which model provider, which permissions a worker gets, and what you apply to your projects. Workers are AI agents and can be wrong: review their changes and run your tests before you rely on them. Pitroom's permission profiles, git guard and isolated copies reduce risk, but they are not a security boundary against a determined attacker or a malicious repository. Keep secrets out of the folder you delegate in, prefer isolated mode for changes you have not reviewed, and follow the terms of the worker CLIs and model providers you connect. What reaches a provider is described in the [privacy policy](PRIVACY.md).
+
+---
+
 ## Contributing
 
-Issues and pull requests are welcome. Worker adapters are the easiest place to start: [docs/backends.md](docs/backends.md).
+Issues and pull requests are welcome. Start with [CONTRIBUTING.md](CONTRIBUTING.md): setup, tests, the dist bundle and the commit style. Worker adapters are the easiest place to begin: [docs/backends.md](docs/backends.md).
 
 ```bash
 npm install
@@ -446,8 +475,11 @@ npm test          # end-to-end tests against a fake worker CLI + adapter contrac
 npm run typecheck
 ```
 
+**Security:** please report vulnerabilities privately, as described in [SECURITY.md](SECURITY.md), not in a public issue.
+
 **[Report an issue](https://github.com/ATASTECH/pitroom/issues/new)** ·
-[Open issues](https://github.com/ATASTECH/pitroom/issues)
+[Open issues](https://github.com/ATASTECH/pitroom/issues) ·
+[Security policy](SECURITY.md)
 
 ---
 
