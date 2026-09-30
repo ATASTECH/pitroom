@@ -1,4 +1,5 @@
 // One function per `pitroom` command. Each returns the process exit code.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { configPath, effective, loadConfig } from '../core/config.js';
@@ -10,6 +11,7 @@ import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress } from '../core/report.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
+import { hookCards, statusLine } from '../core/ui.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
@@ -252,6 +254,41 @@ function sinceMs(s: string | undefined): number | undefined {
   const m = /^(\d+)d$/.exec(s);
   if (!m) throw new UserError('--since takes 7d, 30d, … or all');
   return Date.now() - Number(m[1]) * 86_400_000;
+}
+
+const readStdin = () => (process.stdin.isTTY ? '' : fs.readFileSync(0, 'utf8'));
+
+/**
+ * A host status line: `--then CMD` runs the user's own status line command first (with the
+ * same stdin) and keeps its output, then Pitroom's line follows when it has something to say.
+ */
+export function cmdStatusline(p: Parsed): number {
+  const input = readStdin();
+  const lines: string[] = [];
+  const then = flag(p, 'then');
+  if (then) {
+    const r = spawnSync('/bin/sh', ['-c', then], { input, encoding: 'utf8', timeout: 5000 });
+    if (r.stdout?.trimEnd()) lines.push(r.stdout.trimEnd());
+  }
+  try {
+    const own = statusLine();
+    if (own) lines.push(own);
+  } catch {
+    // a status bar never shows an error
+  }
+  if (lines.length) console.log(lines.join('\n'));
+  return 0;
+}
+
+/** A PostToolUse hook: a card shown to the user after each Bash `pitroom` command. */
+export function cmdHookCard(): number {
+  try {
+    const cards = hookCards(readStdin());
+    if (cards) console.log(JSON.stringify({ systemMessage: cards }));
+  } catch {
+    // never block or clutter the host's tool call
+  }
+  return 0;
 }
 
 export function cmdSavings(p: Parsed): number {

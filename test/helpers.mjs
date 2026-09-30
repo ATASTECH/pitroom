@@ -41,9 +41,9 @@ export function sandbox() {
   };
   delete env.PITROOM_ACTIVE;
   for (const k of ['PITROOM_WORKER', 'PITROOM_MODEL', 'PITROOM_FALLBACK', 'PITROOM_TIMEOUT', 'PITROOM_PRIMARY', 'PITROOM_PRICE', 'PITROOM_MAX_PARALLEL']) delete env[k];
-  const run = (args, extra = {}) =>
+  const run = (args, extra = {}, input = undefined) =>
     // PWD as a shell would set it: some worker CLIs trust $PWD over the real cwd.
-    spawnSync(process.execPath, [CLI, ...args], { cwd: repo, env: { ...env, PWD: repo, ...extra }, encoding: 'utf8', timeout: 60_000 });
+    spawnSync(process.execPath, [CLI, ...args], { cwd: repo, env: { ...env, PWD: repo, ...extra }, input, encoding: 'utf8', timeout: 60_000 });
   const entries = () => (fs.existsSync(log) ? fs.readFileSync(log, 'utf8').trim().split('\n').map((l) => JSON.parse(l)) : []);
   const calls = () => entries().filter((e) => e.argv);
   const execs = () => entries().filter((e) => e.exec);

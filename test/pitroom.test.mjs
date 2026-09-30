@@ -464,3 +464,33 @@ test('doctor warns when superpowers is active too, and only while it is enabled'
   write(file, 'export default {};\n');
   assert.match(doctor(opencode), /superpowers is installed too \(OpenCode plugin .*superpowers\.js\)/);
 });
+
+test('hook-card: one card per phase after a Bash pitroom command, silence otherwise', () => {
+  const s = sandbox();
+  const r = s.run(['run', 'where is the parser defined']);
+  assert.equal(r.status, 0, r.stderr);
+  const id = /run (\S+)/.exec(r.stdout)[1];
+  const hook = (command, stdout, tool = 'Bash') =>
+    s.run(['hook-card'], {}, JSON.stringify({ tool_name: tool, tool_input: { command }, tool_response: { stdout, stderr: '' } }));
+  const first = hook('pitroom run "where is the parser defined"', r.stdout);
+  assert.equal(first.status, 0, first.stderr);
+  const card = JSON.parse(first.stdout).systemMessage;
+  assert.match(card, new RegExp(`🏁 Pitroom ✔ research done on opencode.*\\(${id}\\)`));
+  assert.doesNotMatch(card, /▶/, 'a run first seen finished gets its result card only');
+  assert.equal(hook(`pitroom show ${id}`, r.stdout).stdout, '', 'each phase is shown once');
+  assert.equal(hook('ls -la', r.stdout).stdout, '', 'not a pitroom command');
+  assert.equal(hook(`cat ~/.local/state/pitroom/runs/${id}/meta.json`, id).stdout, '', 'a path is not a call');
+  assert.equal(hook('pitroom status', id, 'Read').stdout, '', 'only Bash');
+  assert.equal(s.run(['hook-card'], {}, 'not json').status, 0, 'never fails the host');
+});
+
+test('statusline: the user\'s own line first, then Pitroom\'s when it has something to say', () => {
+  const s = sandbox();
+  assert.equal(s.run(['statusline', '--then', 'echo base'], {}, '{}').stdout, 'base\n', 'nothing to add yet');
+  assert.equal(s.run(['statusline'], {}, '{}').stdout, '');
+  assert.equal(s.run(['run', 'x']).status, 0);
+  const saved = JSON.parse(s.run(['savings', '--json', '--since', '7d']).stdout).saved;
+  const out = s.run(['statusline', '--then', 'cat >/dev/null; echo base'], {}, '{"model":{}}').stdout;
+  if (saved > 0) assert.match(out, /^base\n🏁 pitroom · ~\$[\d.]+ saved this week\n$/);
+  else assert.equal(out, 'base\n');
+});

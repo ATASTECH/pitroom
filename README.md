@@ -164,12 +164,28 @@ pitroom show [run]                                --patch --events --full --json
 pitroom apply [run | -g NAME] · pitroom discard|revert [run] · pitroom stop [run | -g NAME]
 pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
 pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+pitroom statusline [--then CMD] · pitroom hook-card
 pitroom doctor [--probe] · pitroom config · pitroom install [--copy] [--force] · pitroom uninstall
 ```
 
 Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4` timeout · `5` read-only violation · `6` verify failed · `75` still running.
 
+### Seeing Pitroom at work in Claude Code
+
+Two settings make every delegation visible, whether or not the agent mentions it. A status line shows running workers and this week's savings (`--then` keeps your own status line first); a card appears after each `pitroom` command the agent runs, once per phase (started, finished with its result, applied). The plugin registers the card hook itself; with `pitroom install`, add both to `~/.claude/settings.json`:
+
+```json
+{
+  "statusLine": { "type": "command", "command": "pitroom statusline --then 'your-own-statusline'" },
+  "hooks": {
+    "PostToolUse": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": "pitroom hook-card", "timeout": 10 }] }]
+  }
+}
+```
+
 ## How it works
+
+![Pitroom workflow: primary agent → Pitroom CLI → OpenCode, Codex or Claude Code workers → verified answer, exact diff and receipt returned to the primary agent.](docs/pitroom-flow.png)
 
 ```text
 primary agent ──(skill: "delegate?")──► pitroom run "task"

@@ -1151,6 +1151,7 @@ var VALUE_FLAGS = {
   "--days": "days",
   "--interval": "interval",
   "--range": "range",
+  "--then": "then",
   "--plan": "plan",
   "--step": "step"
 };
@@ -1269,7 +1270,8 @@ function planStep(p) {
 }
 
 // src/cli/commands.ts
-import fs21 from "node:fs";
+import { spawnSync as spawnSync6 } from "node:child_process";
+import fs22 from "node:fs";
 import path18 from "node:path";
 
 // src/core/report.ts
@@ -2154,9 +2156,105 @@ function fill(template, values) {
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
 }
 
+// src/core/ui.ts
+import fs16 from "node:fs";
+var WEEK_MS = 7 * 24 * 3600 * 1e3;
+var RECENT = 40;
+function activeRuns() {
+  const out = [];
+  for (const id of listRunIds().slice(-RECENT)) {
+    try {
+      const m = readMeta(id);
+      if (isActive(m.state) && (m.state === "queued" || isAlive(m.pid))) out.push(m);
+    } catch {
+    }
+  }
+  return out;
+}
+function statusLine() {
+  const running = activeRuns();
+  const saved = totals(readLedger(Date.now() - WEEK_MS)).saved;
+  if (!running.length && !saved) return "";
+  const parts = ["\u{1F3C1} pitroom"];
+  if (running.length) {
+    const who = [...new Set(running.map((m) => (m.ran ?? m.worker).backend))].join(", ");
+    parts.push(`${running.length} running (${who})`);
+  }
+  if (saved) parts.push(`~${usd(saved)} saved this week`);
+  return parts.join(" \xB7 ");
+}
+var RUN_ID = /\b\d{8}-\d{6}-[0-9a-f]{4}\b/g;
+var PITROOM_CALL = /(^|[\s;&|(`])(\S*\/)?pitroom(\.mjs)?(\s|$)/;
+var ICON2 = { done: "\u2714", failed: "\u2718", timeout: "\u23F1", stopped: "\u25A0" };
+function kind(m) {
+  if (m.reviewOf) return m.reviewKind === "range" ? "branch review" : m.reviewKind === "fix" ? "re-review" : "review";
+  return m.mode === "read" ? "research" : m.mode === "isolate" ? "change (isolated copy)" : "change";
+}
+function what(m) {
+  if (m.plan) return `Task ${m.plan.step}: ${m.plan.title}`;
+  if (m.reviewOf) return `of ${m.reviewOf}`;
+  const line = m.task.split("\n").find((l) => l.trim()) ?? "";
+  return line.length > 70 ? `${line.slice(0, 69)}\u2026` : line;
+}
+function duration2(m) {
+  const s = Math.round((Date.parse(m.endedAt ?? "") - Date.parse(m.startedAt)) / 1e3);
+  if (!Number.isFinite(s) || s < 0) return "";
+  return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s` : `${s}s`;
+}
+function cardsFor(m) {
+  const phases = [
+    ["started", () => `\u{1F3C1} Pitroom \u25B6 ${kind(m)} on ${describeTarget(m.worker)} \xB7 ${what(m)}  (${m.id})`]
+  ];
+  if (!isActive(m.state)) {
+    phases.push([
+      "ended",
+      () => {
+        const v = m.verdict;
+        const bits = [
+          `\u{1F3C1} Pitroom ${ICON2[m.state] ?? "\u2022"} ${kind(m)} ${m.state} on ${describeTarget(m.ran ?? m.worker)}`,
+          what(m),
+          duration2(m),
+          v && `SPEC ${v.spec.toUpperCase()} \xB7 QUALITY ${v.quality.toUpperCase()}`,
+          m.changes?.length ? `${m.changes.length} file${m.changes.length === 1 ? "" : "s"} changed` : "",
+          m.savedUsd ? `~${usd(m.savedUsd)} saved` : ""
+        ];
+        return `${bits.filter(Boolean).join(" \xB7 ")}  (${m.id})`;
+      }
+    ]);
+  }
+  if (m.applied) {
+    phases.push(["applied", () => `\u{1F3C1} Pitroom \u2935 applied ${m.changes?.length ?? 0} file(s) from ${m.id} to your tree`]);
+  }
+  const out = [];
+  for (const [phase, text] of phases) {
+    const marker = runFile(m.id, `card-${phase}`);
+    if (fs16.existsSync(marker)) continue;
+    if (!(phase === "started" && !isActive(m.state))) out.push(text());
+    fs16.writeFileSync(marker, "");
+  }
+  return out;
+}
+function hookCards(input) {
+  const event = JSON.parse(input);
+  const command = event.tool_input?.command ?? "";
+  if (event.tool_name !== "Bash" || !PITROOM_CALL.test(command)) return "";
+  const response = event.tool_response;
+  const output = typeof response === "string" ? response : [response?.stdout, response?.stderr].filter(Boolean).join("\n");
+  const ids = [...new Set(`${command}
+${output}`.match(RUN_ID) ?? [])].filter((id) => fs16.existsSync(`${runsDir()}/${id}`));
+  const cards = [];
+  for (const id of ids) {
+    try {
+      cards.push(...cardsFor(readMeta(id)));
+    } catch {
+    }
+  }
+  return cards.join("\n");
+}
+
 // src/core/run.ts
 import { spawn as spawn2, spawnSync as spawnSync5 } from "node:child_process";
-import fs20 from "node:fs";
+import fs21 from "node:fs";
 import path17 from "node:path";
 
 // src/core/chain.ts
@@ -2191,10 +2289,10 @@ function resolveChain(flags = {}) {
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs17 from "node:fs";
+import fs18 from "node:fs";
 
 // src/vcs/guard.ts
-import fs16 from "node:fs";
+import fs17 from "node:fs";
 import path14 from "node:path";
 var VERSION = 1;
 var SHIM = `#!/bin/sh
@@ -2277,8 +2375,8 @@ function findRealGit(skip) {
     if (path14.resolve(dir) === skip) continue;
     const p = path14.join(dir, "git");
     try {
-      fs16.accessSync(p, fs16.constants.X_OK);
-      if (fs16.statSync(p).isFile()) return p;
+      fs17.accessSync(p, fs17.constants.X_OK);
+      if (fs17.statSync(p).isFile()) return p;
     } catch {
     }
   }
@@ -2293,11 +2391,11 @@ exit 1
 `;
 var hooksDir = () => path14.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
-  if (fs16.existsSync(file) && fs16.readFileSync(file, "utf8") === content) return;
-  fs16.mkdirSync(path14.dirname(file), { recursive: true });
+  if (fs17.existsSync(file) && fs17.readFileSync(file, "utf8") === content) return;
+  fs17.mkdirSync(path14.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs16.writeFileSync(tmp, content, { mode: 493 });
-  fs16.renameSync(tmp, file);
+  fs17.writeFileSync(tmp, content, { mode: 493 });
+  fs17.renameSync(tmp, file);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -2333,8 +2431,8 @@ function guardEnv(env) {
 
 // src/core/process.ts
 async function spawnWorker(inv, opts) {
-  const out = fs17.openSync(opts.stdoutFile, "w");
-  const err = fs17.openSync(opts.stderrFile, "w");
+  const out = fs18.openSync(opts.stdoutFile, "w");
+  const err = fs18.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -2366,8 +2464,8 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs17.closeSync(out);
-  fs17.closeSync(err);
+  fs18.closeSync(out);
+  fs18.closeSync(err);
   return res;
 }
 
@@ -2393,7 +2491,7 @@ function parseVerdict(text) {
 
 // src/core/slots.ts
 import crypto5 from "node:crypto";
-import fs18 from "node:fs";
+import fs19 from "node:fs";
 import path15 from "node:path";
 var slotsDir = () => path15.join(home(), "slots");
 var locksDir = () => path15.join(home(), "locks");
@@ -2410,23 +2508,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs18.mkdirSync(path15.dirname(file), { recursive: true });
+  fs19.mkdirSync(path15.dirname(file), { recursive: true });
   try {
-    fs18.writeFileSync(file, runId, { flag: "wx" });
+    fs19.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs18.readFileSync(file, "utf8").trim();
+    owner = fs19.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs18.rmSync(file, { force: true });
+  fs19.rmSync(file, { force: true });
   try {
-    fs18.writeFileSync(file, runId, { flag: "wx" });
+    fs19.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -2435,7 +2533,7 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs18.readFileSync(file, "utf8").trim() === runId) fs18.rmSync(file, { force: true });
+    if (fs19.readFileSync(file, "utf8").trim() === runId) fs19.rmSync(file, { force: true });
   } catch {
   }
 }
@@ -2453,7 +2551,7 @@ function acquireWriteLock(repoRoot2, runId) {
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs18.readFileSync(file, "utf8").trim();
+    owner = fs19.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -2499,7 +2597,7 @@ ${task}`;
 }
 
 // src/core/refs.ts
-import fs19 from "node:fs";
+import fs20 from "node:fs";
 import path16 from "node:path";
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
@@ -2551,8 +2649,8 @@ function verifyRefs(refs, dirs) {
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs19.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs19.readFileSync(file, "utf8").split("\n");
+      const size = fs20.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs20.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -2591,7 +2689,7 @@ function resolve(ref, roots) {
   const candidates = path16.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path16.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs19.statSync(c).isFile() && inside(c, roots);
+      return fs20.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -2638,7 +2736,7 @@ function prepareRun(o) {
     parent = readMeta(o.continueFrom);
     if (o.worker || o.tier) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
-    if (parent.mode === "isolate" && (!parent.worktree || !fs20.existsSync(parent.worktree))) {
+    if (parent.mode === "isolate" && (!parent.worktree || !fs21.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
     }
     const ran = parent.ran ?? parent.worker;
@@ -2658,14 +2756,14 @@ function prepareRun(o) {
   }
   const mode = parent?.mode ?? o.mode;
   const dir = path17.resolve(parent?.dir ?? o.dir);
-  if (!fs20.existsSync(dir) || !fs20.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
+  if (!fs21.existsSync(dir) || !fs21.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
   if (mode === "write" && !root && !o.allowNonGit) {
     throw new UserError("--write outside a git repo cannot be tracked or reverted; pass --allow-non-git to accept that", 3);
   }
   const files = o.files.map((f) => path17.resolve(f));
-  for (const f of files) if (!fs20.existsSync(f)) throw new UserError(`file not found: ${f}`);
+  for (const f of files) if (!fs21.existsSync(f)) throw new UserError(`file not found: ${f}`);
   const meta = {
     id: newRunId(),
     version: VERSION2,
@@ -2700,13 +2798,13 @@ function prepareRun(o) {
     try {
       acquireWriteLock(root, meta.id);
     } catch (e) {
-      fs20.rmSync(runDir(meta.id), { recursive: true, force: true });
+      fs21.rmSync(runDir(meta.id), { recursive: true, force: true });
       throw e;
     }
   }
-  fs20.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
+  fs21.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
 `);
-  if (work.brief) fs20.writeFileSync(runFile(meta.id, "brief.md"), work.brief);
+  if (work.brief) fs21.writeFileSync(runFile(meta.id, "brief.md"), work.brief);
   return meta;
 }
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -2779,7 +2877,7 @@ async function execute(meta) {
       (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
-        if (fs20.existsSync(from)) fs20.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
+        if (fs21.existsSync(from)) fs21.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
       }
       writeMeta(meta);
     }
@@ -2824,7 +2922,7 @@ function attempt(meta, backend, target) {
     timeoutSec: meta.timeoutSec
   });
 }
-var read = (f) => fs20.existsSync(f) ? fs20.readFileSync(f, "utf8") : "";
+var read = (f) => fs21.existsSync(f) ? fs21.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   if (run.usage.steps > 0) return void 0;
@@ -2843,12 +2941,12 @@ function finalize(meta, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
-  fs20.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
+  fs21.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
 `);
   if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run.finalText);
   if (meta.reviewOf) {
     meta.verdict = parseVerdict(run.finalText);
-    if (meta.packageFile) fs20.rmSync(meta.packageFile, { force: true });
+    if (meta.packageFile) fs21.rmSync(meta.packageFile, { force: true });
   }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, "stderr.log")), res.code);
@@ -2890,7 +2988,7 @@ function captureChanges(meta) {
   const d = diffTrees(target, meta.baseTree, meta.afterTree);
   meta.changes = d.changes;
   meta.stats = d.stats;
-  fs20.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
+  fs21.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
 function runVerify(meta) {
   const r = spawnSync5(meta.verify, {
@@ -2903,7 +3001,7 @@ function runVerify(meta) {
     env: { ...process.env, PWD: meta.cwd, PITROOM_ACTIVE: "1" }
   });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-  fs20.writeFileSync(runFile(meta.id, "verify.log"), output);
+  fs21.writeFileSync(runFile(meta.id, "verify.log"), output);
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
 function applyRun(meta) {
@@ -2937,7 +3035,7 @@ function discardRun(meta) {
   return `discarded the isolated copy of ${meta.id}; the patch stays in ${runFile(meta.id, "changes.patch")}`;
 }
 function cleanupWorktree(meta) {
-  if (meta.worktree && fs20.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
+  if (meta.worktree && fs21.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
 }
 
 // src/cli/commands.ts
@@ -2986,10 +3084,10 @@ async function cmdReview(p) {
       writeMeta(meta);
     }
   } catch (e) {
-    fs21.rmSync(packageFile, { force: true });
+    fs22.rmSync(packageFile, { force: true });
     throw e;
   }
-  fs21.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  fs22.writeFileSync(runFile(meta.id, "package.md"), job.package);
   return launch(p, meta);
 }
 function cmdPlan(p) {
@@ -3009,7 +3107,7 @@ function cmdPlan(p) {
 }
 function cmdCrew(p) {
   const file = flag(p, "task-file");
-  const tasks = (file ? fs21.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  const tasks = (file ? fs22.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
@@ -3090,7 +3188,7 @@ function cmdShow(p) {
   const meta = freshMeta(resolveRun(p.positional[0]));
   const dump = (name) => {
     const f = runFile(meta.id, name);
-    process.stdout.write(fs21.existsSync(f) ? fs21.readFileSync(f, "utf8") : `(no ${name})
+    process.stdout.write(fs22.existsSync(f) ? fs22.readFileSync(f, "utf8") : `(no ${name})
 `);
   };
   if (has(p, "patch")) dump("changes.patch");
@@ -3152,6 +3250,31 @@ function sinceMs(s) {
   if (!m) throw new UserError("--since takes 7d, 30d, \u2026 or all");
   return Date.now() - Number(m[1]) * 864e5;
 }
+var readStdin = () => process.stdin.isTTY ? "" : fs22.readFileSync(0, "utf8");
+function cmdStatusline(p) {
+  const input = readStdin();
+  const lines = [];
+  const then = flag(p, "then");
+  if (then) {
+    const r = spawnSync6("/bin/sh", ["-c", then], { input, encoding: "utf8", timeout: 5e3 });
+    if (r.stdout?.trimEnd()) lines.push(r.stdout.trimEnd());
+  }
+  try {
+    const own = statusLine();
+    if (own) lines.push(own);
+  } catch {
+  }
+  if (lines.length) console.log(lines.join("\n"));
+  return 0;
+}
+function cmdHookCard() {
+  try {
+    const cards = hookCards(readStdin());
+    if (cards) console.log(JSON.stringify({ systemMessage: cards }));
+  } catch {
+  }
+  return 0;
+}
 function cmdSavings(p) {
   const since = flag(p, "since") ?? "all";
   const t = totals(readLedger(sinceMs(since)));
@@ -3168,7 +3291,7 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs21.writeFileSync(out, card(t, period));
+    fs22.writeFileSync(out, card(t, period));
     console.log(`card written to ${path18.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
@@ -3189,7 +3312,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs21.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs22.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -3212,7 +3335,7 @@ function cmdClean(p) {
   for (const id of old) {
     const m = readMeta(id);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
-    fs21.rmSync(runDir(id), { recursive: true, force: true });
+    fs22.rmSync(runDir(id), { recursive: true, force: true });
   }
   console.log(`removed ${old.length} run(s); the savings ledger is kept`);
   return 0;
@@ -3221,8 +3344,8 @@ var cmdRevert = (p) => (console.log(revertRun(freshMeta(resolveRun(p.positional[
 var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positional[0])))), 0);
 
 // src/core/doctor.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
-import fs22 from "node:fs";
+import { spawnSync as spawnSync7 } from "node:child_process";
+import fs23 from "node:fs";
 import os9 from "node:os";
 import path19 from "node:path";
 var MARK = { ok: "\u2714", warn: "!", fail: "\u2718" };
@@ -3238,7 +3361,7 @@ function doctor4(probe) {
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs22.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs23.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
   if (process.platform !== "win32") {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
@@ -3299,7 +3422,7 @@ function liveProbe(target) {
     title: "pitroom doctor probe"
   });
   const t0 = Date.now();
-  const r = spawnSync6(inv.command, inv.args, {
+  const r = spawnSync7(inv.command, inv.args, {
     encoding: "utf8",
     timeout: 3e5,
     stdio: ["ignore", "pipe", "pipe"],
@@ -3335,8 +3458,8 @@ function skillChecks() {
     );
   }
   const launcher = launcherPath();
-  if (fs22.existsSync(launcher)) {
-    const r = spawnSync6(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
+  if (fs23.existsSync(launcher)) {
+    const r = spawnSync7(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
     );
@@ -3348,7 +3471,7 @@ function skillChecks() {
 function pluginInstalled() {
   try {
     const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {};
+    const plugins = JSON.parse(fs23.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
@@ -3367,14 +3490,14 @@ function superpowersActive() {
   }
   for (const base of [path19.join(os9.homedir(), ".agents", "skills"), path19.join(os9.homedir(), ".claude", "skills")]) {
     const dir = path19.join(base, "using-superpowers");
-    if (fs22.existsSync(path19.join(dir, "SKILL.md"))) found.push(dir);
+    if (fs23.existsSync(path19.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
 }
 function claudePlugins() {
   try {
     const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
-    return Object.keys(JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {});
+    return Object.keys(JSON.parse(fs23.readFileSync(f, "utf8")).plugins ?? {});
   } catch {
     return [];
   }
@@ -3382,7 +3505,7 @@ function claudePlugins() {
 function claudePluginEnabled(key) {
   try {
     const f = path19.join(os9.homedir(), ".claude", "settings.json");
-    return JSON.parse(fs22.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
+    return JSON.parse(fs23.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
   } catch {
     return true;
   }
@@ -3391,7 +3514,7 @@ function codexPlugins() {
   const plugins = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs22.readFileSync(path19.join(process.env.CODEX_HOME ?? path19.join(os9.homedir(), ".codex"), "config.toml"), "utf8");
+    text = fs23.readFileSync(path19.join(process.env.CODEX_HOME ?? path19.join(os9.homedir(), ".codex"), "config.toml"), "utf8");
   } catch {
     return plugins;
   }
@@ -3413,7 +3536,7 @@ function openCodePlugins() {
   const plugins = [];
   for (const name of ["opencode.json", "opencode.jsonc"]) {
     try {
-      const text = fs22.readFileSync(path19.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const text = fs23.readFileSync(path19.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
       const list2 = JSON.parse(text).plugin;
       if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
     } catch {
@@ -3421,7 +3544,7 @@ function openCodePlugins() {
   }
   for (const folder of ["plugin", "plugins"]) {
     try {
-      for (const f of fs22.readdirSync(path19.join(dir, folder))) plugins.push(path19.join(dir, folder, f));
+      for (const f of fs23.readdirSync(path19.join(dir, folder))) plugins.push(path19.join(dir, folder, f));
     } catch {
     }
   }
@@ -3454,6 +3577,8 @@ Usage
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
   pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+  pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
+  pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom install [--copy] [--force]    link the skills into ~/.agents/skills + ~/.claude/skills,
@@ -3509,6 +3634,8 @@ var COMMANDS = {
   discard: cmdDiscard,
   stop: cmdStop,
   savings: cmdSavings,
+  statusline: cmdStatusline,
+  "hook-card": cmdHookCard,
   doctor: (p) => doctor4(has(p, "probe")),
   config: cmdConfig,
   install: cmdInstall,

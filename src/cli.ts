@@ -31,6 +31,8 @@ Usage
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
   pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+  pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
+  pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom install [--copy] [--force]    link the skills into ~/.agents/skills + ~/.claude/skills,
@@ -89,6 +91,8 @@ const COMMANDS: Record<string, Command> = {
   discard: cmd.cmdDiscard,
   stop: cmd.cmdStop,
   savings: cmd.cmdSavings,
+  statusline: cmd.cmdStatusline,
+  'hook-card': cmd.cmdHookCard,
   doctor: (p) => doctor(has(p, 'probe')),
   config: cmd.cmdConfig,
   install: cmd.cmdInstall,
