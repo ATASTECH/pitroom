@@ -188,12 +188,13 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 | `PITROOM_HOME` | `~/.local/state/pitroom` | Where run records and the ledger live |
 | `PITROOM_<WORKER>_BIN` | on PATH | Path to a worker CLI, e.g. `PITROOM_OPENCODE_BIN` |
 
-Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from:
+Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins:
 
 ```json
 {
   "worker": "opencode",
-  "fallback": ["opencode:opencode/space-bunny-free", "opencode:nvidia/z-ai/glm-5.3"],
+  "fallback": ["opencode:opencode/space-bunny-free", "codex"],
+  "models": { "codex": "gpt-6.1-sol", "claude": "claude-sonnet-5-5" },
   "timeout": "20m",
   "primary": "opus",
   "link": ["node_modules"],

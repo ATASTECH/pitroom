@@ -69,7 +69,9 @@ export function classify(message: string): FailureKind {
 function failure(run: ParsedRun, stderr: string, exitCode: number | null): Failure | undefined {
   if (exitCode === 0 && !run.error) return undefined;
   const detail = stderr.split('\n').find((l) => /^Error[: ]|ERROR/.test(l) && !/rmcp|models cache/.test(l));
-  const message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  let message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  // Codex reports a model its own version does not know yet as unsupported for the account.
+  if (/not supported when using Codex/i.test(message)) message += ' (an outdated Codex CLI says this too: npm i -g @openai/codex@latest)';
   return { kind: classify(message), message };
 }
 

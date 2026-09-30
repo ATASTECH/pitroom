@@ -443,7 +443,8 @@ function classify2(message) {
 function failure2(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.split("\n").find((l) => /^Error[: ]|ERROR/.test(l) && !/rmcp|models cache/.test(l));
-  const message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  let message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  if (/not supported when using Codex/i.test(message)) message += " (an outdated Codex CLI says this too: npm i -g @openai/codex@latest)";
   return { kind: classify2(message), message };
 }
 function resolveModel(sessionId) {
@@ -973,7 +974,8 @@ var SCHEMA = {
   price: "string",
   link: "string[]",
   web: "boolean",
-  maxParallel: "number"
+  maxParallel: "number",
+  models: "record"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path5.resolve(process.env.PITROOM_CONFIG);
@@ -1011,6 +1013,9 @@ function loadConfig() {
 }
 function matches(v, type) {
   if (type === "string[]") return Array.isArray(v) && v.every((s) => typeof s === "string");
+  if (type === "record") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === "string");
+  }
   return typeof v === type;
 }
 var positiveInt = (v) => {
@@ -1037,7 +1042,8 @@ function effective(flags = {}) {
     price: setting(void 0, e.PITROOM_PRICE, c.price, void 0),
     link: setting(void 0, void 0, c.link, []),
     web: setting(void 0, void 0, c.web, false),
-    maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4)
+    maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
+    models: setting(void 0, void 0, c.models, {})
   };
 }
 
@@ -1790,6 +1796,30 @@ function applyPatch(root, patchFile, reverse) {
   return { ok: r.code === 0, message: r.stderr.trim() };
 }
 
+// src/core/chain.ts
+function resolveChain(flags = {}) {
+  const eff = effective({ worker: flags.worker, model: flags.model });
+  const models = eff.models.value;
+  const withDefault = (t) => t.model || !models[t.backend] ? t : { ...t, model: models[t.backend] };
+  let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
+  if (eff.model.value) worker = { ...worker, model: eff.model.value };
+  worker = withDefault(worker);
+  const fallback = [];
+  const warnings = [];
+  if (!flags.noFallback) {
+    for (const spec of eff.fallback.value) {
+      const t = withDefault(parseTarget(spec, worker.backend));
+      try {
+        getBackend(t.backend);
+        fallback.push(t);
+      } catch (e) {
+        warnings.push(`fallback ${spec} skipped: ${e.message}`);
+      }
+    }
+  }
+  return { worker, fallback, warnings };
+}
+
 // src/core/process.ts
 import { spawn } from "node:child_process";
 import fs13 from "node:fs";
@@ -2188,23 +2218,6 @@ var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
 var VERSION2 = true ? "0.5.0" : "0.0.0-dev";
-function resolveWorkers(o, warnings) {
-  const eff = effective({ worker: o.worker, model: o.model });
-  let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
-  if (eff.model.value) worker = { ...worker, model: eff.model.value };
-  const fallback = [];
-  if (o.noFallback) return { worker, fallback };
-  for (const spec of eff.fallback.value) {
-    const t = parseTarget(spec, worker.backend);
-    try {
-      getBackend(t.backend);
-      fallback.push(t);
-    } catch (e) {
-      warnings.push(`fallback ${spec} skipped: ${e.message}`);
-    }
-  }
-  return { worker, fallback };
-}
 function prepareRun(o) {
   if (process.env.PITROOM_ACTIVE === "1") {
     throw new UserError("refusing to delegate from inside a Pitroom worker (no recursive delegation)", 3);
@@ -2225,7 +2238,9 @@ function prepareRun(o) {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    ({ worker, fallback } = resolveWorkers(o, warnings));
+    const chain = resolveChain({ worker: o.worker, model: o.model, noFallback: o.noFallback });
+    ({ worker, fallback } = chain);
+    warnings.push(...chain.warnings);
   }
   const backend = getBackend(worker.backend);
   if (parent && backend.capabilities.resume === "none") {
@@ -2707,7 +2722,7 @@ function cmdConfig(p) {
   }
   console.log(`config file: ${configPath()}${fs17.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
-    const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
+    const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
   }
   for (const w of warnings) console.log(`! ${w}`);
@@ -2760,12 +2775,11 @@ function doctor4(probe) {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
     add(guarded ? "ok" : "warn", guarded ? "git guard shim ready" : "git guard unavailable (git not on PATH)");
   }
-  const eff = effective();
   const chain = [];
   try {
-    const worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
-    chain.push(eff.model.value ? { ...worker, model: eff.model.value } : worker);
-    for (const spec of eff.fallback.value) chain.push(parseTarget(spec, worker.backend));
+    const resolved = resolveChain();
+    chain.push(resolved.worker, ...resolved.fallback);
+    for (const w of resolved.warnings) add("warn", w);
   } catch (e) {
     add("fail", e.message);
   }

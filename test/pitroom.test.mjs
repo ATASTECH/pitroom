@@ -349,3 +349,23 @@ test('fallback crosses backends: Claude Code (session expired) → OpenCode', ()
   assert.match(r.stdout, /worker opencode/);
   assert.match(r.stdout, /SUMMARY: login is in auth.ts/);
 });
+
+test('config "models" gives each worker a default model; explicit models win', () => {
+  const s = sandbox();
+  s.config({ models: { opencode: 'mock/configured' }, fallback: ['opencode'] });
+  const modelOf = () => {
+    const c = s.calls().filter((x) => x.argv[0] === 'run').at(-1);
+    return c.argv.includes('--model') ? c.argv[c.argv.indexOf('--model') + 1] : 'default';
+  };
+  assert.equal(s.run(['run', 'x']).status, 0);
+  assert.equal(modelOf(), 'mock/configured', 'preferred worker without a model');
+  assert.equal(s.run(['run', '-W', 'opencode:mock/explicit', 'y']).status, 0);
+  assert.equal(modelOf(), 'mock/explicit', 'target model wins');
+  assert.equal(s.run(['run', '-m', 'mock/flag', 'z']).status, 0);
+  assert.equal(modelOf(), 'mock/flag', '-m wins');
+  // the model-less fallback "opencode" also gets the configured model
+  const r = s.run(['run', '-W', 'opencode:mock/dead', 'w'], { MOCK_FAIL_MODELS: 'mock/dead' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.equal(modelOf(), 'mock/configured');
+  assert.match(s.run(['config']).stdout, /models\s+opencode=mock\/configured\s+\(config\)/);
+});

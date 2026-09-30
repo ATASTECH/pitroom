@@ -6,6 +6,7 @@
 - **Codex CLI** (`-W codex`, `codex:<model>`, `codex:<model>#<effort>`): `codex exec --json` with Codex's OS sandbox (`read-only` for read, `workspace-write` for write/isolate), approvals off, `~/.codex/config.toml` ignored (its MCP servers would run outside the sandbox), resume by session id, model read from the session's rollout file. Verified on real runs: read (sandbox refused a write), isolate + follow-up + apply.
 - **Claude Code** (`-W claude`, `claude:haiku`…): `claude -p --output-format stream-json` with `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk` and an explicit tool allowlist (`Read,Grep,Glob` for read; `+Edit,Write,Bash` with git/destructive commands disallowed for write), `.env`/key files denied, resume by session id, cost reported. `doctor` checks the login and warns about Opus-class defaults. Verified on real runs (`claude:haiku`): the read worker was granted exactly `Glob, Grep, Read` with no user MCP servers or plugins; isolate + follow-up in the same session + apply.
 - Gemini CLI is recognised as "soon".
+- Config `models`: a default model per worker (`{"codex": "gpt-6.1-sol", "claude": "claude-sonnet-5-5"}`) for targets that name none, including fallbacks; a model in the target or `-m` wins. `pitroom config` and `doctor` show it.
 - Fallback chains cross backends (e.g. Claude Code logged out → OpenCode); a group can mix workers.
 
 ### Safety

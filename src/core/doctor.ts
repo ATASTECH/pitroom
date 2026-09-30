@@ -4,15 +4,16 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { DEFAULT_BACKEND, getBackend } from '../backends/index.js';
+import { getBackend } from '../backends/index.js';
 import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
-import { configPath, effective, loadConfig } from './config.js';
+import { resolveChain } from './chain.js';
+import { configPath, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { VERSION } from './run.js';
 import { home } from './store.js';
-import { describeTarget, parseTarget } from './target.js';
+import { describeTarget } from './target.js';
 
 const MARK: Record<DoctorCheck['level'], string> = { ok: '✔', warn: '!', fail: '✘' };
 
@@ -38,12 +39,11 @@ export function doctor(probe: boolean): number {
   }
 
   // The worker chain, grouped per backend so each backend checks its own models once.
-  const eff = effective();
   const chain: Target[] = [];
   try {
-    const worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
-    chain.push(eff.model.value ? { ...worker, model: eff.model.value } : worker);
-    for (const spec of eff.fallback.value) chain.push(parseTarget(spec, worker.backend));
+    const resolved = resolveChain();
+    chain.push(resolved.worker, ...resolved.fallback);
+    for (const w of resolved.warnings) add('warn', w);
   } catch (e) {
     add('fail', (e as Error).message);
   }

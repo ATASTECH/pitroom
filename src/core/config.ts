@@ -17,9 +17,11 @@ export interface PitroomConfig {
   web?: boolean;
   /** Workers talking to models at once; more runs wait in a queue (default 4). */
   maxParallel?: number;
+  /** Default model per worker, used when a target names none: {"codex": "gpt-5.6-sol"}. */
+  models?: Record<string, string>;
 }
 
-const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number'> = {
+const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record'> = {
   worker: 'string',
   fallback: 'string[]',
   timeout: 'string',
@@ -28,6 +30,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   link: 'string[]',
   web: 'boolean',
   maxParallel: 'number',
+  models: 'record',
 };
 
 export function configPath(): string {
@@ -72,6 +75,9 @@ export function loadConfig(): { config: PitroomConfig; warnings: string[] } {
 
 function matches(v: unknown, type: string): boolean {
   if (type === 'string[]') return Array.isArray(v) && v.every((s) => typeof s === 'string');
+  if (type === 'record') {
+    return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === 'string');
+  }
   return typeof v === type;
 }
 
@@ -111,5 +117,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     link: setting<string[]>(undefined, undefined, c.link, []),
     web: setting<boolean>(undefined, undefined, c.web, false),
     maxParallel: setting<number>(undefined, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
+    models: setting<Record<string, string>>(undefined, undefined, c.models, {}),
   };
 }

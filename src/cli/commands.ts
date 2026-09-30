@@ -231,6 +231,8 @@ export function cmdConfig(p: Parsed): number {
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value)
       ? s.value.join(', ') || '—'
+      : s.value && typeof s.value === 'object'
+        ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(', ') || '—'
       : s.value === undefined
         ? key === 'model'
           ? "the worker's default"

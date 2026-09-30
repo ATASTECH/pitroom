@@ -5,9 +5,10 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_BACKEND, getBackend } from '../backends/index.js';
+import { getBackend } from '../backends/index.js';
 import type { Backend, Failure, Mode, Target } from '../backends/types.js';
 import { applyPatch, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
+import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
@@ -17,7 +18,7 @@ import { estimateTokens, record, savedUsd } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { formatReport } from './report.js';
 import { type RunMeta, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
-import { describeTarget, parseTarget, sameTarget } from './target.js';
+import { describeTarget, sameTarget } from './target.js';
 
 declare const __VERSION__: string;
 export const VERSION = typeof __VERSION__ === 'string' ? __VERSION__ : '0.0.0-dev';
@@ -37,25 +38,6 @@ export interface RunOptions {
   web: boolean;
   noFallback: boolean;
   group?: string;
-}
-
-/** Resolves the preferred worker and the fallback chain from flags, env and config. */
-function resolveWorkers(o: RunOptions, warnings: string[]): { worker: Target; fallback: Target[] } {
-  const eff = effective({ worker: o.worker, model: o.model });
-  let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
-  if (eff.model.value) worker = { ...worker, model: eff.model.value };
-  const fallback: Target[] = [];
-  if (o.noFallback) return { worker, fallback };
-  for (const spec of eff.fallback.value) {
-    const t = parseTarget(spec, worker.backend);
-    try {
-      getBackend(t.backend);
-      fallback.push(t);
-    } catch (e) {
-      warnings.push(`fallback ${spec} skipped: ${(e as Error).message}`);
-    }
-  }
-  return { worker, fallback };
 }
 
 /** Validates options and writes the initial run record. Does not start the worker. */
@@ -81,7 +63,9 @@ export function prepareRun(o: RunOptions): RunMeta {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    ({ worker, fallback } = resolveWorkers(o, warnings));
+    const chain = resolveChain({ worker: o.worker, model: o.model, noFallback: o.noFallback });
+    ({ worker, fallback } = chain);
+    warnings.push(...chain.warnings);
   }
   const backend = getBackend(worker.backend);
   if (parent && backend.capabilities.resume === 'none') {

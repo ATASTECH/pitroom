@@ -441,7 +441,8 @@ function classify2(message) {
 function failure2(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.split("\n").find((l) => /^Error[: ]|ERROR/.test(l) && !/rmcp|models cache/.test(l));
-  const message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  let message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
+  if (/not supported when using Codex/i.test(message)) message += " (an outdated Codex CLI says this too: npm i -g @openai/codex@latest)";
   return { kind: classify2(message), message };
 }
 function resolveModel(sessionId) {

@@ -29,7 +29,7 @@ Before you open many files, grep around a codebase, or make repetitive edits, as
 
 ## Running it
 
-Call `pitroom` (on PATH after `pitroom install`). If it is not found, use the command given in your session context, or `node <pitroom>/dist/pitroom.mjs`. `pitroom doctor` diagnoses setup problems.
+Call `pitroom` (on PATH after `pitroom install`). If it is not found, use the command given in your session context, or `node <pitroom>/dist/pitroom.mjs`. `pitroom doctor` diagnoses setup problems. The default worker and models come from the user's config; pick another worker only when the user asks (`-W codex`, `-W claude`).
 
 Workers on free models can take minutes. Don't block on them:
 - Start long work with `--bg` (or `pitroom crew`), which returns immediately, and keep working.
