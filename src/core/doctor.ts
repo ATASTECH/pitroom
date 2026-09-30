@@ -119,11 +119,11 @@ function skillChecks(): DoctorCheck[] {
   const checks: DoctorCheck[] = [];
   const all = skillNames();
   const viaPlugin = pluginInstalled();
-  const superpowers = superpowersInstalled();
-  if (superpowers) {
+  const superpowers = superpowersActive();
+  if (superpowers.length) {
     checks.push({
       level: 'warn',
-      message: `superpowers is installed too (${superpowers}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`,
+      message: `superpowers is installed too (${superpowers.join(', ')}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`,
     });
   }
   for (const { base, names } of installedSkills()) {
@@ -163,18 +163,95 @@ function pluginInstalled(): boolean {
   }
 }
 
-/** Where superpowers is installed next to Pitroom, if it is. */
-function superpowersInstalled(): string | undefined {
-  try {
-    const f = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
-    const key = Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).plugins ?? {}).find((k) => k.startsWith('superpowers@'));
-    if (key) return `Claude Code plugin ${key}`;
-  } catch {
-    // no Claude Code plugins
+/**
+ * Where superpowers is active next to Pitroom. A plugin that is installed but disabled
+ * (Claude Code, Codex) or not listed (OpenCode) loads nothing, so it does not compete
+ * with Pitroom's bootstrap and is not reported.
+ */
+function superpowersActive(): string[] {
+  const found: string[] = [];
+  for (const key of claudePlugins()) {
+    if (key.startsWith('superpowers@') && claudePluginEnabled(key)) found.push(`Claude Code plugin ${key}`);
+  }
+  for (const [key, enabled] of codexPlugins()) {
+    if (key.startsWith('superpowers@') && enabled) found.push(`Codex plugin ${key}`);
+  }
+  for (const p of openCodePlugins()) {
+    if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
   for (const base of [path.join(os.homedir(), '.agents', 'skills'), path.join(os.homedir(), '.claude', 'skills')]) {
     const dir = path.join(base, 'using-superpowers');
-    if (fs.existsSync(path.join(dir, 'SKILL.md'))) return dir;
+    if (fs.existsSync(path.join(dir, 'SKILL.md'))) found.push(dir);
   }
-  return undefined;
+  return found;
+}
+
+function claudePlugins(): string[] {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'plugins', 'installed_plugins.json');
+    return Object.keys(JSON.parse(fs.readFileSync(f, 'utf8')).plugins ?? {});
+  } catch {
+    return []; // no Claude Code plugins
+  }
+}
+
+/** False only when the user's Claude Code settings turn the plugin off. */
+function claudePluginEnabled(key: string): boolean {
+  try {
+    const f = path.join(os.homedir(), '.claude', 'settings.json');
+    return JSON.parse(fs.readFileSync(f, 'utf8')).enabledPlugins?.[key] !== false;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Codex plugins from `[plugins."name@marketplace"]` tables in config.toml, with their
+ * `enabled` flag (a table without one counts as enabled). A line scan is enough for these
+ * flat tables and keeps Pitroom free of a TOML dependency.
+ */
+function codexPlugins(): Map<string, boolean> {
+  const plugins = new Map<string, boolean>();
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(process.env.CODEX_HOME ?? path.join(os.homedir(), '.codex'), 'config.toml'), 'utf8');
+  } catch {
+    return plugins; // no Codex config
+  }
+  let current: string | undefined;
+  for (const line of text.split(/\r?\n/)) {
+    const table = /^\s*\[(.*)\]\s*(#.*)?$/.exec(line);
+    if (table) {
+      current = /^plugins\."([^"]+)"$/.exec(table[1]!.trim())?.[1];
+      if (current) plugins.set(current, true);
+      continue;
+    }
+    const flag = current && /^\s*enabled\s*=\s*(true|false)\b/.exec(line);
+    if (flag) plugins.set(current!, flag[1] === 'true');
+  }
+  return plugins;
+}
+
+/** OpenCode plugins: the `plugin` list of opencode.json(c) and the files in its plugin folders. */
+function openCodePlugins(): string[] {
+  const dir = path.join(process.env.XDG_CONFIG_HOME ?? path.join(os.homedir(), '.config'), 'opencode');
+  const plugins: string[] = [];
+  for (const name of ['opencode.json', 'opencode.jsonc']) {
+    try {
+      // opencode.jsonc may carry comments; strip them before parsing.
+      const text = fs.readFileSync(path.join(dir, name), 'utf8').replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, '');
+      const list: unknown = JSON.parse(text).plugin;
+      if (Array.isArray(list)) plugins.push(...list.filter((p): p is string => typeof p === 'string'));
+    } catch {
+      // no such config, or one we cannot read
+    }
+  }
+  for (const folder of ['plugin', 'plugins']) {
+    try {
+      for (const f of fs.readdirSync(path.join(dir, folder))) plugins.push(path.join(dir, folder, f));
+    } catch {
+      // no plugin folder
+    }
+  }
+  return plugins;
 }

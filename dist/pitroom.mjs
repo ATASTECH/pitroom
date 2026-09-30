@@ -3316,11 +3316,11 @@ function skillChecks() {
   const checks = [];
   const all = skillNames();
   const viaPlugin = pluginInstalled();
-  const superpowers = superpowersInstalled();
-  if (superpowers) {
+  const superpowers = superpowersActive();
+  if (superpowers.length) {
     checks.push({
       level: "warn",
-      message: `superpowers is installed too (${superpowers}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`
+      message: `superpowers is installed too (${superpowers.join(", ")}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`
     });
   }
   for (const { base, names } of installedSkills()) {
@@ -3354,18 +3354,78 @@ function pluginInstalled() {
     return false;
   }
 }
-function superpowersInstalled() {
-  try {
-    const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const key = Object.keys(JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {}).find((k) => k.startsWith("superpowers@"));
-    if (key) return `Claude Code plugin ${key}`;
-  } catch {
+function superpowersActive() {
+  const found = [];
+  for (const key of claudePlugins()) {
+    if (key.startsWith("superpowers@") && claudePluginEnabled(key)) found.push(`Claude Code plugin ${key}`);
+  }
+  for (const [key, enabled] of codexPlugins()) {
+    if (key.startsWith("superpowers@") && enabled) found.push(`Codex plugin ${key}`);
+  }
+  for (const p of openCodePlugins()) {
+    if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
   for (const base of [path19.join(os9.homedir(), ".agents", "skills"), path19.join(os9.homedir(), ".claude", "skills")]) {
     const dir = path19.join(base, "using-superpowers");
-    if (fs22.existsSync(path19.join(dir, "SKILL.md"))) return dir;
+    if (fs22.existsSync(path19.join(dir, "SKILL.md"))) found.push(dir);
   }
-  return void 0;
+  return found;
+}
+function claudePlugins() {
+  try {
+    const f = path19.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
+    return Object.keys(JSON.parse(fs22.readFileSync(f, "utf8")).plugins ?? {});
+  } catch {
+    return [];
+  }
+}
+function claudePluginEnabled(key) {
+  try {
+    const f = path19.join(os9.homedir(), ".claude", "settings.json");
+    return JSON.parse(fs22.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
+  } catch {
+    return true;
+  }
+}
+function codexPlugins() {
+  const plugins = /* @__PURE__ */ new Map();
+  let text;
+  try {
+    text = fs22.readFileSync(path19.join(process.env.CODEX_HOME ?? path19.join(os9.homedir(), ".codex"), "config.toml"), "utf8");
+  } catch {
+    return plugins;
+  }
+  let current;
+  for (const line of text.split(/\r?\n/)) {
+    const table2 = /^\s*\[(.*)\]\s*(#.*)?$/.exec(line);
+    if (table2) {
+      current = /^plugins\."([^"]+)"$/.exec(table2[1].trim())?.[1];
+      if (current) plugins.set(current, true);
+      continue;
+    }
+    const flag2 = current && /^\s*enabled\s*=\s*(true|false)\b/.exec(line);
+    if (flag2) plugins.set(current, flag2[1] === "true");
+  }
+  return plugins;
+}
+function openCodePlugins() {
+  const dir = path19.join(process.env.XDG_CONFIG_HOME ?? path19.join(os9.homedir(), ".config"), "opencode");
+  const plugins = [];
+  for (const name of ["opencode.json", "opencode.jsonc"]) {
+    try {
+      const text = fs22.readFileSync(path19.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const list2 = JSON.parse(text).plugin;
+      if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
+    } catch {
+    }
+  }
+  for (const folder of ["plugin", "plugins"]) {
+    try {
+      for (const f of fs22.readdirSync(path19.join(dir, folder))) plugins.push(path19.join(dir, folder, f));
+    } catch {
+    }
+  }
+  return plugins;
 }
 
 // src/cli.ts

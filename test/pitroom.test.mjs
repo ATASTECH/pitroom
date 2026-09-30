@@ -405,15 +405,62 @@ test('doctor reports a broken tier and keeps checking the others', () => {
   assert.match(d.stdout, /tiers: cheap=opencode:mock\/cheap/);
 });
 
-test('doctor warns when superpowers is installed too', () => {
+test('doctor warns when superpowers is active too, and only while it is enabled', () => {
   const s = sandbox();
-  const home = path.join(s.base, 'user-home');
-  fs.mkdirSync(path.join(home, '.agents', 'skills', 'using-superpowers'), { recursive: true });
-  fs.writeFileSync(path.join(home, '.agents', 'skills', 'using-superpowers', 'SKILL.md'), '---\nname: using-superpowers\n---\n');
-  assert.match(s.run(['doctor'], { HOME: home }).stdout, /superpowers is installed too \(.*using-superpowers\).*keep one/);
-  const empty = path.join(s.base, 'empty-home');
-  fs.mkdirSync(empty);
-  const clean = s.run(['doctor'], { HOME: empty }).stdout;
-  assert.match(clean, /worker chain:/, 'doctor ran its checks');
-  assert.doesNotMatch(clean, /superpowers/);
+  // Each case gets its own home; CODEX_HOME and XDG_CONFIG_HOME must not leak in from the real one.
+  const at = (name) => {
+    const dir = path.join(s.base, name);
+    fs.mkdirSync(dir, { recursive: true });
+    return { dir, env: { HOME: dir, CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config') } };
+  };
+  const write = (file, text) => {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, text);
+  };
+  const doctor = (h) => {
+    const out = s.run(['doctor'], h.env).stdout;
+    assert.match(out, /worker chain:/, 'doctor ran its checks');
+    return out;
+  };
+
+  const skills = at('skills-home');
+  write(path.join(skills.dir, '.agents', 'skills', 'using-superpowers', 'SKILL.md'), '---\nname: using-superpowers\n---\n');
+  assert.match(doctor(skills), /superpowers is installed too \(.*using-superpowers\).*keep one/);
+  assert.doesNotMatch(doctor(at('empty-home')), /superpowers/);
+
+  // Claude Code: installed plugins stay listed when disabled; only enabled ones count.
+  const claude = at('claude-home');
+  write(
+    path.join(claude.dir, '.claude', 'plugins', 'installed_plugins.json'),
+    JSON.stringify({ plugins: { 'superpowers@claude-plugins-official': [{ scope: 'user' }] } }),
+  );
+  const claudeEnabled = (on) =>
+    write(path.join(claude.dir, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'superpowers@claude-plugins-official': on } }));
+  claudeEnabled(true);
+  assert.match(doctor(claude), /superpowers is installed too \(Claude Code plugin superpowers@claude-plugins-official\)/);
+  claudeEnabled(false);
+  assert.doesNotMatch(doctor(claude), /superpowers/, 'a disabled Claude Code plugin is not a second bootstrap');
+
+  // Codex: config.toml turns plugins on and off.
+  const codex = at('codex-home');
+  const codexEnabled = (on) =>
+    write(
+      path.join(codex.dir, '.codex', 'config.toml'),
+      `model = "x"\n\n[plugins."superpowers@openai-curated"]\nenabled = ${on}\n\n[plugins."other@openai-curated"]\nenabled = true\n`,
+    );
+  codexEnabled(true);
+  assert.match(doctor(codex), /superpowers is installed too \(Codex plugin superpowers@openai-curated\)/);
+  codexEnabled(false);
+  assert.doesNotMatch(doctor(codex), /superpowers/, 'a disabled Codex plugin is not a second bootstrap');
+
+  // OpenCode: a plugin is on while opencode.json lists it or its file sits in the plugin folder.
+  const opencode = at('opencode-home');
+  const config = path.join(opencode.dir, '.config', 'opencode', 'opencode.json');
+  write(config, JSON.stringify({ plugin: ['superpowers@git+https://github.com/obra/superpowers.git'] }));
+  assert.match(doctor(opencode), /superpowers is installed too \(OpenCode plugin superpowers@git/);
+  write(config, JSON.stringify({ plugin: ['some-other-plugin'] }));
+  assert.doesNotMatch(doctor(opencode), /superpowers/, 'an OpenCode plugin that is not listed is off');
+  const file = path.join(opencode.dir, '.config', 'opencode', 'plugins', 'superpowers.js');
+  write(file, 'export default {};\n');
+  assert.match(doctor(opencode), /superpowers is installed too \(OpenCode plugin .*superpowers\.js\)/);
 });
