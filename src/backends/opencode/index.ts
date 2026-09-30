@@ -8,7 +8,7 @@
 // apply to the worker at all.
 import { spawnSync } from 'node:child_process';
 import { findBinary, resolveCommand } from '../exec.js';
-import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
+import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 import { AGENT, agentFor, configContent } from './profiles.js';
 
@@ -116,6 +116,15 @@ function resolveModel(sessionId: string): string | undefined {
   }
 }
 
+function catalog(): ModelCatalog {
+  // The first call can come back empty while OpenCode's background service starts: ask once more.
+  const ids = listModels();
+  return {
+    models: (ids.length ? ids : listModels()).map((id) => ({ id })),
+    source: '`opencode models` (reasoning variants are provider-specific: provider/model#variant)',
+  };
+}
+
 function listModels(): string[] {
   return oc(['models']).out.split('\n').map((s) => s.trim()).filter(Boolean);
 }
@@ -171,5 +180,6 @@ export const opencode: Backend = {
   defaultModel,
   resolveModel,
   listModels,
+  catalog,
   doctor,
 };

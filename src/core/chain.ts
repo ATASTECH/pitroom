@@ -15,7 +15,7 @@ export interface Chain {
   warnings: string[];
 }
 
-export function resolveChain(flags: { worker?: string; model?: string; tier?: string; noFallback?: boolean } = {}): Chain {
+export function resolveChain(flags: { worker?: string; model?: string; tier?: string; effort?: string; noFallback?: boolean } = {}): Chain {
   const warnings: string[] = [];
   let spec = flags.worker;
   if (!spec && flags.tier) {
@@ -26,11 +26,35 @@ export function resolveChain(flags: { worker?: string; model?: string; tier?: st
   }
   const eff = effective({ worker: spec, model: flags.model });
   const models = eff.models.value;
-  const withDefault = (t: Target): Target => (t.model || !models[t.backend] ? t : { ...t, model: models[t.backend] });
+  // A target that names no model gets the worker's configured one. "#low" names only a reasoning
+  // effort (Codex), so it keeps its effort and still gets the configured model: before, it counted
+  // as a model and the vendor's own default (maybe a pricier one) ran instead.
+  const withDefault = (t: Target): Target => {
+    const pinned = models[t.backend];
+    if (!pinned) return t;
+    if (!t.model) return { ...t, model: pinned };
+    return t.model.startsWith('#') ? { ...t, model: `${pinned}${t.model}` } : t;
+  };
 
   let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
   if (eff.model.value) worker = { ...worker, model: eff.model.value };
   worker = withDefault(worker);
+  if (flags.effort) {
+    // "model#level": Codex and Claude Code read the level themselves, OpenCode takes it as a variant.
+    const base = (worker.model ?? '').split('#')[0]!;
+    if (worker.backend === 'opencode' && !base) {
+      warnings.push('--effort needs a model for OpenCode (provider/model#variant): set one in the config or pass -m; ignored');
+    } else {
+      worker = { ...worker, model: `${base}#${flags.effort}` };
+    }
+  }
+
+  // Codex and Claude Code run their own default model when none is pinned; it can change and cost more.
+  if ((worker.backend === 'codex' || worker.backend === 'claude') && !(worker.model ?? '').replace(/#.*$/, '')) {
+    warnings.push(
+      `${worker.backend} has no pinned model, so it runs its own default (which can change and cost more): set "models": {"${worker.backend}": "<model>"} in the pitroom config, or pass -W ${worker.backend}:<model>`,
+    );
+  }
 
   const fallback: Target[] = [];
   if (!flags.noFallback) {

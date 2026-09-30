@@ -11,6 +11,7 @@ import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress } from '../core/report.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
+import { formatModels, modelTable } from '../core/models.js';
 import { hookCards, statusLine } from '../core/ui.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
@@ -299,6 +300,14 @@ export function cmdHookCard(): number {
   } catch {
     // never block or clutter the host's tool call
   }
+  return 0;
+}
+
+/** What each worker offers, next to your costs and your own usage. */
+export function cmdModels(p: Parsed): number {
+  const backend = p.positional[0];
+  const table = modelTable({ backend, all: has(p, 'all') });
+  console.log(has(p, 'json') ? JSON.stringify(table, null, 2) : formatModels(table));
   return 0;
 }
 

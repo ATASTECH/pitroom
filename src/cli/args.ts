@@ -13,7 +13,7 @@ export interface Parsed {
 
 const VALUE_FLAGS: Record<string, string> = {
   '-d': 'dir', '--dir': 'dir', '-f': 'file', '--file': 'file', '-m': 'model', '--model': 'model',
-  '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '-g': 'group', '--group': 'group',
+  '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '--effort': 'effort', '-g': 'group', '--group': 'group',
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then',
@@ -24,7 +24,7 @@ const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
   '--bg': 'bg', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe',
-  '--copy': 'copy', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running',
+  '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
 };
 
@@ -106,6 +106,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
     worker: flag(p, 'worker'),
     model: flag(p, 'model'),
     tier: flag(p, 'tier'),
+    effort: effortFlag(p),
     timeoutSec: parseDuration(effective({ timeout: flag(p, 'timeout') }).timeout.value),
     verify: flag(p, 'verify'),
     continueFrom: cont ? resolveRun(cont) : undefined,
@@ -124,4 +125,11 @@ export function planStep(p: Parsed): { file: string; step: number } | undefined 
   if (!file || !step) throw new UserError('--plan and --step go together: pitroom run -i --plan PLAN.md --step N');
   if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
   return { file, step: Number(step) };
+}
+
+/** --effort LEVEL: a word such as low, medium, high, xhigh, max; the worker CLI decides which it accepts. */
+function effortFlag(p: Parsed): string | undefined {
+  const v = flag(p, 'effort');
+  if (v !== undefined && !/^[a-z][a-z0-9-]*$/i.test(v)) throw new UserError(`--effort takes a level such as low, medium, high or xhigh, not "${v}"`);
+  return v?.toLowerCase();
 }

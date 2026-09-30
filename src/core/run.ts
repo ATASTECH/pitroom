@@ -36,6 +36,8 @@ export interface RunOptions {
   model?: string;
   /** A worker from the config's "tiers"; -W wins. */
   tier?: string;
+  /** Reasoning-effort level for the worker (low, medium, high, xhigh, …), applied as `model#level`. */
+  effort?: string;
   /** `--plan PLAN --step N`: implement one task of an implementation plan. */
   plan?: { file: string; step: number };
   timeoutSec: number;
@@ -83,7 +85,7 @@ export function prepareRun(o: RunOptions): RunMeta {
 
   if (o.continueFrom) {
     parent = readMeta(o.continueFrom);
-    if (o.worker || o.tier) throw new UserError('a follow-up runs on the same worker as its parent; drop --worker/--tier');
+    if (o.worker || o.tier || o.effort) throw new UserError('a follow-up runs on the same worker as its parent; drop --worker/--tier/--effort');
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
     if (parent.mode === 'isolate' && (!parent.worktree || !fs.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
@@ -93,7 +95,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }

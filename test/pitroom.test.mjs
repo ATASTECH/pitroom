@@ -530,3 +530,72 @@ test('savings --models lists workers and models with their runs and tokens', () 
   // the fake worker reports one model; the row counts every run that used it
   assert.match(out, /^opencode {2}mock\/good-model\s+3 /m);
 });
+
+test('an effort-only Codex target gets the configured model; an unpinned Codex or Claude worker is flagged', () => {
+  const s = sandbox();
+  // "#low" names only a reasoning effort: the configured model must still apply (it used to be skipped).
+  s.config({ worker: 'codex:#low', models: { codex: 'gpt-test' } });
+  const pinned = s.run(['doctor']).stdout;
+  assert.match(pinned, /worker chain: codex:gpt-test#low/);
+  assert.doesNotMatch(pinned, /no pinned model/);
+
+  s.config({ worker: 'codex:#low' });
+  assert.match(s.run(['doctor']).stdout, /codex has no pinned model, so it runs its own default/);
+  s.config({ worker: 'claude' });
+  assert.match(s.run(['doctor']).stdout, /claude has no pinned model/);
+  s.config({ worker: 'codex:gpt-test#low' });
+  assert.doesNotMatch(s.run(['doctor']).stdout, /no pinned model/, 'a model in the target pins it');
+  s.config({ worker: 'opencode' });
+  assert.doesNotMatch(s.run(['doctor']).stdout, /no pinned model/, 'OpenCode uses the model you set in opencode.json');
+});
+
+test('models: each worker\'s list with effort levels, your costs and your own usage', () => {
+  const s = sandbox();
+  const home = path.join(s.base, 'codex-home');
+  fs.mkdirSync(home, { recursive: true });
+  fs.writeFileSync(
+    path.join(home, 'models_cache.json'),
+    JSON.stringify({
+      fetched_at: '2026-09-30T21:00:00Z',
+      models: [
+        { slug: 'gpt-test', visibility: 'list', default_reasoning_level: 'medium', supported_reasoning_levels: [{ effort: 'low' }, { effort: 'medium' }, 'high'] },
+        { slug: 'gpt-hidden', visibility: 'hide', supported_reasoning_levels: [] },
+      ],
+    }),
+  );
+  s.config({ tiers: { standard: 'codex:gpt-test' }, costs: { 'codex:gpt-test': 3 } });
+  const out = s.run(['models', 'codex'], { CODEX_HOME: home });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /^codex\s+gpt-test\s+low\/medium\*\/high\s+3\s+-\s+-\s+-\s+tier standard/m);
+  assert.doesNotMatch(out.stdout, /gpt-hidden/, 'hidden models are not offered');
+  assert.match(out.stdout, /source codex: Codex model cache, fetched 2026-09-30/);
+  const json = JSON.parse(s.run(['models', 'codex', '--json'], { CODEX_HOME: home }).stdout);
+  assert.deepEqual(json.rows.map((r) => [r.model, r.cost, r.efforts]), [['gpt-test', 3, ['low', 'medium', 'high']]]);
+  // Claude Code: aliases with the --effort levels
+  assert.match(s.run(['models', 'claude']).stdout, /^claude\s+sonnet\s+low\/medium\/high\/xhigh\/max/m);
+});
+
+test('--effort becomes model#level: OpenCode variant, Codex effort, Claude Code --effort; a follow-up refuses it', () => {
+  const s = sandbox();
+  const r = s.run(['run', '-W', 'opencode:mock/m', '--effort', 'high', 'x']);
+  assert.equal(r.status, 0, r.stderr);
+  const last = s.calls().filter((c) => c.argv[0] === 'run').at(-1);
+  assert.equal(last.argv[last.argv.indexOf('--model') + 1], 'mock/m#high');
+  s.config({ worker: 'codex', models: { codex: 'gpt-test' } });
+  assert.match(s.run(['doctor']).stdout, /worker chain: codex:gpt-test/, 'the configured model applies');
+  const bad = s.run(['run', '--effort', 'high!', 'x']);
+  assert.equal(bad.status, 2);
+  assert.match(bad.stderr, /--effort takes a level/);
+  const id = /run (\S+)/.exec(r.stdout)[1];
+  const cont = s.run(['run', '--continue', id, '--effort', 'low', 'more']);
+  assert.equal(cont.status, 2);
+  assert.match(cont.stderr, /drop --worker\/--tier\/--effort/);
+});
+
+test('config "costs" must be numbers; doctor shows the cost of the models in use and a cheaper one you priced', () => {
+  const s = sandbox();
+  s.config({ costs: { 'codex:a': 'cheap' } });
+  assert.match(s.run(['config']).stdout + s.run(['doctor']).stdout, /"costs" must be numbers; ignored/);
+  s.config({ worker: 'codex:gpt-b', costs: { 'codex:gpt-a': 1, 'codex:gpt-b': 2 } });
+  assert.match(s.run(['doctor']).stdout, /cost: codex:gpt-b = 2; you priced codex:gpt-a cheaper \(1\)/);
+});

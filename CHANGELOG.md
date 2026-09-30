@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.5
+
+### Models, costs and effort
+- `pitroom models [worker] [--all] [--json]` lists what Codex (from its model cache), Claude Code (aliases) and OpenCode (`opencode models`) offer, the effort levels each model accepts, your costs and what your own runs used (runs, average tokens, reported dollars).
+- Config `costs` (`{"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}`): your relative cost per model. Pitroom cannot know vendor prices, so it does not guess them; `pitroom doctor` prints the cost of the models in use and notes a cheaper one you priced.
+- `--effort LEVEL` for every worker (`model#level`: Codex effort, Claude Code `--effort`, OpenCode variant). The skills tell the agent to pick the cheapest model and the lowest effort that fits.
+- Fix: a target that names only an effort (`codex:#low`) skipped the configured `models` default and ran the vendor's own default model. It now gets the configured model with that effort. A Codex or Claude Code worker with no pinned model gets a warning.
+
+### Seeing Pitroom at work
+- The card hook also reaches the agent (`additionalContext`), so the user hears which worker and model ran even where the host shows no hook messages. Runs that finished without a card are announced on the next `pitroom` command.
+- `pitroom savings --models` lists workers and models with runs, tokens, cost and savings.
+
 ## 0.6.4
 
 ### Deleting is the user's call

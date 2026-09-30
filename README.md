@@ -337,7 +337,8 @@ pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeou
 pitroom show [run]                                --patch --events --full --json
 pitroom apply [run | -g NAME] · pitroom discard|revert [run] · pitroom stop [run | -g NAME]
 pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
-pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
+pitroom models [worker] [--all] [--json]      models, effort levels, your costs, your usage
 pitroom statusline [--then CMD] · pitroom hook-card
 pitroom doctor [--probe] · pitroom config · pitroom install [--copy] [--force] · pitroom uninstall
 ```
@@ -393,7 +394,8 @@ A worker is named by a target: `backend[:model]`.
 ```bash
 pitroom run "…"                                          # preferred worker (config "worker", default opencode)
 pitroom run -W opencode:opencode/space-bunny-free "…"    # a specific backend and model
-pitroom run -W 'codex:#low' "…"                          # Codex's default model, low reasoning effort
+pitroom run -W 'codex:#low' "…"                          # the model from config "models" (not Codex's default), low reasoning effort
+pitroom run --effort high "…"                           # any worker: model#level (Codex, Claude Code, OpenCode)
 pitroom run -W claude:haiku "…"                          # Claude Code on a cheap model
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
@@ -404,6 +406,19 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
 | Gemini CLI | soon | approval mode + policy engine | | |
+
+### Models, costs and effort
+
+`pitroom models` lists what each worker offers (Codex from its own model cache, Claude Code's aliases, OpenCode's `opencode models`), the reasoning-effort levels each model accepts, what you say it costs and what your own runs used:
+
+```text
+worker  model        effort (* default)                 cost  runs  avg tokens  $/run   in use
+codex   gpt-6.1-sol  low*/medium/high/xhigh/max/ultra   2     20    174k        -       tier standard
+codex   gpt-6-sol    low/medium*/high/xhigh/max/ultra   1     1     24k         -       -
+claude  haiku        low/medium/high/xhigh/max          ?     -     -           -       -
+```
+
+Pitroom cannot know vendor prices and does not fetch them, so a cost is what you enter: `"costs": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}` in the config, in any unit (they are only compared). `pitroom doctor` then prints the cost of the models in use and says when you priced a cheaper one of the same worker. A target that names only an effort (`codex:#low`) uses the model from `models`; a Codex or Claude Code worker with no pinned model gets a warning, because it would run the vendor's own default, which can change and cost more. `--effort LEVEL` sets the level for one run; your agent picks model and level from `pitroom models` (cheapest that fits: `low` for lookups, `medium` for ordinary changes, `high` for reviews).
 
 Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a worker that is rate-limited, logged out or missing its model hands the task to the next. Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md).
 
@@ -435,6 +450,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
   "worker": "opencode",
   "fallback": ["opencode:opencode/space-bunny-free", "codex"],
   "models": { "codex": "gpt-6.1-sol", "claude": "claude-sonnet-5-5" },
+  "costs": { "codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2 },
   "tiers": { "cheap": "opencode", "standard": "codex", "capable": "claude" },
   "timeout": "20m",
   "primary": "opus",

@@ -85,6 +85,19 @@ export interface Capabilities {
   attachFiles: boolean;
 }
 
+export interface ModelInfo {
+  id: string;
+  /** Reasoning-effort levels the model accepts (`model#level`), lowest first. */
+  efforts?: string[];
+  defaultEffort?: string;
+}
+
+export interface ModelCatalog {
+  models: ModelInfo[];
+  /** Where the list comes from, for the reader to judge how current it is. */
+  source: string;
+}
+
 export interface Backend {
   readonly id: string;
   readonly name: string;
@@ -103,6 +116,8 @@ export interface Backend {
   resolveModel?(sessionId: string): string | undefined;
   /** Models the CLI can use, for validating configuration. */
   listModels?(): string[];
+  /** What the CLI knows about its models: ids, reasoning-effort levels and where that came from. */
+  catalog?(): ModelCatalog;
   /** Backend-specific setup checks for the given models (undefined = default model). */
   doctor(ctx: { models: (string | undefined)[]; hasFallback: boolean }): DoctorCheck[];
 }

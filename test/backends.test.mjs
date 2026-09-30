@@ -150,6 +150,17 @@ test('codex: OS sandbox per mode (also on resume), user config ignored, effort f
   assert.equal(inv.args.at(-1), 'PROMPT-SENTINEL');
 });
 
+test('claude: "model#level" becomes --model and --effort', () => {
+  const b = getBackend('claude');
+  const inv = b.invocation(request({ model: 'sonnet#high' }));
+  assert.equal(inv.args[inv.args.indexOf('--model') + 1], 'sonnet');
+  assert.equal(inv.args[inv.args.indexOf('--effort') + 1], 'high');
+  const only = b.invocation(request({ model: '#low' }));
+  assert.equal(only.args.includes('--model'), false, 'an effort alone pins no model');
+  assert.equal(only.args[only.args.indexOf('--effort') + 1], 'low');
+  assert.equal(b.invocation(request({})).args.includes('--effort'), false);
+});
+
 test('claude: locked down in every mode; read gets only read tools; secrets denied', () => {
   const b = getBackend('claude');
   const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];

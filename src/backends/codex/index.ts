@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findBinary, resolveCommand } from '../exec.js';
-import type { Backend, DoctorCheck, Failure, FailureKind, Mode, ParsedRun, WorkerRequest } from '../types.js';
+import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, Mode, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
 const binary = () => findBinary('codex', 'PITROOM_CODEX_BIN');
@@ -108,20 +108,45 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
       : { level: 'fail', message: 'Codex is not logged in: run `codex login`' },
   );
   for (const m of models) {
+    const pinned = m?.replace(/#.*$/, '');
     checks.push({
-      level: 'ok',
-      message: m
-        ? `Codex model: ${m} (checked on first use; unsupported models fail over)`
-        : "Codex model: Codex's built-in default (your ~/.codex/config.toml is ignored for workers; pick one with -W codex:<model>)",
+      level: pinned ? 'ok' : 'warn',
+      message: pinned
+        ? `Codex model: ${pinned} (checked on first use; unsupported models fail over)`
+        : 'Codex model: none pinned, so Codex runs its own default (it can change and cost more); set "models": {"codex": "<model>"} or use -W codex:<model>',
     });
   }
   if (!hasFallback) checks.push({ level: 'warn', message: 'no fallback workers configured for Codex runs' });
   return checks;
 }
 
+/**
+ * Codex keeps the models it offers, with their reasoning levels, in ~/.codex/models_cache.json.
+ * It is a hint, not the authority: a model can work before it shows up there.
+ */
+function catalog(): ModelCatalog {
+  const file = path.join(codexHome(), 'models_cache.json');
+  try {
+    const raw = JSON.parse(fs.readFileSync(file, 'utf8')) as { fetched_at?: string; models?: Record<string, unknown>[] };
+    const models = (raw.models ?? [])
+      .filter((m) => m.visibility !== 'hide' && typeof m.slug === 'string')
+      .map((m) => ({
+        id: m.slug as string,
+        efforts: ((m.supported_reasoning_levels as { effort?: string }[] | string[] | undefined) ?? []).map((l) =>
+          typeof l === 'string' ? l : (l.effort ?? ''),
+        ).filter(Boolean),
+        defaultEffort: typeof m.default_reasoning_level === 'string' ? m.default_reasoning_level : undefined,
+      }));
+    return { models, source: `Codex model cache${raw.fetched_at ? `, fetched ${raw.fetched_at.slice(0, 10)}` : ''}` };
+  } catch {
+    return { models: [], source: 'no Codex model cache found (run codex once)' };
+  }
+}
+
 export const codex: Backend = {
   id: 'codex',
   name: 'Codex',
+  catalog,
   capabilities: { readOnly: 'os-sandbox', resume: 'by-id', reportsCost: false, attachFiles: false },
   binary,
   invocation,

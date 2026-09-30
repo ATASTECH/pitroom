@@ -55,6 +55,8 @@ Once you or the user pick a skill, follow it: its checklists and gates are how i
 
 Call `pitroom` (on PATH after `pitroom install`; otherwise the command in your session context). `pitroom doctor` diagnoses setup problems. Workers and models come from the user's config (`worker`, `fallback`, `models`, `tiers`); pick others only when the user or a plan says so (`--tier capable`, `-W codex`).
 
+Model and effort: tiers already name the workers. Before you pick anything else, run `pitroom models`: it lists what each worker offers (Codex, Claude Code, OpenCode), the effort levels each model accepts, what the user says it costs (`costs` in the config) and what it used so far. Take the cheapest model that fits the task, never a dearer one by habit. Set `--effort` from the task: `low` for lookups and mechanical edits, `medium` for ordinary changes, `high` for reviews and non-obvious bugs, `xhigh` or above only when the user asks or a lower level failed. More effort costs more tokens and time.
+
 Workers can take minutes. Start long work with `--bg` and keep working; follow it with `pitroom watch --json` through your host's background or monitor facility, or call `pitroom wait --timeout 540` again while it exits 75. Never poll with `sleep`.
 
 ## When you do use it

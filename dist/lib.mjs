@@ -223,7 +223,9 @@ function invocation(req) {
     "stream-json",
     "--verbose"
   );
-  if (req.model) args.push("--model", req.model);
+  const [model, effort] = (req.model ?? "").split("#");
+  if (model) args.push("--model", model);
+  if (effort) args.push("--effort", effort);
   if (req.sessionId) args.push("--resume", req.sessionId);
   args.push("--", req.prompt);
   const { command, prefix } = resolveCommand(binary());
@@ -276,11 +278,19 @@ function doctor({ models, hasFallback }) {
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Claude Code runs" });
   return checks;
 }
+var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+function catalog() {
+  const def = defaultModel();
+  const models = ["haiku", "sonnet", "opus"].map((id) => ({ id, efforts: CLAUDE_EFFORTS }));
+  if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });
+  return { models, source: "Claude Code aliases (latest of each size) and --effort levels from `claude --help`" };
+}
 var claude = {
   id: "claude",
   name: "Claude Code",
   capabilities: { readOnly: "tool-allowlist", resume: "by-id", reportsCost: true, attachFiles: false },
   binary,
+  catalog,
   invocation,
   parse: parseEvents,
   failure,
@@ -474,17 +484,35 @@ function doctor2({ models, hasFallback }) {
     login.ok && /logged in/i.test(login.out) ? { level: "ok", message: `Codex: ${login.out.trim().split("\n")[0]}` } : { level: "fail", message: "Codex is not logged in: run `codex login`" }
   );
   for (const m of models) {
+    const pinned = m?.replace(/#.*$/, "");
     checks.push({
-      level: "ok",
-      message: m ? `Codex model: ${m} (checked on first use; unsupported models fail over)` : "Codex model: Codex's built-in default (your ~/.codex/config.toml is ignored for workers; pick one with -W codex:<model>)"
+      level: pinned ? "ok" : "warn",
+      message: pinned ? `Codex model: ${pinned} (checked on first use; unsupported models fail over)` : 'Codex model: none pinned, so Codex runs its own default (it can change and cost more); set "models": {"codex": "<model>"} or use -W codex:<model>'
     });
   }
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Codex runs" });
   return checks;
 }
+function catalog2() {
+  const file = path3.join(codexHome(), "models_cache.json");
+  try {
+    const raw = JSON.parse(fs3.readFileSync(file, "utf8"));
+    const models = (raw.models ?? []).filter((m) => m.visibility !== "hide" && typeof m.slug === "string").map((m) => ({
+      id: m.slug,
+      efforts: (m.supported_reasoning_levels ?? []).map(
+        (l) => typeof l === "string" ? l : l.effort ?? ""
+      ).filter(Boolean),
+      defaultEffort: typeof m.default_reasoning_level === "string" ? m.default_reasoning_level : void 0
+    }));
+    return { models, source: `Codex model cache${raw.fetched_at ? `, fetched ${raw.fetched_at.slice(0, 10)}` : ""}` };
+  } catch {
+    return { models: [], source: "no Codex model cache found (run codex once)" };
+  }
+}
 var codex = {
   id: "codex",
   name: "Codex",
+  catalog: catalog2,
   capabilities: { readOnly: "os-sandbox", resume: "by-id", reportsCost: false, attachFiles: false },
   binary: binary2,
   invocation: invocation2,
@@ -889,6 +917,13 @@ function resolveModel2(sessionId) {
     return void 0;
   }
 }
+function catalog3() {
+  const ids = listModels();
+  return {
+    models: (ids.length ? ids : listModels()).map((id) => ({ id })),
+    source: "`opencode models` (reasoning variants are provider-specific: provider/model#variant)"
+  };
+}
 function listModels() {
   return oc(["models"]).out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
@@ -938,6 +973,7 @@ var opencode = {
   defaultModel: defaultModel2,
   resolveModel: resolveModel2,
   listModels,
+  catalog: catalog3,
   doctor: doctor3
 };
 

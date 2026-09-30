@@ -14,7 +14,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { findBinary, resolveCommand } from '../exec.js';
-import type { Backend, DoctorCheck, Failure, FailureKind, Mode, ParsedRun, WorkerRequest } from '../types.js';
+import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, Mode, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
 const binary = () => findBinary('claude', 'PITROOM_CLAUDE_BIN', ['~/.local/bin/claude', '~/.claude/local/claude']);
@@ -67,7 +67,10 @@ function invocation(req: WorkerRequest) {
     '--output-format', 'stream-json',
     '--verbose',
   );
-  if (req.model) args.push('--model', req.model);
+  // "sonnet#high": the model alias and, after "#", the effort level (Claude Code's --effort).
+  const [model, effort] = (req.model ?? '').split('#');
+  if (model) args.push('--model', model);
+  if (effort) args.push('--effort', effort);
   if (req.sessionId) args.push('--resume', req.sessionId);
   args.push('--', req.prompt);
   const { command, prefix } = resolveCommand(binary());
@@ -132,11 +135,22 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
   return checks;
 }
 
+/** Claude Code names models by alias (the latest of each size) or by full id; --effort takes these levels. */
+const CLAUDE_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
+
+function catalog(): ModelCatalog {
+  const def = defaultModel();
+  const models = ['haiku', 'sonnet', 'opus'].map((id) => ({ id, efforts: CLAUDE_EFFORTS }));
+  if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });
+  return { models, source: 'Claude Code aliases (latest of each size) and --effort levels from `claude --help`' };
+}
+
 export const claude: Backend = {
   id: 'claude',
   name: 'Claude Code',
   capabilities: { readOnly: 'tool-allowlist', resume: 'by-id', reportsCost: true, attachFiles: false },
   binary,
+  catalog,
   invocation,
   parse: parseEvents,
   failure,

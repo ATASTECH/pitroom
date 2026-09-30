@@ -61,7 +61,7 @@ function resolveCommand(bin) {
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var DENIED = /permission|not allowed|denied|blocked|disallowed/i;
 function parseEvents(jsonl) {
-  const usage = {
+  const usage2 = {
     input: 0,
     output: 0,
     reasoning: 0,
@@ -106,7 +106,7 @@ function parseEvents(jsonl) {
           lastText = String(c.text).trim();
           lastActivity = `says: ${oneLine(lastText)}`;
         } else if (c.type === "tool_use") {
-          usage.toolCalls++;
+          usage2.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
           lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ""}`.trim();
@@ -118,21 +118,21 @@ function parseEvents(jsonl) {
         if (c?.type !== "tool_result") continue;
         const text = typeof c.content === "string" ? c.content : JSON.stringify(c.content ?? "");
         if (c.is_error) {
-          if (DENIED.test(text)) usage.denied++;
+          if (DENIED.test(text)) usage2.denied++;
         } else if (pendingEdits.has(c.tool_use_id)) {
           edits.push(pendingEdits.get(c.tool_use_id));
         }
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += num(u.input_tokens);
-      usage.cacheRead += num(u.cache_read_input_tokens);
-      usage.cacheWrite += num(u.cache_creation_input_tokens);
-      usage.reasoning += num(u.output_tokens_details?.thinking_tokens);
-      usage.output += Math.max(0, num(u.output_tokens) - num(u.output_tokens_details?.thinking_tokens));
-      usage.total += num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens) + num(u.output_tokens);
-      usage.cost = (usage.cost ?? 0) + num(e.total_cost_usd);
-      usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
+      usage2.input += num(u.input_tokens);
+      usage2.cacheRead += num(u.cache_read_input_tokens);
+      usage2.cacheWrite += num(u.cache_creation_input_tokens);
+      usage2.reasoning += num(u.output_tokens_details?.thinking_tokens);
+      usage2.output += Math.max(0, num(u.output_tokens) - num(u.output_tokens_details?.thinking_tokens));
+      usage2.total += num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens) + num(u.output_tokens);
+      usage2.cost = (usage2.cost ?? 0) + num(e.total_cost_usd);
+      usage2.denied = Math.max(usage2.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         const tags = [e.terminal_reason, e.api_error_status && `HTTP ${e.api_error_status}`].filter(Boolean);
         error ??= `${String(e.result ?? e.subtype ?? "Claude Code error")}${tags.length ? ` [${tags.join(", ")}]` : ""}`;
@@ -141,8 +141,8 @@ function parseEvents(jsonl) {
       }
     }
   }
-  usage.steps = steps.size;
-  return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, error };
+  usage2.steps = steps.size;
+  return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage: usage2, tools, edits, lastActivity, error };
 }
 function num(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
@@ -231,7 +231,9 @@ function invocation(req) {
     "stream-json",
     "--verbose"
   );
-  if (req.model) args.push("--model", req.model);
+  const [model, effort] = (req.model ?? "").split("#");
+  if (model) args.push("--model", model);
+  if (effort) args.push("--effort", effort);
   if (req.sessionId) args.push("--resume", req.sessionId);
   args.push("--", req.prompt);
   const { command, prefix } = resolveCommand(binary());
@@ -284,11 +286,19 @@ function doctor({ models, hasFallback }) {
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Claude Code runs" });
   return checks;
 }
+var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+function catalog() {
+  const def = defaultModel();
+  const models = ["haiku", "sonnet", "opus"].map((id) => ({ id, efforts: CLAUDE_EFFORTS }));
+  if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });
+  return { models, source: "Claude Code aliases (latest of each size) and --effort levels from `claude --help`" };
+}
 var claude = {
   id: "claude",
   name: "Claude Code",
   capabilities: { readOnly: "tool-allowlist", resume: "by-id", reportsCost: true, attachFiles: false },
   binary,
+  catalog,
   invocation,
   parse: parseEvents,
   failure,
@@ -306,7 +316,7 @@ import path3 from "node:path";
 var WORK = /* @__PURE__ */ new Set(["agent_message", "reasoning", "command_execution", "file_change", "mcp_tool_call", "web_search", "todo_list"]);
 var TOOLS = /* @__PURE__ */ new Set(["command_execution", "file_change", "mcp_tool_call", "web_search"]);
 function parseEvents2(jsonl) {
-  const usage = {
+  const usage2 = {
     input: 0,
     output: 0,
     reasoning: 0,
@@ -338,21 +348,21 @@ function parseEvents2(jsonl) {
       case "item.completed": {
         const it = e.item ?? {};
         if (!WORK.has(it.type)) break;
-        usage.steps++;
+        usage2.steps++;
         if (TOOLS.has(it.type)) {
-          usage.toolCalls++;
+          usage2.toolCalls++;
           tools[it.type] = (tools[it.type] ?? 0) + 1;
         }
         if (it.type === "agent_message" && String(it.text ?? "").trim()) {
           finalText = String(it.text).trim();
           lastActivity = `says: ${oneLine2(finalText)}`;
         } else if (it.type === "command_execution") {
-          if (it.status === "declined" || /operation not permitted|sandbox/i.test(String(it.aggregated_output ?? ""))) usage.denied++;
+          if (it.status === "declined" || /operation not permitted|sandbox/i.test(String(it.aggregated_output ?? ""))) usage2.denied++;
           lastActivity = `shell ${oneLine2(String(it.command ?? ""), 60)}`;
         } else if (it.type === "file_change") {
           const paths = (it.changes ?? []).map((c) => String(c.path));
           if (it.status !== "failed" && it.status !== "declined") edits.push(...paths);
-          else usage.denied++;
+          else usage2.denied++;
           lastActivity = `edit ${oneLine2(paths.join(", "), 60)}`;
         }
         break;
@@ -361,12 +371,12 @@ function parseEvents2(jsonl) {
         const u = e.usage ?? {};
         const cached2 = num2(u.cached_input_tokens);
         const reasoning = num2(u.reasoning_output_tokens);
-        usage.input += Math.max(0, num2(u.input_tokens) - cached2);
-        usage.cacheRead += cached2;
-        usage.cacheWrite += num2(u.cache_write_input_tokens);
-        usage.output += Math.max(0, num2(u.output_tokens) - reasoning);
-        usage.reasoning += reasoning;
-        usage.total += num2(u.input_tokens) + num2(u.output_tokens);
+        usage2.input += Math.max(0, num2(u.input_tokens) - cached2);
+        usage2.cacheRead += cached2;
+        usage2.cacheWrite += num2(u.cache_write_input_tokens);
+        usage2.output += Math.max(0, num2(u.output_tokens) - reasoning);
+        usage2.reasoning += reasoning;
+        usage2.total += num2(u.input_tokens) + num2(u.output_tokens);
         break;
       }
       case "error":
@@ -377,7 +387,7 @@ function parseEvents2(jsonl) {
         break;
     }
   }
-  return { sessionId, finalText, usage, tools, edits, lastActivity, error };
+  return { sessionId, finalText, usage: usage2, tools, edits, lastActivity, error };
 }
 function describe(raw) {
   const s = String(raw ?? "unknown Codex error");
@@ -482,17 +492,35 @@ function doctor2({ models, hasFallback }) {
     login.ok && /logged in/i.test(login.out) ? { level: "ok", message: `Codex: ${login.out.trim().split("\n")[0]}` } : { level: "fail", message: "Codex is not logged in: run `codex login`" }
   );
   for (const m of models) {
+    const pinned = m?.replace(/#.*$/, "");
     checks.push({
-      level: "ok",
-      message: m ? `Codex model: ${m} (checked on first use; unsupported models fail over)` : "Codex model: Codex's built-in default (your ~/.codex/config.toml is ignored for workers; pick one with -W codex:<model>)"
+      level: pinned ? "ok" : "warn",
+      message: pinned ? `Codex model: ${pinned} (checked on first use; unsupported models fail over)` : 'Codex model: none pinned, so Codex runs its own default (it can change and cost more); set "models": {"codex": "<model>"} or use -W codex:<model>'
     });
   }
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Codex runs" });
   return checks;
 }
+function catalog2() {
+  const file = path3.join(codexHome(), "models_cache.json");
+  try {
+    const raw = JSON.parse(fs3.readFileSync(file, "utf8"));
+    const models = (raw.models ?? []).filter((m) => m.visibility !== "hide" && typeof m.slug === "string").map((m) => ({
+      id: m.slug,
+      efforts: (m.supported_reasoning_levels ?? []).map(
+        (l) => typeof l === "string" ? l : l.effort ?? ""
+      ).filter(Boolean),
+      defaultEffort: typeof m.default_reasoning_level === "string" ? m.default_reasoning_level : void 0
+    }));
+    return { models, source: `Codex model cache${raw.fetched_at ? `, fetched ${raw.fetched_at.slice(0, 10)}` : ""}` };
+  } catch {
+    return { models: [], source: "no Codex model cache found (run codex once)" };
+  }
+}
 var codex = {
   id: "codex",
   name: "Codex",
+  catalog: catalog2,
   capabilities: { readOnly: "os-sandbox", resume: "by-id", reportsCost: false, attachFiles: false },
   binary: binary2,
   invocation: invocation2,
@@ -509,7 +537,7 @@ import { spawnSync as spawnSync3 } from "node:child_process";
 var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
 var DENIED2 = /rule which prevents you|permission denied|permission\.rejected/i;
 function parseEvents3(ndjson) {
-  const usage = {
+  const usage2 = {
     input: 0,
     output: 0,
     reasoning: 0,
@@ -550,9 +578,9 @@ function parseEvents3(ndjson) {
       case "tool_use": {
         const name = String(p.tool ?? "tool");
         const st = p.state ?? {};
-        usage.toolCalls++;
+        usage2.toolCalls++;
         tools[name] = (tools[name] ?? 0) + 1;
-        if (st.status === "error" && DENIED2.test(String(st.error ?? ""))) usage.denied++;
+        if (st.status === "error" && DENIED2.test(String(st.error ?? ""))) usage2.denied++;
         if (st.status === "completed" && EDIT_TOOLS2.has(name)) {
           edits.push(String(st.input?.filePath ?? st.input?.path ?? name));
         }
@@ -561,14 +589,14 @@ function parseEvents3(ndjson) {
       }
       case "step_finish": {
         const t = p.tokens ?? {};
-        usage.steps++;
-        usage.input += num3(t.input);
-        usage.output += num3(t.output);
-        usage.reasoning += num3(t.reasoning);
-        usage.cacheRead += num3(t.cache?.read);
-        usage.cacheWrite += num3(t.cache?.write);
-        usage.total += num3(t.total) || num3(t.input) + num3(t.output) + num3(t.reasoning) + num3(t.cache?.read);
-        usage.cost = (usage.cost ?? 0) + num3(p.cost);
+        usage2.steps++;
+        usage2.input += num3(t.input);
+        usage2.output += num3(t.output);
+        usage2.reasoning += num3(t.reasoning);
+        usage2.cacheRead += num3(t.cache?.read);
+        usage2.cacheWrite += num3(t.cache?.write);
+        usage2.total += num3(t.total) || num3(t.input) + num3(t.output) + num3(t.reasoning) + num3(t.cache?.read);
+        usage2.cost = (usage2.cost ?? 0) + num3(p.cost);
         break;
       }
       case "error": {
@@ -579,7 +607,7 @@ function parseEvents3(ndjson) {
   }
   const groups = [...textByMessage.values()];
   const finalText = (groups[groups.length - 1] ?? []).join("\n").trim();
-  return { sessionId, finalText, usage, tools, edits, lastActivity, error };
+  return { sessionId, finalText, usage: usage2, tools, edits, lastActivity, error };
 }
 function describeError(err) {
   if (!err || typeof err !== "object") return "unknown OpenCode error";
@@ -784,15 +812,15 @@ function configContent(existing, allowWeb = false) {
       }
     }
   };
-  let base = {};
+  let base2 = {};
   if (existing?.trim()) {
     try {
-      base = JSON.parse(existing);
+      base2 = JSON.parse(existing);
     } catch {
-      base = {};
+      base2 = {};
     }
   }
-  return JSON.stringify(deepMerge(base, ours));
+  return JSON.stringify(deepMerge(base2, ours));
 }
 function deepMerge(a, b) {
   if (!isObject(a) || !isObject(b)) return b;
@@ -897,6 +925,13 @@ function resolveModel2(sessionId) {
     return void 0;
   }
 }
+function catalog3() {
+  const ids = listModels();
+  return {
+    models: (ids.length ? ids : listModels()).map((id) => ({ id })),
+    source: "`opencode models` (reasoning variants are provider-specific: provider/model#variant)"
+  };
+}
 function listModels() {
   return oc(["models"]).out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
@@ -946,6 +981,7 @@ var opencode = {
   defaultModel: defaultModel2,
   resolveModel: resolveModel2,
   listModels,
+  catalog: catalog3,
   doctor: doctor3
 };
 
@@ -954,6 +990,7 @@ var REGISTRY = new Map([opencode, codex, claude].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
 var PLANNED = ["gemini"];
 var backendIds = () => [...REGISTRY.keys()];
+var allBackends = () => [...REGISTRY.values()];
 var isBackendId = (id) => REGISTRY.has(id) || PLANNED.includes(id);
 function getBackend(id) {
   const backend = REGISTRY.get(id);
@@ -982,12 +1019,13 @@ var SCHEMA = {
   web: "boolean",
   maxParallel: "number",
   models: "record",
-  tiers: "record"
+  tiers: "record",
+  costs: "numbers"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path5.resolve(process.env.PITROOM_CONFIG);
-  const base = process.platform === "win32" ? process.env.APPDATA ?? path5.join(os5.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path5.join(os5.homedir(), ".config");
-  return path5.join(base, "pitroom", "config.json");
+  const base2 = process.platform === "win32" ? process.env.APPDATA ?? path5.join(os5.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path5.join(os5.homedir(), ".config");
+  return path5.join(base2, "pitroom", "config.json");
 }
 var cached;
 function loadConfig() {
@@ -1023,6 +1061,9 @@ function matches(v, type) {
   if (type === "record") {
     return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === "string");
   }
+  if (type === "numbers") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+  }
   return typeof v === type;
 }
 var positiveInt = (v) => {
@@ -1051,7 +1092,8 @@ function effective(flags = {}) {
     web: setting(void 0, void 0, c.web, false),
     maxParallel: setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
     models: setting(void 0, void 0, c.models, {}),
-    tiers: setting(void 0, void 0, c.tiers, {})
+    tiers: setting(void 0, void 0, c.tiers, {}),
+    costs: setting(void 0, void 0, c.costs, {})
   };
 }
 
@@ -1143,6 +1185,7 @@ var VALUE_FLAGS = {
   "-W": "worker",
   "--worker": "worker",
   "--tier": "tier",
+  "--effort": "effort",
   "-g": "group",
   "--group": "group",
   "-t": "timeout",
@@ -1179,6 +1222,7 @@ var BOOL_FLAGS = {
   "--badge": "badge",
   "--probe": "probe",
   "--copy": "copy",
+  "--all": "all",
   "--models": "models",
   "--force": "force",
   "--allow-delete": "allow-delete",
@@ -1259,6 +1303,7 @@ function runOptions(p, task) {
     worker: flag(p, "worker"),
     model: flag(p, "model"),
     tier: flag(p, "tier"),
+    effort: effortFlag(p),
     timeoutSec: parseDuration(effective({ timeout: flag(p, "timeout") }).timeout.value),
     verify: flag(p, "verify"),
     continueFrom: cont ? resolveRun(cont) : void 0,
@@ -1275,6 +1320,11 @@ function planStep(p) {
   if (!file || !step) throw new UserError("--plan and --step go together: pitroom run -i --plan PLAN.md --step N");
   if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
   return { file, step: Number(step) };
+}
+function effortFlag(p) {
+  const v = flag(p, "effort");
+  if (v !== void 0 && !/^[a-z][a-z0-9-]*$/i.test(v)) throw new UserError(`--effort takes a level such as low, medium, high or xhigh, not "${v}"`);
+  return v?.toLowerCase();
 }
 
 // src/cli/commands.ts
@@ -1375,10 +1425,10 @@ function primaryPrice() {
   return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet;
 }
 var estimateTokens = (text) => Math.ceil(text.length / 4);
-function savedUsd(usage, returnedTokens, price = primaryPrice()) {
-  const wouldCost = (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
+function savedUsd(usage2, returnedTokens, price = primaryPrice()) {
+  const wouldCost = (usage2.input * price.input + usage2.cacheRead * price.cachedInput + (usage2.output + usage2.reasoning) * price.output) / 1e6;
   const readingTheReport = returnedTokens * price.input / 1e6;
-  return Math.max(0, wouldCost - (usage.cost ?? 0) - readingTheReport);
+  return Math.max(0, wouldCost - (usage2.cost ?? 0) - readingTheReport);
 }
 function record(meta) {
   if (!meta.usage?.steps) return;
@@ -1633,9 +1683,9 @@ async function watch(select, opts) {
         const prev = seen.get(m.id);
         const l = m.state === "running" ? live(m) : { steps: m.usage?.steps ?? 0, toolCalls: m.usage?.toolCalls ?? 0 };
         const attempts = m.attempts?.length ?? 0;
-        const base = { run: m.id, mode: m.mode, task: oneLine4(m.task, 60) };
-        if (!prev) emit({ event: m.state === "queued" ? "queued" : "started", ...base });
-        else if (prev.state === "queued" && m.state === "running") emit({ event: "started", ...base });
+        const base2 = { run: m.id, mode: m.mode, task: oneLine4(m.task, 60) };
+        if (!prev) emit({ event: m.state === "queued" ? "queued" : "started", ...base2 });
+        else if (prev.state === "queued" && m.state === "running") emit({ event: "started", ...base2 });
         if (attempts > (prev?.attempts ?? 0)) {
           const a = m.attempts[attempts - 1];
           emit({ event: "fallback", run: m.id, failed: a.target, reason: oneLine4(a.error, 120) });
@@ -1758,15 +1808,15 @@ function install(opts) {
   const skills = skillNames(root);
   if (!skills.length) throw new Error(`no skills found under ${path9.join(root, "skills")}`);
   const out = [];
-  for (const base of skillTargets()) {
+  for (const base2 of skillTargets()) {
     for (const legacy of LEGACY) {
-      const l = path9.join(base, legacy);
+      const l = path9.join(base2, legacy);
       if (!skills.includes(legacy) && linksInto(l, root)) {
         fs11.unlinkSync(l);
         out.push(`\u2714 removed old link ${l}`);
       }
     }
-    for (const name of skills) out.push(place(path9.join(root, "skills", name), path9.join(base, name), opts));
+    for (const name of skills) out.push(place(path9.join(root, "skills", name), path9.join(base2, name), opts));
   }
   const bundle = path9.join(root, "dist", "pitroom.mjs");
   if (fs11.existsSync(bundle)) {
@@ -1779,10 +1829,10 @@ function install(opts) {
 function uninstall() {
   const root = packageRoot();
   const out = [];
-  for (const base of skillTargets()) {
-    if (!fs11.existsSync(base)) continue;
-    for (const name of fs11.readdirSync(base)) {
-      const l = path9.join(base, name);
+  for (const base2 of skillTargets()) {
+    if (!fs11.existsSync(base2)) continue;
+    for (const name of fs11.readdirSync(base2)) {
+      const l = path9.join(base2, name);
       if (linksInto(l, root)) {
         fs11.unlinkSync(l);
         out.push(`\u2714 removed ${l}`);
@@ -1797,7 +1847,7 @@ function uninstall() {
 }
 function installedSkills() {
   const names = skillNames();
-  return skillTargets().map((base) => ({ base, names: names.filter((n) => fs11.existsSync(path9.join(base, n, "SKILL.md"))) }));
+  return skillTargets().map((base2) => ({ base: base2, names: names.filter((n) => fs11.existsSync(path9.join(base2, n, "SKILL.md"))) }));
 }
 
 // src/core/plan-status.ts
@@ -2170,6 +2220,102 @@ function fill(template, values) {
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
 }
 
+// src/core/models.ts
+var base = (model) => (model ?? "").split("#")[0];
+function usage() {
+  const eff = effective();
+  const out = /* @__PURE__ */ new Map();
+  const add = (spec, label) => {
+    let t;
+    try {
+      t = parseTarget(spec, "opencode");
+    } catch {
+      return;
+    }
+    const model = base(t.model) || base(eff.models.value[t.backend]);
+    if (!model) return;
+    const key = `${t.backend}:${model}`;
+    out.set(key, [...out.get(key) ?? [], label]);
+  };
+  add(eff.worker.value, "default worker");
+  for (const [name, spec] of Object.entries(eff.tiers.value)) add(spec, `tier ${name}`);
+  eff.fallback.value.forEach((spec) => add(spec, "fallback"));
+  for (const [backend, model] of Object.entries(eff.models.value)) add(`${backend}:${model}`, "models");
+  return out;
+}
+function modelTable(opts = {}) {
+  const costs = effective().costs.value;
+  const used = usage();
+  const seen = /* @__PURE__ */ new Map();
+  for (const e of readLedger()) {
+    if (!e.backend || !e.model) continue;
+    const key = `${e.backend}:${base(e.model)}`;
+    const a = seen.get(key) ?? { runs: 0, tokens: 0, usd: 0 };
+    seen.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, usd: a.usd + e.workerCost });
+  }
+  const rows = [];
+  const sources = [];
+  let hiddenOpenCode = 0;
+  const known = /* @__PURE__ */ new Set();
+  for (const b of allBackends()) {
+    if (opts.backend && b.id !== opts.backend) continue;
+    const catalog4 = b.catalog?.() ?? { models: [], source: "no model list for this worker" };
+    sources.push(`${b.id}: ${catalog4.source}`);
+    for (const m of catalog4.models) {
+      const key = `${b.id}:${m.id}`;
+      known.add(key);
+      const s = seen.get(key);
+      const row = {
+        worker: b.id,
+        model: m.id,
+        efforts: m.efforts?.length ? m.efforts : void 0,
+        defaultEffort: m.defaultEffort,
+        cost: costs[key],
+        runs: s?.runs ?? 0,
+        avgTokens: s ? Math.round(s.tokens / s.runs) : void 0,
+        reportedUsdPerRun: s && s.usd > 0 ? s.usd / s.runs : void 0,
+        inUse: used.get(key) ?? []
+      };
+      const relevant = row.inUse.length || row.runs || row.cost !== void 0;
+      if (b.id === "opencode" && !opts.all && !relevant) hiddenOpenCode++;
+      else rows.push(row);
+    }
+  }
+  for (const [key, labels] of used) {
+    const [worker, ...rest] = key.split(":");
+    if (known.has(key) || opts.backend && worker !== opts.backend) continue;
+    const s = seen.get(key);
+    rows.push({ worker, model: rest.join(":"), cost: costs[key], runs: s?.runs ?? 0, avgTokens: s ? Math.round(s.tokens / s.runs) : void 0, inUse: labels });
+  }
+  rows.sort(
+    (a, b) => a.worker.localeCompare(b.worker) || Number(b.inUse.length > 0) - Number(a.inUse.length > 0) || (a.cost ?? Infinity) - (b.cost ?? Infinity) || b.runs - a.runs || a.model.localeCompare(b.model)
+  );
+  return { rows, sources, hiddenOpenCode };
+}
+var compact2 = (n) => n >= 1e6 ? `${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n);
+function formatModels(t) {
+  const efforts = (r) => r.efforts ? r.efforts.map((e) => e === r.defaultEffort ? `${e}*` : e).join("/") : "-";
+  const cells = t.rows.map((r) => [
+    r.worker,
+    r.model,
+    efforts(r),
+    r.cost !== void 0 ? String(r.cost) : "?",
+    r.runs ? String(r.runs) : "-",
+    r.avgTokens !== void 0 ? compact2(r.avgTokens) : "-",
+    r.reportedUsdPerRun !== void 0 ? `$${r.reportedUsdPerRun.toFixed(3)}` : "-",
+    r.inUse.join(", ") || "-"
+  ]);
+  const head = ["worker", "model", "effort (* default)", "cost", "runs", "avg tokens", "$/run", "in use"];
+  const widths = head.map((h, i) => Math.max(h.length, ...cells.map((c) => c[i].length)));
+  const line = (c) => c.map((x, i) => x.padEnd(widths[i])).join("  ").trimEnd();
+  const out = [line(head), ...cells.map(line), ""];
+  out.push('cost: your relative cost from the config ("costs": {"codex:gpt-6-sol": 1, \u2026}); ? = not set. Pitroom cannot know vendor prices.');
+  out.push("runs, avg tokens, $/run: from your own runs (only Claude Code and OpenCode report dollars). Choose one with -W worker:model --effort LEVEL.");
+  if (t.hiddenOpenCode) out.push(`${t.hiddenOpenCode} more OpenCode models not shown (use --all).`);
+  out.push(...t.sources.map((s) => `source ${s}`));
+  return out.join("\n");
+}
+
 // src/core/ui.ts
 import fs16 from "node:fs";
 var WEEK_MS = 7 * 24 * 3600 * 1e3;
@@ -2309,10 +2455,28 @@ function resolveChain(flags = {}) {
   }
   const eff = effective({ worker: spec, model: flags.model });
   const models = eff.models.value;
-  const withDefault = (t) => t.model || !models[t.backend] ? t : { ...t, model: models[t.backend] };
+  const withDefault = (t) => {
+    const pinned = models[t.backend];
+    if (!pinned) return t;
+    if (!t.model) return { ...t, model: pinned };
+    return t.model.startsWith("#") ? { ...t, model: `${pinned}${t.model}` } : t;
+  };
   let worker = parseTarget(eff.worker.value, DEFAULT_BACKEND);
   if (eff.model.value) worker = { ...worker, model: eff.model.value };
   worker = withDefault(worker);
+  if (flags.effort) {
+    const base2 = (worker.model ?? "").split("#")[0];
+    if (worker.backend === "opencode" && !base2) {
+      warnings.push("--effort needs a model for OpenCode (provider/model#variant): set one in the config or pass -m; ignored");
+    } else {
+      worker = { ...worker, model: `${base2}#${flags.effort}` };
+    }
+  }
+  if ((worker.backend === "codex" || worker.backend === "claude") && !(worker.model ?? "").replace(/#.*$/, "")) {
+    warnings.push(
+      `${worker.backend} has no pinned model, so it runs its own default (which can change and cost more): set "models": {"${worker.backend}": "<model>"} in the pitroom config, or pass -W ${worker.backend}:<model>`
+    );
+  }
   const fallback = [];
   if (!flags.noFallback) {
     for (const s of eff.fallback.value) {
@@ -2746,7 +2910,7 @@ function inside(file, roots) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
-var VERSION2 = true ? "0.6.4" : "0.0.0-dev";
+var VERSION2 = true ? "0.6.5" : "0.0.0-dev";
 function planWork(o) {
   if (!o.plan) return { task: o.task.trim(), tier: o.tier };
   if (o.continueFrom) throw new UserError("a follow-up continues its parent's task; drop --plan/--step");
@@ -2776,7 +2940,7 @@ function prepareRun(o) {
   let fallback;
   if (o.continueFrom) {
     parent = readMeta(o.continueFrom);
-    if (o.worker || o.tier) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier");
+    if (o.worker || o.tier || o.effort) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier/--effort");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
     if (parent.mode === "isolate" && (!parent.worktree || !fs21.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
@@ -2785,7 +2949,7 @@ function prepareRun(o) {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }
@@ -3338,6 +3502,12 @@ ${cards}` }
   }
   return 0;
 }
+function cmdModels(p) {
+  const backend = p.positional[0];
+  const table2 = modelTable({ backend, all: has(p, "all") });
+  console.log(has(p, "json") ? JSON.stringify(table2, null, 2) : formatModels(table2));
+  return 0;
+}
 function cmdSavings(p) {
   const since = flag(p, "since") ?? "all";
   const t = totals(readLedger(sinceMs(since)));
@@ -3464,6 +3634,16 @@ function doctor4(probe) {
     }
   }
   if (tierNames.length) add("ok", `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i])}`).join(", ")}`);
+  const costs = effective().costs.value;
+  if (Object.keys(costs).length) {
+    for (const t of [...chain, ...tierTargets]) {
+      const key = `${t.backend}:${(t.model ?? "").split("#")[0]}`;
+      const mine = costs[key];
+      if (mine === void 0) continue;
+      const cheaper = Object.entries(costs).filter(([k, v]) => k.startsWith(`${t.backend}:`) && v < mine).sort((a, b) => a[1] - b[1])[0];
+      add("ok", `cost: ${key} = ${mine}${cheaper ? `; you priced ${cheaper[0]} cheaper (${cheaper[1]}): is the dearer one needed?` : ""}`);
+    }
+  }
   const byBackend = /* @__PURE__ */ new Map();
   for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...byBackend.get(t.backend) ?? [], t.model]);
   for (const [id, models] of byBackend) {
@@ -3523,10 +3703,10 @@ function skillChecks() {
       message: `superpowers is installed too (${superpowers.join(", ")}): two bootstraps compete for the same work; keep one (Pitroom includes the superpowers workflow)`
     });
   }
-  for (const { base, names } of installedSkills()) {
-    if (names.length === all.length) checks.push({ level: "ok", message: `skills in ${base}: ${names.join(", ")}` });
-    else if (names.length) checks.push({ level: "warn", message: `skills in ${base}: only ${names.join(", ")} of ${all.length}; run \`pitroom install\`` });
-    else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base}; run \`pitroom install\`` });
+  for (const { base: base2, names } of installedSkills()) {
+    if (names.length === all.length) checks.push({ level: "ok", message: `skills in ${base2}: ${names.join(", ")}` });
+    else if (names.length) checks.push({ level: "warn", message: `skills in ${base2}: only ${names.join(", ")} of ${all.length}; run \`pitroom install\`` });
+    else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
   if (viaPlugin) {
     const linked = installedSkills().some((i) => i.base.includes(`${path19.sep}.claude${path19.sep}`) && i.names.length);
@@ -3565,8 +3745,8 @@ function superpowersActive() {
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
-  for (const base of [path19.join(os9.homedir(), ".agents", "skills"), path19.join(os9.homedir(), ".claude", "skills")]) {
-    const dir = path19.join(base, "using-superpowers");
+  for (const base2 of [path19.join(os9.homedir(), ".agents", "skills"), path19.join(os9.homedir(), ".claude", "skills")]) {
+    const dir = path19.join(base2, "using-superpowers");
     if (fs23.existsSync(path19.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
@@ -3656,6 +3836,8 @@ Usage
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
   pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
+  pitroom models [worker] [--all] [--json]
+                                        models each worker offers, with effort levels, your costs and usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills
@@ -3674,6 +3856,7 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, \u2026 (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
@@ -3713,6 +3896,7 @@ var COMMANDS = {
   discard: cmdDiscard,
   stop: cmdStop,
   savings: cmdSavings,
+  models: cmdModels,
   statusline: cmdStatusline,
   "hook-card": cmdHookCard,
   doctor: (p) => doctor4(has(p, "probe")),

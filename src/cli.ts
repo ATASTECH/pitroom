@@ -33,6 +33,8 @@ Usage
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
   pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
+  pitroom models [worker] [--all] [--json]
+                                        models each worker offers, with effort levels, your costs and usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills
@@ -51,6 +53,7 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, … (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
@@ -93,6 +96,7 @@ const COMMANDS: Record<string, Command> = {
   discard: cmd.cmdDiscard,
   stop: cmd.cmdStop,
   savings: cmd.cmdSavings,
+  models: cmd.cmdModels,
   statusline: cmd.cmdStatusline,
   'hook-card': cmd.cmdHookCard,
   doctor: (p) => doctor(has(p, 'probe')),

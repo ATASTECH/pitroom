@@ -61,6 +61,17 @@ export function doctor(probe: boolean): number {
     }
   }
   if (tierNames.length) add('ok', `tiers: ${tierNames.map((name, i) => `${name}=${describeTarget(tierTargets[i]!)}`).join(', ')}`);
+  // Costs you entered: show what the models in use cost and whether you priced a cheaper one of the same worker.
+  const costs = effective().costs.value;
+  if (Object.keys(costs).length) {
+    for (const t of [...chain, ...tierTargets]) {
+      const key = `${t.backend}:${(t.model ?? '').split('#')[0]}`;
+      const mine = costs[key];
+      if (mine === undefined) continue;
+      const cheaper = Object.entries(costs).filter(([k, v]) => k.startsWith(`${t.backend}:`) && v < mine).sort((a, b) => a[1] - b[1])[0];
+      add('ok', `cost: ${key} = ${mine}${cheaper ? `; you priced ${cheaper[0]} cheaper (${cheaper[1]}): is the dearer one needed?` : ''}`);
+    }
+  }
   const byBackend = new Map<string, (string | undefined)[]>();
   for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);
   for (const [id, models] of byBackend) {

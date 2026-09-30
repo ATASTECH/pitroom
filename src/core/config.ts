@@ -21,9 +21,11 @@ export interface PitroomConfig {
   models?: Record<string, string>;
   /** Worker targets by tier, for --tier and plan tasks: {"cheap": "opencode", "capable": "claude"}. */
   tiers?: Record<string, string>;
+  /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
+  costs?: Record<string, number>;
 }
 
-const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record'> = {
+const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record' | 'numbers'> = {
   worker: 'string',
   fallback: 'string[]',
   timeout: 'string',
@@ -34,6 +36,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   maxParallel: 'number',
   models: 'record',
   tiers: 'record',
+  costs: 'numbers',
 };
 
 export function configPath(): string {
@@ -81,6 +84,9 @@ function matches(v: unknown, type: string): boolean {
   if (type === 'record') {
     return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === 'string');
   }
+  if (type === 'numbers') {
+    return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0);
+  }
   return typeof v === type;
 }
 
@@ -122,5 +128,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     maxParallel: setting<number>(undefined, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), 4),
     models: setting<Record<string, string>>(undefined, undefined, c.models, {}),
     tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
+    costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),
   };
 }
