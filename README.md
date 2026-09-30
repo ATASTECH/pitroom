@@ -1,10 +1,118 @@
-![Pitroom — a free pit crew for your expensive coding agent. Orange Claw’d and a blue terminal-faced Codex pet work together at a coding terminal.](docs/pitroom-hero.png)
+<div align="center">
 
 # Pitroom
 
-**A free pit crew for your expensive coding agent.**
+### A free pit crew for your expensive coding agent
 
-Claude Code, Codex and friends spend premium tokens *reading*: grepping, opening files, scanning code they'll never quote. Your agent stays in the driver's seat; `pitroom` sends that work to a pit crew — a worker agent CLI such as [OpenCode](https://opencode.ai), running **whatever model you already configured there** (a free tier, a local MLX/Ollama model, a cheap paid one) — and hands your main agent back only what it needs: the answer, the exact diff, and a receipt.
+**Send the reading, fixes, tests and reviews to cheap workers. Keep the decisions.**
+
+Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code workers
+
+<br />
+
+[![Release](https://img.shields.io/github/v/release/ATASTECH/pitroom?label=release)](https://github.com/ATASTECH/pitroom/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/ATASTECH/pitroom/total?label=downloads)](https://github.com/ATASTECH/pitroom/releases)
+[![Stars](https://img.shields.io/github/stars/ATASTECH/pitroom?style=flat&label=stars)](https://github.com/ATASTECH/pitroom/stargazers)
+[![CI](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml/badge.svg)](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+
+<br />
+
+**[Quick start](#quick-start)** ·
+[Workflow](#workflow) ·
+[Skills](#skills) ·
+[Commands](#commands) ·
+[Workers](#workers) ·
+[Write an adapter](docs/backends.md)
+
+<br />
+
+<img src="docs/pitroom-hero.png" alt="Pitroom — a free pit crew for your expensive coding agent. Orange Claw’d and a blue terminal-faced Codex pet work together at a coding terminal." width="94%" />
+
+<br />
+
+**Your agent decides · Cheap workers do the typing · A second model reviews**
+
+</div>
+
+> **Current version: 0.6.0.**
+
+---
+
+## Why Pitroom?
+
+Claude Code, Codex and friends spend premium tokens *reading*: grepping, opening files, scanning code they'll never quote.
+
+Pitroom goes one step further:
+
+> **Your agent stays in the driver's seat. A pit crew of cheap workers does the legwork, and hands back only the answer, the exact diff and a receipt.**
+
+<table>
+<tr>
+
+<td width="25%" valign="top">
+
+### Your model, not ours
+
+No model is hardcoded.
+
+Pitroom uses your worker CLI's default model: a free tier, a local MLX/Ollama model or a cheap paid one. Switch there and Pitroom follows.
+
+</td>
+
+<td width="25%" valign="top">
+
+### Any worker CLI
+
+OpenCode, Codex CLI and Claude Code today, Gemini CLI soon.
+
+One group can mix them, and a fallback chain can cross them ([how adapters work](docs/backends.md)).
+
+</td>
+
+<td width="25%" valign="top">
+
+### Verified answers
+
+Every `path:line` a worker cites is checked on disk.
+
+Your agent trusts what checks out and skips re-reading it.
+
+</td>
+
+<td width="25%" valign="top">
+
+### Safe by construction
+
+No commit, push, reset or bulk delete. A git guard stops the tricks.
+
+In isolate mode nothing reaches your tree until you apply it.
+
+</td>
+
+</tr>
+</table>
+
+### And more
+
+- **Receipts, not vibes.** Tokens the worker burned, tokens returned to your agent, compression ratio, and an estimate of what your primary model would have charged. `pitroom savings --card card.svg` makes a shareable card.
+- **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
+- **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. A queue (`maxParallel`) keeps free tiers from rate-limiting you; parallel writers are refused.
+- **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
+- **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
+- **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
+- **Works with any agent.** Fourteen [Agent Skills](https://agentskills.io): the superpowers development workflow run by workers, plus delegation (`using-pitroom`, `pitroom-research`, `-crew`, `-implement`), a CLI, and a Claude Code / Codex plugin whose session-start hook loads the workflow. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
+- **Small.** About 4,400 lines of TypeScript, one ~135 KB bundled file, zero runtime dependencies.
+
+### How it stays safe
+
+Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, no `.env` or key files, no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched.
+
+---
+
+## See it work
+
+A real run on a free OpenCode Zen model: your agent reads ~554 tokens instead of 163,000.
 
 ```text
 $ pitroom run "Which function builds the read-only permission profile, and which bash commands does it allow?"
@@ -22,33 +130,66 @@ FILES CHANGED: none
    · returned ~554 tokens, 294× compression · est. saved $0.152 vs Claude Sonnet
 ```
 
-A real run on a free OpenCode Zen model: your agent reads ~554 tokens instead of 163,000. Every run prints a receipt, and `pitroom savings` adds them up.
+Every run prints a receipt, and `pitroom savings` adds them up:
 
 <p align="center"><img src="docs/card.svg" width="520" alt="Pitroom savings card"></p>
 
-## Why Pitroom
-
-- **Your model, not ours.** No model is hardcoded. Pitroom uses your worker CLI's default model; switch between free, paid and local models there and Pitroom follows.
-- **Any worker CLI.** Workers are adapters behind one interface: OpenCode, Codex CLI and Claude Code today, Gemini CLI soon ([how adapters work](docs/backends.md)). One group can mix them, and a fallback chain can cross them. Safety, verification and receipts live in the core, so every worker gets them.
-- **Verified answers.** Every `path:line` the worker cites is checked on disk (file exists, line in range, the named symbol is nearby): `── refs: 17/18 verified · bad: src/x.ts:400 (file has 120 lines)`. Your agent trusts what checks out and skips re-reading it.
-- **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
-- **Receipts, not vibes.** Tokens the worker burned, tokens returned to your agent, compression ratio, and an estimate of what your primary model would have charged. `pitroom savings --card card.svg` makes a shareable card.
-- **Safe by construction.** Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, no `.env` or key files, no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched.
-- **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. A queue (`maxParallel`) keeps free tiers from rate-limiting you; parallel writers are refused.
-- **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
-- **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
-- **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
-- **Works with any agent.** Fourteen [Agent Skills](https://agentskills.io): the superpowers development workflow run by workers, plus delegation (`using-pitroom`, `pitroom-research`, `-crew`, `-implement`), a CLI, and a Claude Code / Codex plugin whose session-start hook loads the workflow. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
-- **Small.** About 4,400 lines of TypeScript, one ~135 KB bundled file, zero runtime dependencies.
+---
 
 ## Quick start
+
+<table>
+<tr>
+
+<td width="25%" valign="top">
+
+### 01
+
+**Get it**
+
+Clone the repository
+
+</td>
+
+<td width="25%" valign="top">
+
+### 02
+
+**Link it**
+
+`pitroom install`
+
+</td>
+
+<td width="25%" valign="top">
+
+### 03
+
+**Check it**
+
+`pitroom doctor --probe`
+
+</td>
+
+<td width="25%" valign="top">
+
+### 04
+
+**Use it**
+
+Ask your agent, or run `pitroom`
+
+</td>
+
+</tr>
+</table>
 
 Requires Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
 ```bash
-npm i -g pitroom
-pitroom install          # skills → ~/.agents/skills + ~/.claude/skills, launcher → ~/.local/bin/pitroom
-pitroom doctor --probe   # worker CLI, models, permissions, skills, one live round trip
+git clone https://github.com/ATASTECH/pitroom && cd pitroom
+node dist/pitroom.mjs install   # skills → ~/.agents/skills + ~/.claude/skills, launcher → ~/.local/bin/pitroom
+pitroom doctor --probe          # worker CLI, models, permissions, skills, one live round trip
 ```
 
 Or, in Claude Code, install it as a plugin (skills plus the session-start hook), from a clone or the repository:
@@ -58,10 +199,12 @@ Or, in Claude Code, install it as a plugin (skills plus the session-start hook),
 /plugin install pitroom@pitroom
 ```
 
-Use one or the other, not both (`doctor` warns if the skills load twice). Then just work: your agent delegates when it fits, or ask explicitly:
+Use one or the other, not both (`doctor` warns if the skills load twice). Pitroom is a toolbox, not a procedure: your agent uses it when it helps, or you ask explicitly:
 
 > Use pitroom to map how sessions are created and invalidated, then propose a fix.
 > Split this into a pitroom crew: audit auth, billing and uploads for missing input validation.
+
+---
 
 ## Modes
 
@@ -79,6 +222,8 @@ pitroom run --continue last "Now handle the empty-page case too"
 ```
 
 Long jobs: `--bg` returns immediately; `pitroom wait <id>` blocks for up to 9 minutes (made for agents with 10-minute tool limits; exit code 75 means "call wait again").
+
+---
 
 ## Workflow
 
@@ -99,6 +244,8 @@ pitroom-finishing ──► merge, PR or keep (asked, never automatic)
 A review package holds the diff under review with 10 lines of context, and the reviewer's CLI sends it to that worker's model provider. Pitroom does not filter it: secrets committed in a reviewed range go along as they are.
 
 Tiers map plan tasks to workers: `"tiers": {"cheap": "opencode", "standard": "codex", "capable": "claude"}`. `pitroom plan status PLAN` rebuilds where a plan stands from the run records (it survives context compaction), and `pitroom plan note` keeps completions and rulings outside the repo.
+
+---
 
 ## Crews
 
@@ -133,11 +280,13 @@ Humans get the same table live with `pitroom watch -g NAME`; `pitroom wait -g NA
 
 For changes, `pitroom crew -i …` gives every worker its own isolated copy of your current state and `pitroom apply -g NAME` lands the patches in order, stopping at the first conflict. At most `maxParallel` workers (default 4) run at once, the rest queue; only one `--write` run per repository is allowed. `pitroom stop -g NAME` stops running and queued workers.
 
+---
+
 ## Skills
 
 | Skill | Your agent uses it to |
 |---|---|
-| `using-pitroom` | follow the workflow and decide what to delegate (injected at session start by the plugin) |
+| `using-pitroom` | see what Pitroom offers and when it pays off (injected at session start by the plugin; optional) |
 | `pitroom-brainstorming` | turn an idea into an approved design before any code |
 | `pitroom-writing-plans` | write a task-by-task plan with a worker tier per task |
 | `pitroom-driven-development` | execute a plan: worker per task, review on another model, fix loop, apply, commit |
@@ -151,6 +300,8 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 | `pitroom-research` | find, map or explain code through a read-only worker |
 | `pitroom-implement` | get a one-off change made in an isolated copy |
 | `pitroom-crew` | split independent work across parallel workers and merge the results |
+
+---
 
 ## Commands
 
@@ -185,6 +336,8 @@ Two settings make every delegation visible, whether or not the agent mentions it
 }
 ```
 
+---
+
 ## How it works
 
 ![Pitroom workflow: primary agent → Pitroom CLI → OpenCode, Codex or Claude Code workers → verified answer, exact diff and receipt returned to the primary agent.](docs/pitroom-flow.png)
@@ -202,6 +355,8 @@ primary agent ──(skill: "delegate?")──► pitroom run "task"
 ```
 
 Known headless footguns handled for every worker: `opencode run` blocks forever on an open stdin pipe; `ask` permissions stall headless runs; default output carries ANSI and banners; and in OpenCode v2 a plain `run` attaches to the shared background service, where per-run permissions and the git guard would not apply. Pitroom closes stdin, uses allow/deny-only profiles, parses `--format json` and always runs a private `--standalone` server.
+
+---
 
 ## Workers
 
@@ -223,6 +378,8 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | Gemini CLI | soon | approval mode + policy engine | | |
 
 Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a worker that is rate-limited, logged out or missing its model hands the task to the next. Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md).
+
+---
 
 ## Configuration
 
@@ -253,6 +410,8 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 }
 ```
 
+---
+
 ## FAQ
 
 **Where does my code go?** To whichever provider your worker's model uses. For private code, point the worker at a local model. `.env` files and private keys are blocked from the worker either way.
@@ -263,13 +422,22 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 
 **What if the worker fails?** Pitroom exits non-zero with the real cause (for example a default model that no longer exists) and your agent simply continues on its own. `pitroom doctor` diagnoses setup problems.
 
-## Development
+---
+
+## Contributing
+
+Issues and pull requests are welcome. Worker adapters are the easiest place to start: [docs/backends.md](docs/backends.md).
 
 ```bash
 npm install
 npm test          # end-to-end tests against a fake worker CLI + adapter contract tests on recorded real streams
 npm run typecheck
 ```
+
+**[Report an issue](https://github.com/ATASTECH/pitroom/issues/new)** ·
+[Open issues](https://github.com/ATASTECH/pitroom/issues)
+
+---
 
 ## Credits
 
@@ -283,4 +451,31 @@ The workflow skills (brainstorming, planning, worker-driven development, review,
 >
 > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-Pitroom itself is MIT licensed.
+---
+
+## License
+
+Pitroom is licensed under the **MIT License**. See [LICENSE](LICENSE) for details.
+
+---
+
+<div align="center">
+
+## Pitroom
+
+### A free pit crew for your expensive coding agent.
+
+**Your agent decides · Cheap workers do the typing · A second model reviews**
+
+<br />
+
+**[Quick start](#quick-start)** ·
+[Workflow](#workflow) ·
+[Skills](#skills) ·
+[Write an adapter](docs/backends.md)
+
+<br /><br />
+
+<sub>Model-agnostic · Verified answers · Receipts, not vibes</sub>
+
+</div>
