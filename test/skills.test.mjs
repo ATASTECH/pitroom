@@ -27,8 +27,7 @@ const PACK = [
 ];
 
 test('the pack: using-pitroom plus the pitroom-* workflow skills', () => {
-  for (const s of skills) assert.ok(PACK.includes(s), `unexpected skill folder ${s}`);
-  assert.ok(skills.includes('using-pitroom'));
+  assert.deepEqual([...skills].sort(), PACK);
 });
 
 for (const name of skills) {

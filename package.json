@@ -1,7 +1,7 @@
 {
   "name": "pitroom",
-  "version": "0.5.0",
-  "description": "A free pit crew for your expensive coding agent. Delegate research, fixes, tests and grunt work from Claude Code, Codex or any agent to OpenCode, with receipts that prove the savings.",
+  "version": "0.6.0",
+  "description": "A free pit crew for your expensive coding agent: the superpowers development workflow, run by cheap workers. Delegate research, fixes, tests, reviews and whole plans from Claude Code, Codex or any agent to OpenCode, Codex or Claude Code workers, with receipts that prove the savings.",
   "type": "module",
   "bin": {
     "pitroom": "dist/pitroom.mjs"
@@ -36,7 +36,11 @@
     "llm",
     "opencode",
     "subagent",
-    "tokens"
+    "tokens",
+    "workflow",
+    "code-review",
+    "tdd",
+    "planning"
   ],
   "license": "MIT",
   "devDependencies": {
