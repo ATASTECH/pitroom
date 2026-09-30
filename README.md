@@ -398,8 +398,6 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 ## How it works
 
-![Pitroom workflow: primary agent → Pitroom CLI → OpenCode, Codex or Claude Code workers → verified answer, exact diff and receipt returned to the primary agent.](docs/pitroom-flow.png)
-
 <p align="center"><img src="docs/architecture.svg" width="100%" alt="How a run flows: the primary agent delegates to the Pitroom CLI, which starts a worker CLI in read, isolate or write mode; events, then the answer, an exact diff and a receipt come back."></p>
 
 <details>

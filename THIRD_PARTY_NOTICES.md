@@ -17,3 +17,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 ## Not bundled
 
 Pitroom starts worker CLIs you install yourself (OpenCode, Codex CLI, Claude Code). They are not part of this package and keep their own licenses and terms.
+
+## Product names and marks
+
+`docs/architecture.svg` shows the logos of OpenCode, Codex (OpenAI) and Claude Code (Anthropic) only to say which tools Pitroom can drive. The files come from [svgl](https://svgl.app) (OpenCode) and the MIT-licensed [LobeHub icons](https://github.com/lobehub/lobe-icons) set (Codex, Claude Code). The names and logos belong to their owners. Pitroom is not affiliated with or endorsed by them.
