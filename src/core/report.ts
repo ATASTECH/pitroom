@@ -1,6 +1,7 @@
 // The text the primary agent reads. Everything here costs the primary tokens,
 // so it is compact and ends with exact next commands.
 import fs from 'node:fs';
+import { planName } from './plan.js';
 import { getBackend } from '../backends/index.js';
 import { compact, primaryPrice, usd } from './receipt.js';
 import { type RunMeta, isActive, runFile } from './store.js';
@@ -39,6 +40,9 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
       ? ` · SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()} · critical ${v.critical} · important ${v.important} · minor ${v.minor}`
       : '';
     out.push(`review of ${meta.reviewOf} (${meta.reviewKind})${verdict}`);
+  } else if (meta.plan) {
+    const status = meta.taskStatus ? ` · STATUS ${meta.taskStatus}` : '';
+    out.push(`plan: ${planName(meta.plan.file)} · Task ${meta.plan.step}: ${meta.plan.title}${status}`);
   }
   for (const a of meta.attempts ?? []) out.push(`fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);

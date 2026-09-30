@@ -29,6 +29,7 @@ export interface ReviewJob {
   package: string;
   implementer?: Target;
   group?: string;
+  plan?: RunMeta['plan'];
 }
 
 export const TEMPLATE: Record<ReviewKind, TemplateName> = { task: 'task-reviewer', fix: 're-review', range: 'code-reviewer' };
@@ -86,8 +87,8 @@ export function runReview(id: string): ReviewJob {
   const previous = latestReview(chain.map((a) => a.id));
   // The implementer's isolated copy while it exists (the code after the change), else the project.
   const dir = m.mode === 'isolate' && m.worktree && fs.existsSync(m.worktree) ? m.cwd : m.dir;
-  const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group };
-  const title = `run ${m.id}`;
+  const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group, plan: m.plan };
+  const title = m.plan ? `Task ${m.plan.step}: ${m.plan.title}` : `run ${m.id}`;
   if (!previous) {
     return {
       ...job,

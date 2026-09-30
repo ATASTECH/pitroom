@@ -17,6 +17,7 @@ const VALUE_FLAGS: Record<string, string> = {
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range',
+  '--plan': 'plan', '--step': 'step',
 };
 
 const BOOL_FLAGS: Record<string, string> = {
@@ -113,4 +114,14 @@ export function runOptions(p: Parsed, task: string): RunOptions {
     noFallback: has(p, 'no-fallback'),
     group: flag(p, 'group'),
   };
+}
+
+/** `--plan PLAN --step N`: one task of an implementation plan. */
+export function planStep(p: Parsed): { file: string; step: number } | undefined {
+  const file = flag(p, 'plan');
+  const step = flag(p, 'step');
+  if (!file && !step) return undefined;
+  if (!file || !step) throw new UserError('--plan and --step go together: pitroom run -i --plan PLAN.md --step N');
+  if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
+  return { file, step: Number(step) };
 }

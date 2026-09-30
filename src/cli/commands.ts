@@ -13,7 +13,7 @@ import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile,
 } from '../core/store.js';
-import { type Parsed, exitCodeFor, flag, has, parseDuration, readTask, runOptions } from './args.js';
+import { type Parsed, exitCodeFor, flag, has, parseDuration, planStep, readTask, runOptions } from './args.js';
 
 /** Runs a prepared run in the foreground, or starts it in the background with --bg. */
 async function launch(p: Parsed, meta: RunMeta): Promise<number> {
@@ -33,8 +33,8 @@ async function launch(p: Parsed, meta: RunMeta): Promise<number> {
 }
 
 export async function cmdRun(p: Parsed): Promise<number> {
-  const opts = runOptions(p, readTask(p));
-  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
+  const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
+  if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
   return launch(p, prepareRun(opts));
 }
 
@@ -54,7 +54,7 @@ export async function cmdReview(p: Parsed): Promise<number> {
       dir: job.dir,
       worker: flag(p, 'worker') ?? (flag(p, 'tier') ? undefined : pickReviewer(job)),
       group: flag(p, 'group') ?? job.group,
-      review: { of: job.of, kind: job.kind, packageFile },
+      review: { of: job.of, kind: job.kind, packageFile, plan: job.plan },
     });
   } catch (e) {
     fs.rmSync(packageFile, { force: true });
@@ -73,6 +73,9 @@ export function cmdCrew(p: Parsed): number {
     throw new UserError('parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)');
   }
   if (has(p, 'continue')) throw new UserError('--continue applies to a single run; use pitroom run --continue');
+  if (has(p, 'plan') || has(p, 'step')) {
+    throw new UserError("start plan tasks with pitroom run -i --plan PLAN --step N --bg (they share the plan's group)");
+  }
   const group = flag(p, 'group') ?? `crew-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
   const metas = tasks.map((task) => startInBackground(prepareRun({ ...runOptions(p, task), group })));
   if (has(p, 'json')) {

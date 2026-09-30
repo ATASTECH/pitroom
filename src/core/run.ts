@@ -12,7 +12,9 @@ import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
-import { parseVerdict } from './answers.js';
+import { parseStatus, parseVerdict } from './answers.js';
+import { brief, loadPlan, planName, planTask } from './plan.js';
+import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
 import { estimateTokens, record, savedUsd } from './receipt.js';
@@ -34,6 +36,8 @@ export interface RunOptions {
   model?: string;
   /** A worker from the config's "tiers"; -W wins. */
   tier?: string;
+  /** `--plan PLAN --step N`: implement one task of an implementation plan. */
+  plan?: { file: string; step: number };
   timeoutSec: number;
   verify?: string;
   continueFrom?: string;
@@ -42,7 +46,27 @@ export interface RunOptions {
   noFallback: boolean;
   group?: string;
   /** Set by `pitroom review`. */
-  review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string };
+  review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string; plan?: RunMeta['plan'] };
+}
+
+/** The worker's task. For --plan: the implementer template around one plan task. */
+function planWork(o: RunOptions): { task: string; tier?: string; plan?: RunMeta['plan']; brief?: string } {
+  if (!o.plan) return { task: o.task.trim(), tier: o.tier };
+  if (o.continueFrom) throw new UserError("a follow-up continues its parent's task; drop --plan/--step");
+  if (o.mode === 'read') throw new UserError('--plan runs implement a task: add -i (an isolated copy, recommended) or -w');
+  const plan = loadPlan(o.plan.file);
+  const t = planTask(plan, o.plan.step);
+  const text = brief(plan, t);
+  const task = fill(loadTemplate('implementer'), {
+    PLAN_FILE: plan.file,
+    STEP: String(t.step),
+    TITLE: t.title,
+    BRIEF: text.trim(),
+    NOTES: o.task.trim() || '(none)',
+  });
+  // The task's **Worker:** tier applies when the primary names no worker or tier.
+  const tier = o.tier ?? (o.worker ? undefined : t.tier);
+  return { task, tier, plan: { file: plan.file, step: t.step, title: t.title }, brief: text };
 }
 
 /** Validates options and writes the initial run record. Does not start the worker. */
@@ -50,7 +74,8 @@ export function prepareRun(o: RunOptions): RunMeta {
   if (process.env.PITROOM_ACTIVE === '1') {
     throw new UserError('refusing to delegate from inside a Pitroom worker (no recursive delegation)', 3);
   }
-  if (!o.task.trim()) throw new UserError('empty task');
+  const work = planWork(o);
+  if (!work.task) throw new UserError('empty task');
   const warnings: string[] = [];
   let parent: RunMeta | undefined;
   let worker: Target;
@@ -68,7 +93,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, tier: o.tier, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
   }
@@ -95,14 +120,14 @@ export function prepareRun(o: RunOptions): RunMeta {
     id: newRunId(),
     version: VERSION,
     mode,
-    task: o.task.trim(),
+    task: work.task,
     dir,
     cwd: parent?.cwd ?? dir,
     repoRoot: root,
     worker,
     fallback,
     parent: parent?.id,
-    group: o.group ?? parent?.group,
+    group: o.group ?? parent?.group ?? (work.plan ? planName(work.plan.file) : undefined),
     sessionId: parent?.sessionId,
     files,
     link: parent?.link ?? o.link,
@@ -116,6 +141,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     baseTree: parent?.mode === 'isolate' ? parent.baseTree : undefined,
     worktree: parent?.mode === 'isolate' ? parent.worktree : undefined,
     reviewOf: o.review?.of,
+    plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
     packageFile: o.review?.packageFile,
   };
@@ -130,6 +156,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     }
   }
   fs.writeFileSync(runFile(meta.id, 'task.md'), `${meta.task}\n`);
+  if (work.brief) fs.writeFileSync(runFile(meta.id, 'brief.md'), work.brief);
   return meta;
 }
 
@@ -283,6 +310,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
   fs.writeFileSync(runFile(meta.id, 'summary.md'), `${run.finalText}\n`);
+  if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run.finalText);
   if (meta.reviewOf) {
     meta.verdict = parseVerdict(run.finalText);
     if (meta.packageFile) fs.rmSync(meta.packageFile, { force: true });
