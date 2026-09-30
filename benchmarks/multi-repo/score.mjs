@@ -37,7 +37,9 @@ function truthOf(q) {
 
 const pathsIn = (s) => [...new Set((s.match(/[A-Za-z0-9_.@\-/]+\.[A-Za-z0-9]{1,5}/g) ?? []).map((p) => p.replace(/^\.?\//, '').replace(/:\d+$/, '')))];
 
-const quota = (row) => row.state !== 'done' && /rate.?limit/i.test(row.error ?? '');
+// A run that ended in a provider error (quota, invalid request, internal error) says nothing about
+// the model, so it is left out. A timeout is kept: the worker ran and did not finish.
+const providerError = (row) => row.state === 'failed';
 
 function score(q, truth, row) {
   if (row.state !== 'done') return { s: 0, got: `(${row.state})` };
@@ -66,7 +68,7 @@ for (const row of rows) {
   const q = questions.find((x) => x.id === row.question);
   if (!q) continue;
   const t0 = byTarget.get(row.target) ?? { target: row.target, model: row.model, runs: [], unmeasured: 0 };
-  if (quota(row)) { t0.unmeasured++; byTarget.set(row.target, t0); continue; }
+  if (providerError(row)) { t0.unmeasured++; byTarget.set(row.target, t0); continue; }
   const res = score(q, truths[q.id], row);
   const t = t0;
   t.runs.push({ q: q.id, kind: q.kind, ...res, state: row.state, seconds: row.seconds, tokens: row.tokens, cost: row.cost, refs: row.refs });
@@ -83,9 +85,10 @@ const summary = [...byTarget.values()].map((t) => ({
   cost: t.runs.reduce((a, r) => a + (r.cost ?? 0), 0), runs: t.runs,
 })).sort((a, b) => (b.accuracy ?? -1) - (a.accuracy ?? -1) || (a.medianSeconds ?? 1e9) - (b.medianSeconds ?? 1e9));
 
+const MIN_RUNS = 5;
 const pct = (x) => (x == null ? '-' : `${Math.round(x * 100)}%`);
-console.log('| Worker and model | Score | Definition | Count | List | Scored runs | Failed | Not measured | Median time | Median tokens |\n|---|---|---|---|---|---|---|---|---|---|');
-for (const s of summary) {
-  console.log(`| ${s.target.replace(/^opencode:/, '')} | **${pct(s.accuracy)}** | ${pct(s.byKind.definition)} | ${pct(s.byKind.count)} | ${pct(s.byKind.set)} | ${s.n} | ${s.failed} | ${s.unmeasured ? s.unmeasured + ' (quota)' : '-'} | ${s.medianSeconds ?? '-'} s | ${s.medianTokens ? Math.round(s.medianTokens / 1000) + 'k' : '-'} |`);
+console.log('| Worker and model | Score | Definition | Count | List | Questions scored | Timed out | Left out (provider errors) | Median time | Median tokens |\n|---|---|---|---|---|---|---|---|---|---|');
+for (const s of summary.filter((x) => x.n >= MIN_RUNS)) {
+  console.log(`| ${s.target.replace(/^opencode:/, '')} | **${pct(s.accuracy)}** | ${pct(s.byKind.definition)} | ${pct(s.byKind.count)} | ${pct(s.byKind.set)} | ${s.n} | ${s.failed} | ${s.unmeasured || '-'} | ${s.medianSeconds ?? '-'} s | ${s.medianTokens ? Math.round(s.medianTokens / 1000) + 'k' : '-'} |`);
 }
 if (args.json) fs.writeFileSync(path.resolve(args.json), JSON.stringify({ truths, summary }, null, 1) + '\n');

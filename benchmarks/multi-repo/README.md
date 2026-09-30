@@ -24,7 +24,8 @@ clones are shallow: use `git fetch --depth 1 origin <commit>` and check it out t
 - `definition`: 1 for the exact `path:line`, 0.5 for the right file on another line.
 - `count`: 1 only for the exact number.
 - `set`: F1 of the listed paths against the real list.
-- A run that hit a provider's rate limit or quota is **not measured** and is left out; any other
-  unfinished run scores 0. An answer with nothing before `DETAILS` counts as not in the requested format.
+- A run that ended in a provider error (quota, rate limit, invalid request) is **left out**, and a
+  model with fewer than 5 scored runs is not listed. A timeout is kept and scores 0. An answer with
+  nothing before `DETAILS` counts as not in the requested format.
 
 Keep `--lanes` low for free providers: OpenRouter's free models share a daily request quota.

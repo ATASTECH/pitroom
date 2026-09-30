@@ -1868,16 +1868,16 @@
   {
    "target": "opencode:nvidia/openai/gpt-oss-20b",
    "model": "nvidia/openai/gpt-oss-20b",
-   "n": 9,
-   "unmeasured": 0,
-   "failed": 2,
-   "accuracy": 0.4444444444444444,
+   "n": 7,
+   "unmeasured": 2,
+   "failed": 0,
+   "accuracy": 0.5714285714285714,
    "byKind": {
-    "definition": 0.3333333333333333,
+    "definition": 1,
     "count": 0,
     "set": 1
    },
-   "medianSeconds": 23,
+   "medianSeconds": 24,
    "medianTokens": 41597,
    "cost": 0,
    "runs": [
@@ -1935,17 +1935,6 @@
      "refs": null
     },
     {
-     "q": "django-def",
-     "kind": "definition",
-     "s": 0,
-     "got": "(failed)",
-     "state": "failed",
-     "seconds": 11,
-     "tokens": 39673,
-     "cost": 0,
-     "refs": null
-    },
-    {
      "q": "django-set",
      "kind": "set",
      "s": 1,
@@ -1966,21 +1955,6 @@
      "tokens": 20210,
      "cost": 0,
      "refs": null
-    },
-    {
-     "q": "k8s-def",
-     "kind": "definition",
-     "s": 0,
-     "got": "(failed)",
-     "state": "failed",
-     "seconds": 23,
-     "tokens": 89552,
-     "cost": 0,
-     "refs": {
-      "total": 1,
-      "valid": 1,
-      "invalid": []
-     }
     },
     {
      "q": "k8s-set",

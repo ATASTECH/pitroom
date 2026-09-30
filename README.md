@@ -177,11 +177,11 @@ Workers read 5.5 million tokens of code and docs (96 steps, 179 tool calls) and 
 | OpenCode `nemotron-3-ultra-free` | 89% | 35 s | 21k |
 | OpenRouter `inkling:free` | 83% | 14 s | 41k |
 | OpenCode `nemotron-3.5-lightning-free` | 72% | 377 s | 69k |
-| NVIDIA `gpt-oss-20b` | 44% (2 of 9 runs failed) | 23 s | 42k |
+| NVIDIA `gpt-oss-20b` (7 questions) | 57% | 24 s | 42k |
 
-Four free models matched `gpt-6-sol` on these questions. Most misses were count questions (a wrong number); two models also missed list questions, one by adding `docs/` files that are not under `django/`. The definition lookups were right for every model except `gpt-oss-20b`. `gpt-6-sol` was as fast as the quickest free models, and lowering its effort did not cost accuracy here. `nemotron-3.5-lightning-free` wrote an unrelated text for one list question and needed 10 minutes for another. The scoring harness and every raw answer are in [`benchmarks/multi-repo`](benchmarks/multi-repo).
+Four free models matched `gpt-6-sol` on these questions. Every model found every definition; the misses are count questions (a wrong number) and, for two models, list questions, one of them by adding `docs/` files that are not under `django/`. `gpt-6-sol` was as fast as the quickest free models, and lowering its effort did not cost accuracy here. `nemotron-3.5-lightning-free` wrote an unrelated text for one list question and ran into the 10-minute limit on another. The scoring harness and every raw answer are in [`benchmarks/multi-repo`](benchmarks/multi-repo).
 
-Not measured: OpenRouter's free models share a daily request quota, and it ran out partway through. `laguna-s-2.1`, `north-mini-code` and `qwen3.8-27b` never ran (9 of 9 blocked), `laguna-xs-2.1` got 1 of 9 through. Those runs are left out of the table, not counted as wrong. Three more models did not answer a one-line probe (`ling-3.0-flash-fin`, `gemma-4-31b-it`, `nemotron-3-super-120b`: a provider error, a rate limit and an invalid request).
+Only workers that ran are in the table. Models that could not answer at all (a provider error, or the shared daily quota of OpenRouter's free tier) are left out, and so are the two `gpt-oss-20b` runs that ended in a provider error; a timeout is kept.
 
 **What this does not show**
 - One run per question and model: there is no variance here. The questions are bounded lookups that `grep` can answer, so they do not show how a model handles design questions or large edits, and four free models and `gpt-6-sol` all scoring 100% says the test is easy at the top, not that they are equal.
