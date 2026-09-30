@@ -286,7 +286,16 @@ export function cmdStatusline(p: Parsed): number {
 export function cmdHookCard(): number {
   try {
     const cards = hookCards(readStdin());
-    if (cards) console.log(JSON.stringify({ systemMessage: cards }));
+    if (cards) {
+      // systemMessage is for the user's screen where the host shows it; additionalContext reaches the
+      // agent too, which tells the user when the host does not show hook messages.
+      console.log(
+        JSON.stringify({
+          systemMessage: cards,
+          hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: `Pitroom, for the user:\n${cards}` },
+        }),
+      );
+    }
   } catch {
     // never block or clutter the host's tool call
   }
@@ -296,6 +305,20 @@ export function cmdHookCard(): number {
 export function cmdSavings(p: Parsed): number {
   const since = flag(p, 'since') ?? 'all';
   const t = totals(readLedger(sinceMs(since)));
+  if (has(p, 'models')) {
+    const by = new Map<string, { runs: number; tokens: number; returned: number; cost: number; saved: number }>();
+    for (const e of readLedger(sinceMs(since))) {
+      const key = `${e.backend ?? '?'}  ${e.model ?? '(default model)'}`;
+      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, saved: 0 };
+      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, saved: a.saved + e.saved });
+    }
+    const width = Math.max(12, ...[...by.keys()].map((k) => k.length));
+    console.log(`${'worker  model'.padEnd(width)}  ${'runs'.padStart(5)} ${'processed'.padStart(10)} ${'returned'.padStart(9)} ${'cost'.padStart(8)} ${'saved'.padStart(8)}`);
+    for (const [key, a] of [...by].sort((x, y) => y[1].runs - x[1].runs)) {
+      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${usd(a.cost).padStart(8)} ${usd(a.saved).padStart(8)}`);
+    }
+    return 0;
+  }
   const period = since === 'all' ? 'all time' : `last ${since.replace('d', ' days')}`;
   if (has(p, 'json')) {
     console.log(JSON.stringify({ period, ...t, price: primaryPrice() }, null, 2));

@@ -507,3 +507,26 @@ test('statusline: the user\'s own line first, then Pitroom\'s when it has someth
   if (saved > 0) assert.match(out, /^base\n🏁 pitroom · ~\$[\d.]+ saved this week\n$/);
   else assert.equal(out, 'base\n');
 });
+
+test('hook-card announces a run that finished without being named, and tells the agent too', () => {
+  const s = sandbox();
+  const r = s.run(['run', '--bg', 'finish in the background']);
+  const id = /run (\S+)/.exec(r.stdout)[1];
+  assert.equal(s.run(['wait', id, '--timeout', '30']).status, 0);
+  const hook = (command) =>
+    s.run(['hook-card'], {}, JSON.stringify({ tool_name: 'Bash', tool_input: { command }, tool_response: { stdout: 'nothing about a run id', stderr: '' } }));
+  const out = JSON.parse(hook('pitroom status').stdout);
+  assert.match(out.systemMessage, new RegExp(`🏁 Pitroom ✔ research done on opencode.*\\(${id}\\)`), 'no id in the command or output');
+  assert.equal(out.hookSpecificOutput.hookEventName, 'PostToolUse');
+  assert.match(out.hookSpecificOutput.additionalContext, /^Pitroom, for the user:\n🏁 Pitroom ✔/, 'the agent sees the card too');
+  assert.equal(hook('pitroom status').stdout, '', 'announced once');
+});
+
+test('savings --models lists workers and models with their runs and tokens', () => {
+  const s = sandbox();
+  for (const task of ['one', 'two', 'three']) assert.equal(s.run(['run', task]).status, 0);
+  const out = s.run(['savings', '--models']).stdout;
+  assert.match(out, /^worker {2}model\s+runs\s+processed\s+returned\s+cost\s+saved\n/);
+  // the fake worker reports one model; the row counts every run that used it
+  assert.match(out, /^opencode {2}mock\/good-model\s+3 /m);
+});

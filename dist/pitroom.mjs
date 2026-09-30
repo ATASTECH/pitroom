@@ -1179,6 +1179,7 @@ var BOOL_FLAGS = {
   "--badge": "badge",
   "--probe": "probe",
   "--copy": "copy",
+  "--models": "models",
   "--force": "force",
   "--allow-delete": "allow-delete",
   "--yes": "yes",
@@ -2173,6 +2174,8 @@ function fill(template, values) {
 import fs16 from "node:fs";
 var WEEK_MS = 7 * 24 * 3600 * 1e3;
 var RECENT = 40;
+var RECENT_HOURS = 1;
+var MAX_CARDS = 5;
 function activeRuns() {
   const out = [];
   for (const id of listRunIds().slice(-RECENT)) {
@@ -2271,8 +2274,17 @@ function hookCards(input) {
   const output = typeof response === "string" ? response : [response?.stdout, response?.stderr].filter(Boolean).join("\n");
   const ids = [...new Set(`${command}
 ${output}`.match(RUN_ID) ?? [])].filter((id) => fs16.existsSync(`${runsDir()}/${id}`));
+  const since = Date.now() - RECENT_HOURS * 36e5;
+  for (const id of listRunIds().slice(-RECENT)) {
+    if (ids.includes(id) || fs16.existsSync(runFile(id, "card-ended"))) continue;
+    try {
+      const m = readMeta(id);
+      if (!isActive(m.state) && Date.parse(m.endedAt ?? m.startedAt) > since) ids.push(id);
+    } catch {
+    }
+  }
   const cards = [];
-  for (const id of ids) {
+  for (const id of ids.slice(0, MAX_CARDS)) {
     try {
       cards.push(...cardsFor(readMeta(id)));
     } catch {
@@ -3313,7 +3325,15 @@ function cmdStatusline(p) {
 function cmdHookCard() {
   try {
     const cards = hookCards(readStdin());
-    if (cards) console.log(JSON.stringify({ systemMessage: cards }));
+    if (cards) {
+      console.log(
+        JSON.stringify({
+          systemMessage: cards,
+          hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext: `Pitroom, for the user:
+${cards}` }
+        })
+      );
+    }
   } catch {
   }
   return 0;
@@ -3321,6 +3341,20 @@ function cmdHookCard() {
 function cmdSavings(p) {
   const since = flag(p, "since") ?? "all";
   const t = totals(readLedger(sinceMs(since)));
+  if (has(p, "models")) {
+    const by = /* @__PURE__ */ new Map();
+    for (const e of readLedger(sinceMs(since))) {
+      const key = `${e.backend ?? "?"}  ${e.model ?? "(default model)"}`;
+      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, saved: 0 };
+      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, saved: a.saved + e.saved });
+    }
+    const width = Math.max(12, ...[...by.keys()].map((k) => k.length));
+    console.log(`${"worker  model".padEnd(width)}  ${"runs".padStart(5)} ${"processed".padStart(10)} ${"returned".padStart(9)} ${"cost".padStart(8)} ${"saved".padStart(8)}`);
+    for (const [key, a] of [...by].sort((x, y) => y[1].runs - x[1].runs)) {
+      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${usd(a.cost).padStart(8)} ${usd(a.saved).padStart(8)}`);
+    }
+    return 0;
+  }
   const period = since === "all" ? "all time" : `last ${since.replace("d", " days")}`;
   if (has(p, "json")) {
     console.log(JSON.stringify({ period, ...t, price: primaryPrice() }, null, 2));
@@ -3621,7 +3655,7 @@ Usage
   pitroom discard [run]                 drop an --isolate run's copy (the patch is kept)
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
-  pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+  pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills

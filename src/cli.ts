@@ -32,7 +32,7 @@ Usage
   pitroom discard [run]                 drop an --isolate run's copy (the patch is kept)
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers
-  pitroom savings [--since 7d|30d|all] [--card file.svg] [--badge]
+  pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills

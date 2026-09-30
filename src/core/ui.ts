@@ -10,6 +10,10 @@ import type { Target } from '../backends/types.js';
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 /** How many recent runs the status line looks at for active ones. */
 const RECENT = 40;
+/** Finished runs older than this are not announced late. */
+const RECENT_HOURS = 1;
+/** One hook call shows at most this many cards. */
+const MAX_CARDS = 5;
 
 function activeRuns(): RunMeta[] {
   const out: RunMeta[] = [];
@@ -141,8 +145,20 @@ export function hookCards(input: string): string {
       ? response
       : [(response as { stdout?: string })?.stdout, (response as { stderr?: string })?.stderr].filter(Boolean).join('\n');
   const ids = [...new Set(`${command}\n${output}`.match(RUN_ID) ?? [])].filter((id) => fs.existsSync(`${runsDir()}/${id}`));
+  // Also runs that finished in the last hours without a result card: a background run ends while
+  // the agent is busy, and the next pitroom command (status, wait, ls, …) is the first chance to say so.
+  const since = Date.now() - RECENT_HOURS * 3600_000;
+  for (const id of listRunIds().slice(-RECENT)) {
+    if (ids.includes(id) || fs.existsSync(runFile(id, 'card-ended'))) continue;
+    try {
+      const m = readMeta(id);
+      if (!isActive(m.state) && Date.parse(m.endedAt ?? m.startedAt) > since) ids.push(id);
+    } catch {
+      // a record being written right now
+    }
+  }
   const cards: string[] = [];
-  for (const id of ids) {
+  for (const id of ids.slice(0, MAX_CARDS)) {
     try {
       cards.push(...cardsFor(readMeta(id)));
     } catch {
