@@ -162,8 +162,29 @@ Workers read 5.5 million tokens of code and docs (96 steps, 179 tool calls) and 
 
 **A change in an isolated copy:** "add a one-line comment above `resolveUpdateMode`" finished in 16 s and 4 steps (142,491 tokens). The patch was one file and one line, the comment matched the code, and your working tree is untouched until you apply.
 
+**Free models against `gpt-6-sol`, on three large repositories.** The same kind of work on React (7,252 files), Django (7,091) and Kubernetes (31,353 files), at pinned commits. Nine bounded questions, three per repository: the file and line that define a function, how many files contain a word, and which files contain it. Every answer is checked against `git grep`, not by opinion: an exact `path:line` (half a point for the right file on the wrong line), an exact count, and for the lists an F1 score that punishes both missed and invented files. Each worker ran the nine questions once, read-only, with no fallback, so a model that cannot do it fails instead of being swapped for another.
+
+| Worker and model | Score | Median time | Median tokens |
+|---|---|---|---|
+| Codex `gpt-6-sol` (effort medium) | **100%** | 16 s | 50k |
+| Codex `gpt-6-sol` (effort low) | **100%** | 20 s | 50k |
+| OpenCode `muse-spark-1.3-contributor-free` | **100%** | 23 s | 44k |
+| OpenCode `space-bunny-free` | **100%** | 35 s | 63k |
+| OpenCode `mimo-v2.6-flash-free` | **100%** | 37 s | 42k |
+| OpenCode `big-pickle` | **100%** | 42 s | 91k |
+| OpenRouter `nemotron-3-ultra-550b-a55b:free` | 89% | 27 s | 42k |
+| OpenCode `longcat-2.5-preview-free` | 89% | 29 s | 20k |
+| OpenCode `nemotron-3-ultra-free` | 89% | 35 s | 21k |
+| OpenRouter `inkling:free` | 83% | 14 s | 41k |
+| OpenCode `nemotron-3.5-lightning-free` | 72% | 377 s | 69k |
+| NVIDIA `gpt-oss-20b` | 44% (2 of 9 runs failed) | 23 s | 42k |
+
+Four free models matched `gpt-6-sol` on these questions. Most misses were count questions (a wrong number); two models also missed list questions, one by adding `docs/` files that are not under `django/`. The definition lookups were right for every model except `gpt-oss-20b`. `gpt-6-sol` was as fast as the quickest free models, and lowering its effort did not cost accuracy here. `nemotron-3.5-lightning-free` wrote an unrelated text for one list question and needed 10 minutes for another. The scoring harness and every raw answer are in [`benchmarks/multi-repo`](benchmarks/multi-repo).
+
+Not measured: OpenRouter's free models share a daily request quota, and it ran out partway through. `laguna-s-2.1`, `north-mini-code` and `qwen3.8-27b` never ran (9 of 9 blocked), `laguna-xs-2.1` got 1 of 9 through. Those runs are left out of the table, not counted as wrong. Three more models did not answer a one-line probe (`ling-3.0-flash-fin`, `gemma-4-31b-it`, `nemotron-3-super-120b`: a provider error, a rate limit and an invalid request).
+
 **What this does not show**
-- One repository, one free model, one run per question: there is no variance here, and another model or repository will differ.
+- One run per question and model: there is no variance here. The questions are bounded lookups that `grep` can answer, so they do not show how a model handles design questions or large edits, and four free models and `gpt-6-sol` all scoring 100% says the test is easy at the top, not that they are equal.
 - An open-ended task ("find up to five spelling mistakes in `docs/`") did not finish: it was stopped after 19 minutes and 57 tool calls. Give workers bounded tasks.
 - "Tokens processed" is what the workers read and wrote. What your agent would have spent doing the same reading itself is an estimate, not a measurement: the savings figure assumes it would process about the same tokens. The $0 worker cost is because the model is free.
 - The hand check covered key claims, not every citation.

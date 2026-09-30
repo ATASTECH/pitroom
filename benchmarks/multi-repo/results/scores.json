@@ -1,0 +1,2050 @@
+{
+ "truths": {
+  "react-def": {
+   "path": "packages/react-reconciler/src/ReactFiber.js",
+   "line": 739
+  },
+  "react-count": {
+   "count": 16
+  },
+  "react-set": {
+   "files": [
+    "packages/react-reconciler/src/ReactFiberBeginWork.js",
+    "packages/react-reconciler/src/ReactFiberClassComponent.js",
+    "packages/react-reconciler/src/ReactFiberHooks.js",
+    "packages/react-reconciler/src/ReactFiberHotReloading.js",
+    "packages/react-reconciler/src/ReactFiberReconciler.js",
+    "packages/react-reconciler/src/ReactFiberWorkLoop.js"
+   ]
+  },
+  "django-def": {
+   "path": "django/utils/http.py",
+   "line": 100
+  },
+  "django-count": {
+   "count": 22
+  },
+  "django-set": {
+   "files": [
+    "django/contrib/admin/sites.py",
+    "django/middleware/csrf.py",
+    "django/views/decorators/csrf.py",
+    "django/views/generic/base.py"
+   ]
+  },
+  "k8s-def": {
+   "path": "cmd/kube-scheduler/app/server.go",
+   "line": 94
+  },
+  "k8s-count": {
+   "count": 13
+  },
+  "k8s-set": {
+   "files": [
+    "pkg/kubelet/certificate/transport.go",
+    "pkg/kubelet/cm/container_manager_linux.go",
+    "pkg/kubelet/cm/cpumanager/cpu_manager.go",
+    "pkg/kubelet/cm/qos_container_manager_linux.go",
+    "pkg/kubelet/config/http.go",
+    "pkg/kubelet/images/puller.go",
+    "pkg/kubelet/kubelet.go",
+    "pkg/kubelet/pod_container_deletor.go",
+    "pkg/kubelet/util/manager/watch_based_manager.go",
+    "pkg/kubelet/volumemanager/reconciler/reconciler.go"
+   ]
+  }
+ },
+ "summary": [
+  {
+   "target": "codex:gpt-6-sol",
+   "model": "gpt-6-sol",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 16,
+   "medianTokens": 49737,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 14,
+     "tokens": 49182,
+     "cost": null,
+     "refs": null
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 21,
+     "tokens": 74197,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 11,
+     "tokens": 48899,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 12,
+     "tokens": 48931,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 26,
+     "tokens": 74353,
+     "cost": null,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 16,
+     "tokens": 48998,
+     "cost": null,
+     "refs": null
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 28,
+     "tokens": 101069,
+     "cost": null,
+     "refs": {
+      "total": 13,
+      "valid": 0,
+      "invalid": [
+       {
+        "ref": "app/testing/testserver.go:394",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/options.go:248",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/server.go:487",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/server.go:285",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/testing/testserver.go:123",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/server.go:239",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/options/options.go:276",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/testing/testserver.go:127",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/scheduling.go:44",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/controller_descriptor.go:93",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/batch.go:51",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/controllermanager.go:159",
+        "reason": "file not found"
+       },
+       {
+        "ref": "app/storageversionmigrator.go:43",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 13,
+     "tokens": 49737,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 20,
+     "tokens": 78010,
+     "cost": null,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "codex:gpt-6-sol#low",
+   "model": "gpt-6-sol",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 20,
+   "medianTokens": 50491,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 19,
+     "tokens": 50491,
+     "cost": null,
+     "refs": null
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 20,
+     "tokens": 50486,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 24,
+     "tokens": 77224,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 21,
+     "tokens": 50469,
+     "cost": null,
+     "refs": {
+      "total": 2,
+      "valid": 2,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 24,
+     "tokens": 76311,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 19,
+     "tokens": 50487,
+     "cost": null,
+     "refs": null
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 20,
+     "tokens": 78007,
+     "cost": null,
+     "refs": {
+      "total": 10,
+      "valid": 0,
+      "invalid": [
+       {
+        "ref": "certificate/transport.go:156",
+        "reason": "file not found"
+       },
+       {
+        "ref": "cm/container_manager_linux.go:693",
+        "reason": "file not found"
+       },
+       {
+        "ref": "cm/cpumanager/cpu_manager.go:269",
+        "reason": "file not found"
+       },
+       {
+        "ref": "cm/qos_container_manager_linux.go:179",
+        "reason": "file not found"
+       },
+       {
+        "ref": "config/http.go:57",
+        "reason": "file not found"
+       },
+       {
+        "ref": "images/puller.go:86",
+        "reason": "file not found"
+       },
+       {
+        "ref": "kubelet.go:3482",
+        "reason": "file not found"
+       },
+       {
+        "ref": "pod_container_deletor.go:52",
+        "reason": "file not found"
+       },
+       {
+        "ref": "util/manager/watch_based_manager.go:207",
+        "reason": "file not found"
+       },
+       {
+        "ref": "volumemanager/reconciler/reconciler.go:30",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 11,
+     "tokens": 49722,
+     "cost": null,
+     "refs": null
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 14,
+     "tokens": 51233,
+     "cost": null,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/muse-spark-1.3-contributor-free",
+   "model": "opencode/muse-spark-1.3-contributor-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 23,
+   "medianTokens": 43992,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 24,
+     "tokens": 101842,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 2,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 23,
+     "tokens": 44705,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 6,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 18,
+     "tokens": 21738,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 32,
+     "tokens": 43992,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 48,
+     "tokens": 44962,
+     "cost": 0,
+     "refs": {
+      "total": 22,
+      "valid": 22,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 18,
+     "tokens": 42987,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 12,
+     "tokens": 21736,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 21,
+     "tokens": 21798,
+     "cost": 0,
+     "refs": {
+      "total": 11,
+      "valid": 11,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 42,
+     "tokens": 44333,
+     "cost": 0,
+     "refs": {
+      "total": 14,
+      "valid": 14,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:openrouter/poolside/laguna-xs-2.1:free",
+   "model": "openrouter/poolside/laguna-xs-2.1:free",
+   "n": 1,
+   "unmeasured": 8,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": null,
+    "set": null
+   },
+   "medianSeconds": 34,
+   "medianTokens": 21068,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "** packages/react-reconciler/src/ReactFiber.js:739  **DETAILS:** The function createFiberFromElement is defined as an exported function at line 739 in the file packages/react-reconciler/src/ReactFiber.js. This is part of the React reconciler package, which handles the fiber-based reconciliation algorithm.  **FILES CHANGED:** none  **VERIFICATION:** Ran grep search for the exact pattern export function createFiberFromElement( which found 1 match at the specified location.  **OPEN ISSUES:** none",
+     "state": "done",
+     "seconds": 34,
+     "tokens": 21068,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/space-bunny-free",
+   "model": "opencode/space-bunny-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 35,
+   "medianTokens": 62778,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 110,
+     "tokens": 323777,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 0,
+      "invalid": [
+       {
+        "ref": "src/__tests__/ReactSuspenseList-test.js:3155",
+        "reason": "file not found"
+       },
+       {
+        "ref": "src/__tests__/ReactSuspensePlaceholder-test.internal.js:30",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 37,
+     "tokens": 86563,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 6,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 14,
+     "tokens": 20225,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 370,
+     "tokens": 39866,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 35,
+     "tokens": 89416,
+     "cost": 0,
+     "refs": {
+      "total": 9,
+      "valid": 9,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 29,
+     "tokens": 85916,
+     "cost": 0,
+     "refs": {
+      "total": 7,
+      "valid": 7,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 362,
+     "tokens": 62778,
+     "cost": 0,
+     "refs": {
+      "total": 13,
+      "valid": 11,
+      "invalid": [
+       {
+        "ref": "kubelet.go:3482",
+        "reason": "file not found"
+       },
+       {
+        "ref": "reconciler.go:30",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 21,
+     "tokens": 20204,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 14,
+     "tokens": 41902,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/mimo-v2.6-flash-free",
+   "model": "opencode/mimo-v2.6-flash-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 37,
+   "medianTokens": 41646,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 43,
+     "tokens": 70396,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 40403,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 1,
+      "invalid": [
+       {
+        "ref": "ReactFiber.js:739",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 26,
+     "tokens": 20185,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 1,
+      "invalid": [
+       {
+        "ref": "ReactFiberClassComponent.js:57",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberReconciler.js:71",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberHotReloading.js:18",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberBeginWork.js:267",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberHooks.js:105",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 50,
+     "tokens": 67598,
+     "cost": 0,
+     "refs": {
+      "total": 3,
+      "valid": 3,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 17,
+     "tokens": 19776,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 49,
+     "tokens": 41646,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 23,
+     "tokens": 20166,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 2,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 37,
+     "tokens": 44299,
+     "cost": 0,
+     "refs": {
+      "total": 9,
+      "valid": 9,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 50,
+     "tokens": 63648,
+     "cost": 0,
+     "refs": {
+      "total": 11,
+      "valid": 11,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/big-pickle",
+   "model": "opencode/big-pickle",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 1,
+   "byKind": {
+    "definition": 1,
+    "count": 1,
+    "set": 1
+   },
+   "medianSeconds": 42,
+   "medianTokens": 91405,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 42,
+     "tokens": 95247,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 41,
+     "tokens": 152990,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 6,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 382,
+     "tokens": 40848,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 2,
+      "invalid": [
+       {
+        "ref": "ReactChildFiber.js:61",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactChildFiber.js:246",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiber.js:553",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiber.js:739",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 19,
+     "tokens": 40401,
+     "cost": 0,
+     "refs": {
+      "total": 8,
+      "valid": 8,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 40,
+     "tokens": 91405,
+     "cost": 0,
+     "refs": {
+      "total": 22,
+      "valid": 22,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 43,
+     "tokens": 145506,
+     "cost": 0,
+     "refs": {
+      "total": 5,
+      "valid": 5,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 53,
+     "tokens": 90235,
+     "cost": 0,
+     "refs": {
+      "total": 23,
+      "valid": 14,
+      "invalid": [
+       {
+        "ref": "cm/dra/manager.go:177",
+        "reason": "file not found"
+       },
+       {
+        "ref": "cm/dra/plugin/dra_plugin_manager.go:429",
+        "reason": "file not found"
+       },
+       {
+        "ref": "pluginmanager/reconciler/reconciler.go:87",
+        "reason": "file not found"
+       },
+       {
+        "ref": "watchdog/watchdog_linux.go:142",
+        "reason": "file not found"
+       },
+       {
+        "ref": "podcertificate/podcertificatemanager.go:347",
+        "reason": "file not found"
+       },
+       {
+        "ref": "images/image_gc_manager.go:220",
+        "reason": "file not found"
+       },
+       {
+        "ref": "config/mux.go:73",
+        "reason": "file not found"
+       },
+       {
+        "ref": "volumemanager/volumehealth/manager.go:92",
+        "reason": "file not found"
+       },
+       {
+        "ref": "volumemanager/populator/desired_state_of_world_populator.go:158",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 54,
+     "tokens": 109861,
+     "cost": 0,
+     "refs": {
+      "total": 14,
+      "valid": 14,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "/Users/tahaatas/workspace/bench-repos/kubernetes/cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 19,
+     "tokens": 20227,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 2,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+   "model": "openrouter/nvidia/nemotron-3-ultra-550b-a55b:free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 0.8888888888888888,
+   "byKind": {
+    "definition": 1,
+    "count": 0.6666666666666666,
+    "set": 1
+   },
+   "medianSeconds": 27,
+   "medianTokens": 41567,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 16,
+     "tokens": 21101,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 43215,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 0,
+     "got": 9,
+     "state": "done",
+     "seconds": 79,
+     "tokens": 166003,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 33,
+     "tokens": 43570,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 24,
+     "tokens": 41567,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 27,
+     "tokens": 20772,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 22,
+     "tokens": 21119,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 71,
+     "tokens": 44213,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 25,
+     "tokens": 21179,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/longcat-2.5-preview-free",
+   "model": "opencode/longcat-2.5-preview-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 0.8888888888888888,
+   "byKind": {
+    "definition": 1,
+    "count": 0.6666666666666666,
+    "set": 1
+   },
+   "medianSeconds": 29,
+   "medianTokens": 20266,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 1,
+     "got": 16,
+     "state": "done",
+     "seconds": 44,
+     "tokens": 86355,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 25,
+     "tokens": 20221,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 29,
+     "tokens": 20266,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 24,
+     "tokens": 19869,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 35,
+     "tokens": 39911,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 19908,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 26,
+     "tokens": 20242,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 0,
+     "got": 10,
+     "state": "done",
+     "seconds": 53,
+     "tokens": 84134,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 48,
+     "tokens": 84247,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/nemotron-3-ultra-free",
+   "model": "opencode/nemotron-3-ultra-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 0.8888888888888888,
+   "byKind": {
+    "definition": 1,
+    "count": 0.6666666666666666,
+    "set": 1
+   },
+   "medianSeconds": 35,
+   "medianTokens": 21127,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 0,
+     "got": 8,
+     "state": "done",
+     "seconds": 111,
+     "tokens": 97550,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 40,
+     "tokens": 21127,
+     "cost": 0,
+     "refs": {
+      "total": 6,
+      "valid": 0,
+      "invalid": [
+       {
+        "ref": "ReactFiberWorkLoop.js:987",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberHooks.js:105",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberClassComponent.js:57",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberHotReloading.js:18",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberReconciler.js:71",
+        "reason": "file not found"
+       },
+       {
+        "ref": "ReactFiberBeginWork.js:267",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "/Users/tahaatas/workspace/bench-repos/react/packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 21087,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 40,
+     "tokens": 42668,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 36,
+     "tokens": 20731,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 17,
+     "tokens": 20703,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 21107,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 35,
+     "tokens": 44325,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 30,
+     "tokens": 66251,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:openrouter/thinkingmachines/inkling:free",
+   "model": "openrouter/thinkingmachines/inkling:free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 0,
+   "accuracy": 0.8333333333333334,
+   "byKind": {
+    "definition": 1,
+    "count": 0.6666666666666666,
+    "set": 0.8333333333333334
+   },
+   "medianSeconds": 14,
+   "medianTokens": 40962,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 16,
+     "tokens": 107957,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 0,
+      "invalid": [
+       {
+        "ref": "ReactFiberWorkLoop.js:987",
+        "reason": "file not found"
+       }
+      ]
+     }
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "/Users/tahaatas/workspace/bench-repos/react/packages/react-reconciler/src/ReactFiber.js:739 defines export function createFiberFromElement(.",
+     "state": "done",
+     "seconds": 11,
+     "tokens": 19916,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 0,
+     "got": 8,
+     "state": "done",
+     "seconds": 21,
+     "tokens": 178213,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 14,
+     "tokens": 40962,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 0.5,
+     "got": "4/4 found, 8 extra",
+     "state": "done",
+     "seconds": 17,
+     "tokens": 61630,
+     "cost": 0,
+     "refs": {
+      "total": 4,
+      "valid": 4,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "django/utils/http.py:100",
+     "state": "done",
+     "seconds": 10,
+     "tokens": 19531,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 12,
+     "tokens": 40515,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 18,
+     "tokens": 86402,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 10,
+     "tokens": 19931,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    }
+   ]
+  },
+  {
+   "target": "opencode:opencode/nemotron-3.5-lightning-free",
+   "model": "opencode/nemotron-3.5-lightning-free",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 1,
+   "accuracy": 0.7222222222222222,
+   "byKind": {
+    "definition": 1,
+    "count": 0.6666666666666666,
+    "set": 0.5
+   },
+   "medianSeconds": 377,
+   "medianTokens": 68980,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "/Users/tahaatas/workspace/bench-repos/react/packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 171,
+     "tokens": 21084,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 0,
+     "got": "(timeout)",
+     "state": "timeout",
+     "seconds": 600,
+     "tokens": 1130928,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 136,
+     "tokens": 123233,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "/Users/tahaatas/workspace/bench-repos/django/django/utils/http.py:100",
+     "state": "done",
+     "seconds": 28,
+     "tokens": 20714,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 1,
+     "got": 22,
+     "state": "done",
+     "seconds": 386,
+     "tokens": 177452,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 0.5,
+     "got": "4/4 found, 8 extra",
+     "state": "done",
+     "seconds": 377,
+     "tokens": 44752,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "cmd/kube-scheduler/app/server.go:94",
+     "state": "done",
+     "seconds": 41,
+     "tokens": 21132,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 0,
+     "got": "0/10 found, 4 extra",
+     "state": "done",
+     "seconds": 379,
+     "tokens": 68980,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 1,
+     "got": 13,
+     "state": "done",
+     "seconds": 427,
+     "tokens": 217017,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:nvidia/openai/gpt-oss-20b",
+   "model": "nvidia/openai/gpt-oss-20b",
+   "n": 9,
+   "unmeasured": 0,
+   "failed": 2,
+   "accuracy": 0.4444444444444444,
+   "byKind": {
+    "definition": 0.3333333333333333,
+    "count": 0,
+    "set": 1
+   },
+   "medianSeconds": 23,
+   "medianTokens": 41597,
+   "cost": 0,
+   "runs": [
+    {
+     "q": "react-set",
+     "kind": "set",
+     "s": 1,
+     "got": "6/6 found, 0 extra",
+     "state": "done",
+     "seconds": 43,
+     "tokens": 123382,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-count",
+     "kind": "count",
+     "s": 0,
+     "got": 13,
+     "state": "done",
+     "seconds": 24,
+     "tokens": 99269,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "react-def",
+     "kind": "definition",
+     "s": 1,
+     "got": "packages/react-reconciler/src/ReactFiber.js:739",
+     "state": "done",
+     "seconds": 19,
+     "tokens": 122416,
+     "cost": 0,
+     "refs": {
+      "total": 2,
+      "valid": 1,
+      "invalid": [
+       {
+        "ref": "/packages/react-reconciler/src/ReactFiber.js:739",
+        "reason": "outside the project"
+       }
+      ]
+     }
+    },
+    {
+     "q": "django-count",
+     "kind": "count",
+     "s": 0,
+     "got": 23,
+     "state": "done",
+     "seconds": 30,
+     "tokens": 41597,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-def",
+     "kind": "definition",
+     "s": 0,
+     "got": "(failed)",
+     "state": "failed",
+     "seconds": 11,
+     "tokens": 39673,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "django-set",
+     "kind": "set",
+     "s": 1,
+     "got": "4/4 found, 0 extra",
+     "state": "done",
+     "seconds": 16,
+     "tokens": 20033,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-count",
+     "kind": "count",
+     "s": 0,
+     "got": 9,
+     "state": "done",
+     "seconds": 15,
+     "tokens": 20210,
+     "cost": 0,
+     "refs": null
+    },
+    {
+     "q": "k8s-def",
+     "kind": "definition",
+     "s": 0,
+     "got": "(failed)",
+     "state": "failed",
+     "seconds": 23,
+     "tokens": 89552,
+     "cost": 0,
+     "refs": {
+      "total": 1,
+      "valid": 1,
+      "invalid": []
+     }
+    },
+    {
+     "q": "k8s-set",
+     "kind": "set",
+     "s": 1,
+     "got": "10/10 found, 0 extra",
+     "state": "done",
+     "seconds": 24,
+     "tokens": 40668,
+     "cost": 0,
+     "refs": null
+    }
+   ]
+  },
+  {
+   "target": "opencode:openrouter/poolside/laguna-s-2.1:free",
+   "model": "openrouter/poolside/laguna-s-2.1:free",
+   "n": 0,
+   "unmeasured": 9,
+   "failed": 0,
+   "accuracy": null,
+   "byKind": {
+    "definition": null,
+    "count": null,
+    "set": null
+   },
+   "medianSeconds": null,
+   "medianTokens": null,
+   "cost": 0,
+   "runs": []
+  },
+  {
+   "target": "opencode:openrouter/cohere/north-mini-code:free",
+   "model": "openrouter/cohere/north-mini-code:free",
+   "n": 0,
+   "unmeasured": 9,
+   "failed": 0,
+   "accuracy": null,
+   "byKind": {
+    "definition": null,
+    "count": null,
+    "set": null
+   },
+   "medianSeconds": null,
+   "medianTokens": null,
+   "cost": 0,
+   "runs": []
+  },
+  {
+   "target": "opencode:openrouter/qwen/qwen3.8-27b:free",
+   "model": "openrouter/qwen/qwen3.8-27b:free",
+   "n": 0,
+   "unmeasured": 9,
+   "failed": 0,
+   "accuracy": null,
+   "byKind": {
+    "definition": null,
+    "count": null,
+    "set": null
+   },
+   "medianSeconds": null,
+   "medianTokens": null,
+   "cost": 0,
+   "runs": []
+  }
+ ]
+}

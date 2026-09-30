@@ -1,0 +1,55 @@
+{
+  "note": "Answers are checked against `git grep` on the pinned commit, not by opinion. Each task ends with the same answer-format rule.",
+  "repos": {
+    "react": { "url": "https://github.com/facebook/react", "commit": "7c6ac13e1" },
+    "django": { "url": "https://github.com/django/django", "commit": "50eef9559" },
+    "kubernetes": { "url": "https://github.com/kubernetes/kubernetes", "commit": "08147af84" }
+  },
+  "questions": [
+    {
+      "id": "react-def", "repo": "react", "kind": "definition",
+      "task": "Which file and line define `export function createFiberFromElement(`? The SUMMARY line must be only path:line.",
+      "truth": { "pattern": "^export function createFiberFromElement\\(", "regex": true, "dir": "packages" }
+    },
+    {
+      "id": "react-count", "repo": "react", "kind": "count",
+      "task": "How many files under packages/react-reconciler/src (recursively, excluding any path that contains __tests__) contain the word enableProfilerTimer? The SUMMARY line must be only the number.",
+      "truth": { "pattern": "enableProfilerTimer", "word": true, "dir": "packages/react-reconciler/src", "excludeRe": "__tests__" }
+    },
+    {
+      "id": "react-set", "repo": "react", "kind": "set",
+      "task": "List every file under packages/ (excluding any path that contains __tests__) that contains the word scheduleUpdateOnFiber, the file that defines it included. The SUMMARY line must be only the file paths from the repository root, separated by commas.",
+      "truth": { "pattern": "scheduleUpdateOnFiber", "word": true, "dir": "packages", "excludeRe": "__tests__" }
+    },
+    {
+      "id": "django-def", "repo": "django", "kind": "definition",
+      "task": "Which file and line define the top-level function `def parse_http_date(`? The SUMMARY line must be only path:line.",
+      "truth": { "pattern": "^def parse_http_date\\(", "regex": true, "dir": "django" }
+    },
+    {
+      "id": "django-count", "repo": "django", "kind": "count",
+      "task": "How many files under django/db (recursively) contain the word NotSupportedError? The SUMMARY line must be only the number.",
+      "truth": { "pattern": "NotSupportedError", "word": true, "dir": "django/db" }
+    },
+    {
+      "id": "django-set", "repo": "django", "kind": "set",
+      "task": "List every file under django/ (excluding any path that contains /tests/) that contains the word csrf_exempt, the file that defines it included. The SUMMARY line must be only the file paths from the repository root, separated by commas.",
+      "truth": { "pattern": "csrf_exempt", "word": true, "dir": "django", "excludeRe": "/tests/" }
+    },
+    {
+      "id": "k8s-def", "repo": "kubernetes", "kind": "definition",
+      "task": "Which file and line define `func NewSchedulerCommand(`? The SUMMARY line must be only path:line.",
+      "truth": { "pattern": "^func NewSchedulerCommand\\(", "regex": true, "dir": "cmd" }
+    },
+    {
+      "id": "k8s-count", "repo": "kubernetes", "kind": "count",
+      "task": "How many files under cmd/ (recursively, excluding files whose name ends in _test.go) contain the exact text utilfeature.DefaultFeatureGate.Enabled? The SUMMARY line must be only the number.",
+      "truth": { "pattern": "utilfeature.DefaultFeatureGate.Enabled", "dir": "cmd", "excludeRe": "_test\\.go$" }
+    },
+    {
+      "id": "k8s-set", "repo": "kubernetes", "kind": "set",
+      "task": "List every file under pkg/kubelet (excluding files whose name ends in _test.go) that contains the exact text wait.Until( . The SUMMARY line must be only the file paths from the repository root, separated by commas.",
+      "truth": { "pattern": "wait.Until(", "dir": "pkg/kubelet", "excludeRe": "_test\\.go$" }
+    }
+  ]
+}
