@@ -52,6 +52,7 @@ export function waitForEvent(
  *
  * @param threadManager - The thread manager to query
  * @param threadId - Thread to check for events
+ * @param eventType - Type of event to wait for
  * @param count - Number of events to wait for
  * @param timeoutMs - Maximum time to wait (default 5000ms)
  * @returns Promise resolving to all matching events once count is reached
