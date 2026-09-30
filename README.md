@@ -1,3 +1,5 @@
+![Pitroom — a free pit crew for your expensive coding agent. Orange Claw’d and a blue terminal-faced Codex pet work together at a coding terminal.](docs/pitroom-hero.png)
+
 # Pitroom
 
 **A free pit crew for your expensive coding agent.**
