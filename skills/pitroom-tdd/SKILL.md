@@ -1,6 +1,6 @@
 ---
 name: pitroom-tdd
-description: Use when implementing any feature or bugfix, before writing implementation code - red, green, refactor, for you and for the workers you brief.
+description: Use when you want to drive a feature or bugfix test-first - red, green, refactor, for you and for the workers you brief.
 ---
 
 # Test-Driven Development (TDD)

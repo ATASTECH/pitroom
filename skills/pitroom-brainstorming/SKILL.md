@@ -1,6 +1,6 @@
 ---
 name: pitroom-brainstorming
-description: Use before any creative work - creating features, building components, adding functionality, or modifying behavior - to explore intent, requirements and design with the user and get approval before implementation.
+description: Use when you or the user want a feature, component or behaviour change designed before it is built - explores intent, requirements and design with the user and gets approval before implementation.
 ---
 
 # Brainstorming Ideas Into Designs

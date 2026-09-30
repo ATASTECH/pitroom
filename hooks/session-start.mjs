@@ -29,7 +29,7 @@ const command = fs.existsSync(cli) || fs.existsSync(launcher) ? `\`pitroom\`, or
 
 const context = `<pitroom>
 You have Pitroom: a development workflow as skills, and cheap worker agents that read, search, implement and review for you. Run it as ${command}.
-Below is the 'using-pitroom' skill, your introduction; load the other pitroom-* skills with your Skill tool when they apply.
+It is optional: use it when it helps or when the user asks for it, otherwise work as you normally would. Below is the 'using-pitroom' skill, a menu of what it offers; load a pitroom-* skill with your Skill tool when you choose to use it.
 
 ${body}
 </pitroom>`;

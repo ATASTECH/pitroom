@@ -1,6 +1,6 @@
 ---
 name: pitroom-verification
-description: Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims, including claims a worker made; evidence before assertions always.
+description: Use when you want evidence before claiming work is complete, fixed or passing, or before committing or opening a PR - run the checks and read their output first, including for claims a worker made.
 ---
 
 # Verification Before Completion

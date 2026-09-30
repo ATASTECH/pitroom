@@ -1,6 +1,6 @@
 ---
 name: pitroom-debugging
-description: Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes - finds the root cause first, with Pitroom workers gathering the evidence.
+description: Use when a bug, test failure or unexpected behaviour has no obvious cause and you want a root-cause process before proposing fixes - with Pitroom workers gathering the evidence.
 ---
 
 # Systematic Debugging

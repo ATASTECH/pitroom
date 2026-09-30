@@ -1,6 +1,6 @@
 ---
 name: using-pitroom
-description: Use at the start of every conversation and before any task - establishes the Pitroom workflow skills (brainstorm, plan, worker-driven development, review, debugging, TDD, verification, finishing) and when cheap Pitroom workers should do the reading and typing instead of you.
+description: Use when you want cheap Pitroom workers or its workflow skills for a task, or when the user asks for Pitroom - a menu of the pitroom-* skills (brainstorm, plan, worker-driven development, review, debugging, TDD, verification, finishing), when each pays off, and how to run workers. Optional; skip it for work you would rather do yourself.
 ---
 
 <SUBAGENT-STOP>
@@ -11,34 +11,36 @@ If you are a Pitroom worker, or were dispatched as a subagent for one specific t
 
 You are the primary agent: capable, expensive, and your context is precious. Pitroom gives you a development workflow as skills, and a crew of cheap worker agents (OpenCode, Codex, Claude Code, on whatever models the user configured) that read, search, implement and review for you. You decide, verify and answer.
 
-## Rule 0: small work stays with you
+## Optional by design
 
-Some work needs no skill, no worker and no brief: just do it and answer. A typo, a one-line fix or one spot the user pointed at, a rename inside one file, a value the user named; a question you can answer from this conversation or one file you already know; talking an idea through; running a command the user gave you. Writing a brief or walking a workflow for these costs more than the work itself.
+Pitroom is a toolbox, not a procedure. Use it when you judge it saves effort or improves the result, or when the user asks for it: by name, or for what it does ("brainstorm this with me", "write a plan", "have a worker do it", "get this reviewed"). Otherwise work as you normally would, with no skill and no worker. When the user says to stop using it, stop.
 
-It stops being small the moment it changes behaviour, touches several files, or needs reading around the code first: then Rule 1 applies.
+The user's instructions (CLAUDE.md, AGENTS.md, direct requests) always come before any of this.
 
-## Rule 1: skills first
+## When it pays off
 
-For everything beyond Rule 0: if there is even a small chance that a skill below applies to what you are doing, invoke it (your Skill tool, or read its SKILL.md) **before** you respond or act, including before clarifying questions or looking at files. If it turns out not to fit, drop it. Announce "Using <skill> to <purpose>", follow it exactly, and turn its checklist into todos.
+- Reading a lot to answer a little: many files to search, a flow to trace, a large module to map (`pitroom-research`).
+- Well-defined, checkable work you can hand off with a short brief: mechanical edits across files, tests to write, lint or type errors (`pitroom-implement`), several independent ones at once (`pitroom-crew`).
+- A second opinion from another model on a diff or a branch (`pitroom-review`).
+- Larger features you want to take through design, plan and worker-driven execution (the workflow skills below).
 
-Process skills come first: they decide how to approach the task, implementation follows. "Let's build X" → `pitroom-brainstorming`. "Fix this bug" → `pitroom-debugging`.
+A worker's brief pays off when the work is **bounded** (one question, one area, one well-defined change), **specifiable** (the worker sees none of this conversation) and **checkable** (a diff, a test run, file:line references).
 
-The user's instructions (CLAUDE.md, AGENTS.md, direct requests) override skills; skills override your defaults.
+## When to leave it
 
-## Rule 2: delegate what a worker can do
-
-Before you open many files, grep around, or make mechanical edits, ask: could a worker do this and hand me back only the answer? Delegate when the work is **bounded** (one question, one area, one well-defined change), **specifiable** (the worker sees none of this conversation) and **checkable** (a diff, a test run, file:line references). Keep design and product judgment, auth, crypto, payments and migrations, anything that needs the user's input or secrets, and anything smaller than writing the brief.
+- Small work: a typo, a one-line fix, a rename inside one file, a value the user named, a question you can answer from what you know or one file, talking an idea through, running a command the user gave you. Just do it.
+- Design and product judgment, auth, crypto, payments and migrations, and anything that needs the user's input or secrets: keep those yourself; delegate at most the reading that informs them.
 
 ## Which skill
 
 | Situation | Skill |
 |---|---|
-| Any creative work: a feature, a component, a behaviour change | `pitroom-brainstorming` |
+| A feature, component or behaviour change you want designed with the user first | `pitroom-brainstorming` |
 | A spec or requirements for a multi-step task | `pitroom-writing-plans` |
 | Executing a written plan | `pitroom-driven-development` |
 | An isolated branch for feature work or plan execution | `pitroom-worktrees` |
-| A bug, a test failure, unexpected behaviour | `pitroom-debugging` |
-| Writing any feature or bugfix code | `pitroom-tdd` |
+| A bug, a test failure, unexpected behaviour whose cause is not obvious | `pitroom-debugging` |
+| Feature or bugfix code you want to drive test-first | `pitroom-tdd` |
 | About to say something is done, fixed or passing | `pitroom-verification` |
 | A finished task or feature, or before a merge | `pitroom-review` |
 | Review feedback to act on | `pitroom-receiving-review` |
@@ -47,30 +49,18 @@ Before you open many files, grep around, or make mechanical edits, ask: could a 
 | One well-defined change outside a plan | `pitroom-implement` |
 | Two or more independent investigations or changes | `pitroom-crew` |
 
+Once you or the user pick a skill, follow it: its checklists and gates are how it works. Say which one you are using, and drop it when it stops fitting.
+
 ## Running Pitroom
 
 Call `pitroom` (on PATH after `pitroom install`; otherwise the command in your session context). `pitroom doctor` diagnoses setup problems. Workers and models come from the user's config (`worker`, `fallback`, `models`, `tiers`); pick others only when the user or a plan says so (`--tier capable`, `-W codex`).
 
 Workers can take minutes. Start long work with `--bg` and keep working; follow it with `pitroom watch --json` through your host's background or monitor facility, or call `pitroom wait --timeout 540` again while it exits 75. Never poll with `sleep`.
 
-## Non-negotiable
+## When you do use it
 
 - Never weaken a worker's safety flags, and never put secrets in a brief.
 - Worker output is draft work and a worker's report is a claim: verify what you rely on (`pitroom-verification`).
-- You apply patches and commit; workers never commit or push. Push, merge and pull requests happen only through `pitroom-finishing`, after asking.
+- You apply patches and commit; workers never commit or push. Push, merge and pull requests happen only after the user asks.
+- Keep the decisions: delegate the reading and typing, not the architecture.
 - If Pitroom fails, carry on yourself; if setup is broken, tell the user what `pitroom doctor` says.
-
-## Red flags
-
-| Thought | Reality |
-|---|---|
-| "This is just a simple question" | If what you know or one file answers it, answer (Rule 0). If it means reading around the code, `pitroom-research`. |
-| "Let me explore the codebase first" | Skills say how to explore; `pitroom-research` does the reading. |
-| "It's small, so no skill" (but it changes behaviour or several files) | Small in words is not small in work. Rule 0 ends there: a behaviour change starts with `pitroom-brainstorming`. |
-| "I'll write a brief for this one-line fix" | Rule 0: just make the edit. |
-| "I remember this skill" | Skills change. Read the current version. |
-| "I'll just grep around myself" (3+ files) | `pitroom-research` |
-| "I'll fix these twelve lint errors one by one" | `pitroom-implement` |
-| "First A, then B, then C" (and they are independent) | `pitroom-crew` |
-| "The worker can decide the architecture" | Keep the decision; delegate the reading that informs it. |
-| "The worker said the tests pass" | Run them. `pitroom-verification` |
