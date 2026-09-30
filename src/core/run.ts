@@ -12,6 +12,7 @@ import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
+import { parseVerdict } from './answers.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
 import { estimateTokens, record, savedUsd } from './receipt.js';
@@ -40,6 +41,8 @@ export interface RunOptions {
   web: boolean;
   noFallback: boolean;
   group?: string;
+  /** Set by `pitroom review`. */
+  review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string };
 }
 
 /** Validates options and writes the initial run record. Does not start the worker. */
@@ -112,6 +115,9 @@ export function prepareRun(o: RunOptions): RunMeta {
     // Follow-ups in an isolated copy accumulate into one patch against the original snapshot.
     baseTree: parent?.mode === 'isolate' ? parent.baseTree : undefined,
     worktree: parent?.mode === 'isolate' ? parent.worktree : undefined,
+    reviewOf: o.review?.of,
+    reviewKind: o.review?.kind,
+    packageFile: o.review?.packageFile,
   };
   writeMeta(meta);
   if (mode === 'write' && root) {
@@ -277,6 +283,10 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
   fs.writeFileSync(runFile(meta.id, 'summary.md'), `${run.finalText}\n`);
+  if (meta.reviewOf) {
+    meta.verdict = parseVerdict(run.finalText);
+    if (meta.packageFile) fs.rmSync(meta.packageFile, { force: true });
+  }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, 'stderr.log')), res.code);
     if (f) meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;

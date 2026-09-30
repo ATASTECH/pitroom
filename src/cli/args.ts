@@ -16,7 +16,7 @@ const VALUE_FLAGS: Record<string, string> = {
   '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '-g': 'group', '--group': 'group',
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
-  '--interval': 'interval',
+  '--interval': 'interval', '--range': 'range',
 };
 
 const BOOL_FLAGS: Record<string, string> = {

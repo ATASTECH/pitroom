@@ -7,16 +7,16 @@ import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
 import { formatReport, progress } from '../core/report.js';
+import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
+import { fill, loadTemplate } from '../core/templates.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile,
 } from '../core/store.js';
 import { type Parsed, exitCodeFor, flag, has, parseDuration, readTask, runOptions } from './args.js';
 
-export async function cmdRun(p: Parsed): Promise<number> {
-  const opts = runOptions(p, readTask(p));
-  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
-  const meta = prepareRun(opts);
+/** Runs a prepared run in the foreground, or starts it in the background with --bg. */
+async function launch(p: Parsed, meta: RunMeta): Promise<number> {
   if (has(p, 'bg')) {
     startInBackground(meta);
     console.log(
@@ -30,6 +30,38 @@ export async function cmdRun(p: Parsed): Promise<number> {
   const done = await execute(meta);
   console.log(has(p, 'json') ? JSON.stringify(done, null, 2) : formatReport(done));
   return exitCodeFor(done);
+}
+
+export async function cmdRun(p: Parsed): Promise<number> {
+  const opts = runOptions(p, readTask(p));
+  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
+  return launch(p, prepareRun(opts));
+}
+
+/** A read-only review of a run's change, of a fix round, or of a commit range. */
+export async function cmdReview(p: Parsed): Promise<number> {
+  const range = flag(p, 'range');
+  if (range && p.positional.length) throw new UserError('review takes a run or --range A..B, not both');
+  if (has(p, 'write') || has(p, 'isolate')) throw new UserError('reviews are read-only; drop -w/-i');
+  if (has(p, 'continue')) throw new UserError('to review a follow-up, pass its run id: pitroom review <run>');
+  const job = range ? rangeReview(range, flag(p, 'dir') ?? process.cwd()) : runReview(resolveRun(p.positional[0]));
+  const packageFile = writePackage(job);
+  let meta: RunMeta;
+  try {
+    meta = prepareRun({
+      ...runOptions(p, fill(loadTemplate(TEMPLATE[job.kind]), { PACKAGE_FILE: packageFile })),
+      mode: 'read',
+      dir: job.dir,
+      worker: flag(p, 'worker') ?? (flag(p, 'tier') ? undefined : pickReviewer(job)),
+      group: flag(p, 'group') ?? job.group,
+      review: { of: job.of, kind: job.kind, packageFile },
+    });
+  } catch (e) {
+    fs.rmSync(packageFile, { force: true });
+    throw e;
+  }
+  fs.writeFileSync(runFile(meta.id, 'package.md'), job.package);
+  return launch(p, meta);
 }
 
 /** Several tasks as one group of background workers. */

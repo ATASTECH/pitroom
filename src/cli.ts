@@ -14,6 +14,9 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" …
                                         start several workers in background as one group
+  pitroom review [run | --range A..B] [--tier T | -W T] [--bg]
+                                        read-only review of a run's change (a follow-up: only its
+                                        fix round) or of a commit range; by default on another worker
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run… | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -69,6 +72,7 @@ type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 const COMMANDS: Record<string, Command> = {
   run: cmd.cmdRun,
   crew: cmd.cmdCrew,
+  review: cmd.cmdReview,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,

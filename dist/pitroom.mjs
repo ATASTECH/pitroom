@@ -1149,7 +1149,8 @@ var VALUE_FLAGS = {
   "--since": "since",
   "--card": "card",
   "--days": "days",
-  "--interval": "interval"
+  "--interval": "interval",
+  "--range": "range"
 };
 var BOOL_FLAGS = {
   "-r": "read",
@@ -1258,8 +1259,8 @@ function runOptions(p, task) {
 }
 
 // src/cli/commands.ts
-import fs17 from "node:fs";
-import path14 from "node:path";
+import fs19 from "node:fs";
+import path16 from "node:path";
 
 // src/core/report.ts
 import fs9 from "node:fs";
@@ -1391,6 +1392,11 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(" \xB7 "));
+  if (meta.reviewOf) {
+    const v = meta.verdict;
+    const verdict = v ? ` \xB7 SPEC ${v.spec.toUpperCase()} \xB7 QUALITY ${v.quality.toUpperCase()} \xB7 critical ${v.critical} \xB7 important ${v.important} \xB7 minor ${v.minor}` : "";
+    out.push(`review of ${meta.reviewOf} (${meta.reviewKind})${verdict}`);
+  }
   for (const a of meta.attempts ?? []) out.push(`fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
@@ -1423,6 +1429,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
     if (meta.changes.length > 50) out.push(`   \u2026 ${meta.changes.length - 50} more`);
     if (meta.changes.length) {
       out.push(`   diff:    pitroom show ${meta.id} --patch`);
+      out.push(`   review:  pitroom review ${meta.id}`);
       if (meta.mode === "isolate" && !meta.applied && !meta.discarded) {
         out.push(`   apply:   pitroom apply ${meta.id}`, `   discard: pitroom discard ${meta.id}`);
       }
@@ -1436,7 +1443,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   }
   if (isActive(meta.state)) {
     out.push(`\u2500\u2500 still running: pitroom wait ${meta.id}   (stop: pitroom stop ${meta.id})`);
-  } else if (meta.sessionId && !meta.applied && !meta.discarded) {
+  } else if (meta.sessionId && !meta.applied && !meta.discarded && !meta.reviewOf) {
     out.push(`\u2500\u2500 follow up: pitroom run --continue ${meta.id} "\u2026"`);
   }
   return out.join("\n");
@@ -1692,10 +1699,10 @@ function installedSkills() {
   return skillTargets().map((base) => ({ base, names: names.filter((n) => fs10.existsSync(path8.join(base, n, "SKILL.md"))) }));
 }
 
-// src/core/run.ts
-import { spawn as spawn2, spawnSync as spawnSync5 } from "node:child_process";
-import fs16 from "node:fs";
-import path13 from "node:path";
+// src/core/review.ts
+import crypto3 from "node:crypto";
+import fs12 from "node:fs";
+import path10 from "node:path";
 
 // src/vcs/git.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
@@ -1799,6 +1806,171 @@ function applyPatch(root, patchFile, reverse) {
   const r = git(root, ["apply", "--whitespace=nowarn", ...flags, patchFile]);
   return { ok: r.code === 0, message: r.stderr.trim() };
 }
+function reviewDiff(root, a, b) {
+  return `${must(root, [...DIFF, "--stat", a, b]).trim()}
+
+${must(root, [...DIFF, "-U10", a, b])}`;
+}
+function rangeDiff(root, a, b) {
+  const range = `${a}..${b}`;
+  const log = must(root, ["log", "--oneline", "--no-decorate", range]).trim();
+  return [
+    `## COMMITS
+
+${log || "(none)"}`,
+    `## FILES CHANGED
+
+${must(root, [...DIFF, "--stat", range]).trim() || "(none)"}`,
+    `## DIFF
+
+${must(root, [...DIFF, "-U10", range])}`
+  ].join("\n\n");
+}
+function commitOf(root, ref) {
+  const r = git(root, ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]);
+  return r.code === 0 ? r.stdout.trim() : void 0;
+}
+function gitDir(dir) {
+  const r = git(dir, ["rev-parse", "--absolute-git-dir"]);
+  return r.code === 0 ? r.stdout.trim() : void 0;
+}
+
+// src/core/review.ts
+var TEMPLATE = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
+var section = (title, body) => `## ${title}
+
+${body.trim() || "(empty)"}
+`;
+function ancestors(m) {
+  const out = [];
+  for (let id = m.parent; id; ) {
+    const a = readMeta(id);
+    out.push(a);
+    id = a.parent;
+  }
+  return out;
+}
+function briefOf(m) {
+  const root = [m, ...ancestors(m)].at(-1);
+  const f = runFile(root.id, "brief.md");
+  return fs12.existsSync(f) ? fs12.readFileSync(f, "utf8") : root.task;
+}
+function latestReview(ids) {
+  for (const id of listRunIds().reverse()) {
+    try {
+      const m = readMeta(id);
+      if (m.reviewOf && ids.includes(m.reviewOf) && m.state === "done") return m;
+    } catch {
+    }
+  }
+  return void 0;
+}
+function diffOf(m, from = m.baseTree) {
+  const where = m.mode === "isolate" ? m.worktree : m.repoRoot;
+  if (where && fs12.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
+  if (from !== m.baseTree) {
+    throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
+  }
+  return fs12.readFileSync(runFile(m.id, "changes.patch"), "utf8");
+}
+function runReview(id) {
+  const m = freshMeta(id);
+  if (isActive(m.state)) throw new UserError(`run ${m.id} is still ${m.state}; pitroom wait ${m.id} first`, 3);
+  if (m.reviewOf) throw new UserError(`run ${m.id} is itself a review`);
+  if (m.mode === "read") throw new UserError(`run ${m.id} was read-only; there is no change to review`);
+  if (!m.changes?.length) throw new UserError(`run ${m.id} made no changes; nothing to review`);
+  const chain = ancestors(m);
+  const previous = latestReview(chain.map((a) => a.id));
+  const dir = m.mode === "isolate" && m.worktree && fs12.existsSync(m.worktree) ? m.cwd : m.dir;
+  const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group };
+  const title = `run ${m.id}`;
+  if (!previous) {
+    return {
+      ...job,
+      kind: "task",
+      package: [`# Review package \xB7 ${title}
+`, section("BRIEF", briefOf(m)), section("REPORT", readSummary(m)), section("DIFF", diffOf(m))].join("\n")
+    };
+  }
+  const reviewed = chain.find((a) => a.id === previous.reviewOf);
+  const from = m.mode === "isolate" ? reviewed.afterTree : m.baseTree;
+  return {
+    ...job,
+    kind: "fix",
+    package: [
+      `# Re-review package \xB7 ${title} \xB7 fix round after review ${previous.id}
+`,
+      section("BRIEF", briefOf(m)),
+      section("PREVIOUS FINDINGS", readSummary(previous)),
+      section("FIX REPORT", readSummary(m)),
+      section("FIX DIFF", diffOf(m, from))
+    ].join("\n")
+  };
+}
+function rangeReview(range, dir) {
+  const root = repoRoot(dir);
+  if (!root) throw new UserError("--range needs a git repository");
+  const i = range.indexOf("..");
+  const a = i > 0 ? range.slice(0, i) : "";
+  const b = i > 0 ? range.slice(i + 2) || "HEAD" : "";
+  if (!a || b.startsWith(".")) throw new UserError(`--range takes A..B (e.g. main..HEAD), not "${range}"`);
+  for (const ref of [a, b]) if (!commitOf(root, ref)) throw new UserError(`not a commit: ${ref}`);
+  return {
+    kind: "range",
+    of: `${a}..${b}`,
+    dir: root,
+    package: [
+      `# Review package \xB7 ${a}..${b}
+`,
+      section("WHAT WAS IMPLEMENTED", "The commits below."),
+      section("REQUIREMENTS", "(none given; judge the change on its own terms)"),
+      rangeDiff(root, a, b)
+    ].join("\n")
+  };
+}
+function pickReviewer(job) {
+  const eff = effective();
+  const tiers = eff.tiers.value;
+  if (job.kind === "range") return tiers.capable;
+  const implementer = job.implementer;
+  if (!implementer) return void 0;
+  const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
+  const candidates = [tiers.standard, tiers.capable, ...eff.fallback.value, eff.worker.value].filter((s) => !!s);
+  return candidates.find((c) => parseTarget(c, def).backend !== implementer.backend);
+}
+function writePackage(job) {
+  const g = gitDir(job.dir);
+  if (!g) throw new UserError(`not a git repository: ${job.dir}`);
+  const file = path10.join(g, "pitroom", `review-${crypto3.randomBytes(4).toString("hex")}.md`);
+  fs12.mkdirSync(path10.dirname(file), { recursive: true });
+  fs12.writeFileSync(file, job.package);
+  return file;
+}
+
+// src/core/templates.ts
+import fs13 from "node:fs";
+import path11 from "node:path";
+var FILES = {
+  implementer: "pitroom-driven-development/implementer-prompt.md",
+  "task-reviewer": "pitroom-driven-development/task-reviewer-prompt.md",
+  "re-review": "pitroom-driven-development/re-review-prompt.md",
+  "code-reviewer": "pitroom-review/code-reviewer.md"
+};
+function loadTemplate(name, root = packageRoot()) {
+  const file = path11.join(root, "skills", FILES[name]);
+  if (!fs13.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs13.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+}
+function fill(template, values) {
+  const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
+  if (missing.length) throw new Error(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`);
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
+}
+
+// src/core/run.ts
+import { spawn as spawn2, spawnSync as spawnSync5 } from "node:child_process";
+import fs18 from "node:fs";
+import path15 from "node:path";
 
 // src/core/chain.ts
 function resolveChain(flags = {}) {
@@ -1831,11 +2003,11 @@ function resolveChain(flags = {}) {
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs13 from "node:fs";
+import fs15 from "node:fs";
 
 // src/vcs/guard.ts
-import fs12 from "node:fs";
-import path10 from "node:path";
+import fs14 from "node:fs";
+import path12 from "node:path";
 var VERSION = 1;
 var SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
@@ -1910,15 +2082,15 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path10.join(home(), "shim", `v${VERSION}`);
+  return path12.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
-  for (const dir of (process.env.PATH ?? "").split(path10.delimiter).filter(Boolean)) {
-    if (path10.resolve(dir) === skip) continue;
-    const p = path10.join(dir, "git");
+  for (const dir of (process.env.PATH ?? "").split(path12.delimiter).filter(Boolean)) {
+    if (path12.resolve(dir) === skip) continue;
+    const p = path12.join(dir, "git");
     try {
-      fs12.accessSync(p, fs12.constants.X_OK);
-      if (fs12.statSync(p).isFile()) return p;
+      fs14.accessSync(p, fs14.constants.X_OK);
+      if (fs14.statSync(p).isFile()) return p;
     } catch {
     }
   }
@@ -1931,13 +2103,13 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path10.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path12.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
-  if (fs12.existsSync(file) && fs12.readFileSync(file, "utf8") === content) return;
-  fs12.mkdirSync(path10.dirname(file), { recursive: true });
+  if (fs14.existsSync(file) && fs14.readFileSync(file, "utf8") === content) return;
+  fs14.mkdirSync(path12.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs12.writeFileSync(tmp, content, { mode: 493 });
-  fs12.renameSync(tmp, file);
+  fs14.writeFileSync(tmp, content, { mode: 493 });
+  fs14.renameSync(tmp, file);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -1959,7 +2131,7 @@ function guardEnv(env) {
     PAGER: "cat"
   };
   if (process.platform === "win32") return { ...env, ...quiet };
-  writeIfChanged(path10.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path12.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(env, [
     ["core.hooksPath", hooksDir()],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -1967,14 +2139,14 @@ function guardEnv(env) {
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
-  writeIfChanged(path10.join(dir, "git"), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path10.delimiter}${env.PATH ?? ""}` };
+  writeIfChanged(path12.join(dir, "git"), SHIM);
+  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path12.delimiter}${env.PATH ?? ""}` };
 }
 
 // src/core/process.ts
 async function spawnWorker(inv, opts) {
-  const out = fs13.openSync(opts.stdoutFile, "w");
-  const err = fs13.openSync(opts.stderrFile, "w");
+  const out = fs15.openSync(opts.stdoutFile, "w");
+  const err = fs15.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -2006,17 +2178,32 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs13.closeSync(out);
-  fs13.closeSync(err);
+  fs15.closeSync(out);
+  fs15.closeSync(err);
   return res;
 }
 
+// src/core/answers.ts
+function parseVerdict(text) {
+  const line = /^\s*SUMMARY:.*\bSPEC:.*$/im.exec(text)?.[0] ?? /^.*\bSPEC:.*$/im.exec(text)?.[0] ?? "";
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(line)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(line)?.[1]?.toUpperCase();
+  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(line)?.[1] ?? 0);
+  return {
+    spec: spec === "pass" || spec === "fail" ? spec : "unknown",
+    quality: quality === "APPROVED" ? "approved" : quality ? "needs-fixes" : "unknown",
+    critical: count("critical"),
+    important: count("important"),
+    minor: count("minor")
+  };
+}
+
 // src/core/slots.ts
-import crypto3 from "node:crypto";
-import fs14 from "node:fs";
-import path11 from "node:path";
-var slotsDir = () => path11.join(home(), "slots");
-var locksDir = () => path11.join(home(), "locks");
+import crypto4 from "node:crypto";
+import fs16 from "node:fs";
+import path13 from "node:path";
+var slotsDir = () => path13.join(home(), "slots");
+var locksDir = () => path13.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -2030,23 +2217,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs14.mkdirSync(path11.dirname(file), { recursive: true });
+  fs16.mkdirSync(path13.dirname(file), { recursive: true });
   try {
-    fs14.writeFileSync(file, runId, { flag: "wx" });
+    fs16.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs14.readFileSync(file, "utf8").trim();
+    owner = fs16.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs14.rmSync(file, { force: true });
+  fs16.rmSync(file, { force: true });
   try {
-    fs14.writeFileSync(file, runId, { flag: "wx" });
+    fs16.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -2055,25 +2242,25 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs14.readFileSync(file, "utf8").trim() === runId) fs14.rmSync(file, { force: true });
+    if (fs16.readFileSync(file, "utf8").trim() === runId) fs16.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path11.join(slotsDir(), `slot-${n}`);
+    const file = path13.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
-var lockFile = (repoRoot2) => path11.join(locksDir(), `write-${crypto3.createHash("sha1").update(path11.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot2) => path13.join(locksDir(), `write-${crypto4.createHash("sha1").update(path13.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot2, runId) {
   const file = lockFile(repoRoot2);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs14.readFileSync(file, "utf8").trim();
+    owner = fs16.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -2119,8 +2306,8 @@ ${task}`;
 }
 
 // src/core/refs.ts
-import fs15 from "node:fs";
-import path12 from "node:path";
+import fs17 from "node:fs";
+import path14 from "node:path";
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
   String.raw`(?<![\w/:.-])(\.{0,2}/?(?:[\w@.+-]+/)*(?:[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}|${EXTENSIONLESS})):(\d+)(?:[-–](\d+))?`,
@@ -2166,13 +2353,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path12.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path14.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs15.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs15.readFileSync(file, "utf8").split("\n");
+      const size = fs17.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs17.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -2181,7 +2368,7 @@ function verifyRefs(refs, dirs) {
   for (const ref of refs) {
     const file = resolve(ref.file, roots);
     if (!file) {
-      invalid.push({ ref: ref.text, reason: path12.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path14.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     const lines = load(file);
@@ -2208,10 +2395,10 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 function resolve(ref, roots) {
-  const candidates = path12.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path12.join(r, ref));
+  const candidates = path14.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path14.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs15.statSync(c).isFile() && inside(c, roots);
+      return fs17.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -2219,8 +2406,8 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path12.relative(r, path12.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path12.isAbsolute(rel);
+    const rel = path14.relative(r, path14.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path14.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -2240,7 +2427,7 @@ function prepareRun(o) {
     parent = readMeta(o.continueFrom);
     if (o.worker || o.tier) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
-    if (parent.mode === "isolate" && (!parent.worktree || !fs16.existsSync(parent.worktree))) {
+    if (parent.mode === "isolate" && (!parent.worktree || !fs18.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
     }
     const ran = parent.ran ?? parent.worker;
@@ -2259,15 +2446,15 @@ function prepareRun(o) {
     throw new UserError(`the ${backend.name} worker cannot attach files; put the content in the task`);
   }
   const mode = parent?.mode ?? o.mode;
-  const dir = path13.resolve(parent?.dir ?? o.dir);
-  if (!fs16.existsSync(dir) || !fs16.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
+  const dir = path15.resolve(parent?.dir ?? o.dir);
+  if (!fs18.existsSync(dir) || !fs18.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
   if (mode === "write" && !root && !o.allowNonGit) {
     throw new UserError("--write outside a git repo cannot be tracked or reverted; pass --allow-non-git to accept that", 3);
   }
-  const files = o.files.map((f) => path13.resolve(f));
-  for (const f of files) if (!fs16.existsSync(f)) throw new UserError(`file not found: ${f}`);
+  const files = o.files.map((f) => path15.resolve(f));
+  for (const f of files) if (!fs18.existsSync(f)) throw new UserError(`file not found: ${f}`);
   const meta = {
     id: newRunId(),
     version: VERSION2,
@@ -2291,18 +2478,21 @@ function prepareRun(o) {
     warnings,
     // Follow-ups in an isolated copy accumulate into one patch against the original snapshot.
     baseTree: parent?.mode === "isolate" ? parent.baseTree : void 0,
-    worktree: parent?.mode === "isolate" ? parent.worktree : void 0
+    worktree: parent?.mode === "isolate" ? parent.worktree : void 0,
+    reviewOf: o.review?.of,
+    reviewKind: o.review?.kind,
+    packageFile: o.review?.packageFile
   };
   writeMeta(meta);
   if (mode === "write" && root) {
     try {
       acquireWriteLock(root, meta.id);
     } catch (e) {
-      fs16.rmSync(runDir(meta.id), { recursive: true, force: true });
+      fs18.rmSync(runDir(meta.id), { recursive: true, force: true });
       throw e;
     }
   }
-  fs16.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
+  fs18.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
 `);
   return meta;
 }
@@ -2376,7 +2566,7 @@ async function execute(meta) {
       (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
-        if (fs16.existsSync(from)) fs16.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
+        if (fs18.existsSync(from)) fs18.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
       }
       writeMeta(meta);
     }
@@ -2396,9 +2586,9 @@ function prepareTree(meta) {
   if (root && meta.mode === "write") meta.baseTree = snapshotTree(root);
   if (root && meta.mode === "isolate" && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
-    meta.worktree = path13.join(worktreesDir(), meta.id);
+    meta.worktree = path15.join(worktreesDir(), meta.id);
     createIsolatedCopy(root, meta.baseTree, meta.worktree);
-    meta.cwd = path13.join(meta.worktree, path13.relative(root, meta.dir));
+    meta.cwd = path15.join(meta.worktree, path15.relative(root, meta.dir));
     const linked = linkIntoWorktree(root, meta.worktree, meta.link);
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(", ")}`);
   }
@@ -2421,7 +2611,7 @@ function attempt(meta, backend, target) {
     timeoutSec: meta.timeoutSec
   });
 }
-var read = (f) => fs16.existsSync(f) ? fs16.readFileSync(f, "utf8") : "";
+var read = (f) => fs18.existsSync(f) ? fs18.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   if (run.usage.steps > 0) return void 0;
@@ -2440,8 +2630,12 @@ function finalize(meta, res) {
   const run = backend.parse(read(runFile(meta.id, "events.jsonl")));
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
-  fs16.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
+  fs18.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
 `);
+  if (meta.reviewOf) {
+    meta.verdict = parseVerdict(run.finalText);
+    if (meta.packageFile) fs18.rmSync(meta.packageFile, { force: true });
+  }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, "stderr.log")), res.code);
     if (f) meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
@@ -2482,7 +2676,7 @@ function captureChanges(meta) {
   const d = diffTrees(target, meta.baseTree, meta.afterTree);
   meta.changes = d.changes;
   meta.stats = d.stats;
-  fs16.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
+  fs18.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
 function runVerify(meta) {
   const r = spawnSync5(meta.verify, {
@@ -2495,7 +2689,7 @@ function runVerify(meta) {
     env: { ...process.env, PWD: meta.cwd, PITROOM_ACTIVE: "1" }
   });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-  fs16.writeFileSync(runFile(meta.id, "verify.log"), output);
+  fs18.writeFileSync(runFile(meta.id, "verify.log"), output);
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
 function applyRun(meta) {
@@ -2529,14 +2723,11 @@ function discardRun(meta) {
   return `discarded the isolated copy of ${meta.id}; the patch stays in ${runFile(meta.id, "changes.patch")}`;
 }
 function cleanupWorktree(meta) {
-  if (meta.worktree && fs16.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
+  if (meta.worktree && fs18.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
 }
 
 // src/cli/commands.ts
-async function cmdRun(p) {
-  const opts = runOptions(p, readTask(p));
-  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
-  const meta = prepareRun(opts);
+async function launch(p, meta) {
   if (has(p, "bg")) {
     startInBackground(meta);
     console.log(
@@ -2550,9 +2741,38 @@ async function cmdRun(p) {
   console.log(has(p, "json") ? JSON.stringify(done, null, 2) : formatReport(done));
   return exitCodeFor(done);
 }
+async function cmdRun(p) {
+  const opts = runOptions(p, readTask(p));
+  if (!opts.task.trim()) throw new UserError('no task given (pitroom "find where X is handled")');
+  return launch(p, prepareRun(opts));
+}
+async function cmdReview(p) {
+  const range = flag(p, "range");
+  if (range && p.positional.length) throw new UserError("review takes a run or --range A..B, not both");
+  if (has(p, "write") || has(p, "isolate")) throw new UserError("reviews are read-only; drop -w/-i");
+  if (has(p, "continue")) throw new UserError("to review a follow-up, pass its run id: pitroom review <run>");
+  const job = range ? rangeReview(range, flag(p, "dir") ?? process.cwd()) : runReview(resolveRun(p.positional[0]));
+  const packageFile = writePackage(job);
+  let meta;
+  try {
+    meta = prepareRun({
+      ...runOptions(p, fill(loadTemplate(TEMPLATE[job.kind]), { PACKAGE_FILE: packageFile })),
+      mode: "read",
+      dir: job.dir,
+      worker: flag(p, "worker") ?? (flag(p, "tier") ? void 0 : pickReviewer(job)),
+      group: flag(p, "group") ?? job.group,
+      review: { of: job.of, kind: job.kind, packageFile }
+    });
+  } catch (e) {
+    fs19.rmSync(packageFile, { force: true });
+    throw e;
+  }
+  fs19.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  return launch(p, meta);
+}
 function cmdCrew(p) {
   const file = flag(p, "task-file");
-  const tasks = (file ? fs17.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  const tasks = (file ? fs19.readFileSync(file, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
@@ -2630,7 +2850,7 @@ function cmdShow(p) {
   const meta = freshMeta(resolveRun(p.positional[0]));
   const dump = (name) => {
     const f = runFile(meta.id, name);
-    process.stdout.write(fs17.existsSync(f) ? fs17.readFileSync(f, "utf8") : `(no ${name})
+    process.stdout.write(fs19.existsSync(f) ? fs19.readFileSync(f, "utf8") : `(no ${name})
 `);
   };
   if (has(p, "patch")) dump("changes.patch");
@@ -2708,8 +2928,8 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs17.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path14.resolve(out)}`);
+    fs19.writeFileSync(out, card(t, period));
+    console.log(`card written to ${path16.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -2729,7 +2949,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs17.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs19.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -2752,7 +2972,7 @@ function cmdClean(p) {
   for (const id of old) {
     const m = readMeta(id);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
-    fs17.rmSync(runDir(id), { recursive: true, force: true });
+    fs19.rmSync(runDir(id), { recursive: true, force: true });
   }
   console.log(`removed ${old.length} run(s); the savings ledger is kept`);
   return 0;
@@ -2762,9 +2982,9 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 
 // src/core/doctor.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
-import fs18 from "node:fs";
+import fs20 from "node:fs";
 import os9 from "node:os";
-import path15 from "node:path";
+import path17 from "node:path";
 var MARK = { ok: "\u2714", warn: "!", fail: "\u2718" };
 var READ_ONLY_HOW = {
   "permission-rules": "per-run permission rules",
@@ -2778,7 +2998,7 @@ function doctor4(probe) {
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs18.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs20.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
   if (process.platform !== "win32") {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
@@ -2862,13 +3082,13 @@ function skillChecks() {
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base}; run \`pitroom install\`` });
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path15.sep}.claude${path15.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path17.sep}.claude${path17.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
   }
   const launcher = launcherPath();
-  if (fs18.existsSync(launcher)) {
+  if (fs20.existsSync(launcher)) {
     const r = spawnSync6(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
@@ -2880,8 +3100,8 @@ function skillChecks() {
 }
 function pluginInstalled() {
   try {
-    const f = path15.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs18.readFileSync(f, "utf8")).plugins ?? {};
+    const f = path17.join(os9.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const plugins = JSON.parse(fs20.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
@@ -2897,6 +3117,9 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" \u2026
                                         start several workers in background as one group
+  pitroom review [run | --range A..B] [--tier T | -W T] [--bg]
+                                        read-only review of a run's change (a follow-up: only its
+                                        fix round) or of a commit range; by default on another worker
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run\u2026 | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -2949,6 +3172,7 @@ Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout,
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,
+  review: cmdReview,
   status: cmdStatus,
   wait: cmdWait,
   watch: cmdWatch,

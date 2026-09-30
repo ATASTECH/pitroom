@@ -134,3 +134,30 @@ export function applyPatch(root: string, patchFile: string, reverse: boolean): {
   const r = git(root, ['apply', '--whitespace=nowarn', ...flags, patchFile]);
   return { ok: r.code === 0, message: r.stderr.trim() };
 }
+
+/** Stat plus a unified diff with 10 lines of context, for a reviewer. */
+export function reviewDiff(root: string, a: string, b: string): string {
+  return `${must(root, [...DIFF, '--stat', a, b]).trim()}\n\n${must(root, [...DIFF, '-U10', a, b])}`;
+}
+
+/** Commit list, stat and wide-context diff of the commits in a..b, for a reviewer. */
+export function rangeDiff(root: string, a: string, b: string): string {
+  const range = `${a}..${b}`;
+  const log = must(root, ['log', '--oneline', '--no-decorate', range]).trim();
+  return [
+    `## COMMITS\n\n${log || '(none)'}`,
+    `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', range]).trim() || '(none)'}`,
+    `## DIFF\n\n${must(root, [...DIFF, '-U10', range])}`,
+  ].join('\n\n');
+}
+
+/** The commit a ref names, or undefined. */
+export function commitOf(root: string, ref: string): string | undefined {
+  const r = git(root, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`]);
+  return r.code === 0 ? r.stdout.trim() : undefined;
+}
+
+export function gitDir(dir: string): string | undefined {
+  const r = git(dir, ['rev-parse', '--absolute-git-dir']);
+  return r.code === 0 ? r.stdout.trim() : undefined;
+}

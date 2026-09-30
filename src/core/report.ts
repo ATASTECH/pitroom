@@ -33,6 +33,13 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(' · '));
+  if (meta.reviewOf) {
+    const v = meta.verdict;
+    const verdict = v
+      ? ` · SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()} · critical ${v.critical} · important ${v.important} · minor ${v.minor}`
+      : '';
+    out.push(`review of ${meta.reviewOf} (${meta.reviewKind})${verdict}`);
+  }
   for (const a of meta.attempts ?? []) out.push(`fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
@@ -73,6 +80,7 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
     if (meta.changes.length > 50) out.push(`   … ${meta.changes.length - 50} more`);
     if (meta.changes.length) {
       out.push(`   diff:    pitroom show ${meta.id} --patch`);
+      out.push(`   review:  pitroom review ${meta.id}`);
       if (meta.mode === 'isolate' && !meta.applied && !meta.discarded) {
         out.push(`   apply:   pitroom apply ${meta.id}`, `   discard: pitroom discard ${meta.id}`);
       }
@@ -88,7 +96,7 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
 
   if (isActive(meta.state)) {
     out.push(`── still running: pitroom wait ${meta.id}   (stop: pitroom stop ${meta.id})`);
-  } else if (meta.sessionId && !meta.applied && !meta.discarded) {
+  } else if (meta.sessionId && !meta.applied && !meta.discarded && !meta.reviewOf) {
     out.push(`── follow up: pitroom run --continue ${meta.id} "…"`);
   }
   return out.join('\n');
