@@ -489,6 +489,10 @@ test('hook-card: one card per phase after a Bash pitroom command, silence otherw
   };
   const long = subject('Find every place where the `session cookie` is read outside the auth module and list them');
   assert.ok(long.length <= 49 && long.endsWith('…') && !long.includes('`'), long);
+  // Worker names stay short: no provider prefix, "-free" suffix or trailing version; none for the default model.
+  const named = s.run(['run', '-W', 'opencode:opencode/muse-spark-1.3-contributor-free', 'x']);
+  assert.match(JSON.parse(hook('pitroom run x', named.stdout).stdout).systemMessage, /done on opencode \(muse-spark\) · /);
+  assert.match(card, /done on opencode · /, 'the default model is not spelled out');
   const briefRun = s.run(['run', 'You are implementing Task 3 of the plan docs/pitroom/plans/2026-09-30-widgets.md (in your copy).']);
   assert.match(JSON.parse(hook('pitroom run x', briefRun.stdout).stdout).systemMessage, / · Task 3 · 2026-09-30-widgets · /);
 });

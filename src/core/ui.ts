@@ -5,7 +5,7 @@
 import fs from 'node:fs';
 import { readLedger, totals, usd } from './receipt.js';
 import { type RunMeta, isActive, isAlive, listRunIds, readMeta, runFile, runsDir } from './store.js';
-import { describeTarget } from './target.js';
+import type { Target } from '../backends/types.js';
 
 const WEEK_MS = 7 * 24 * 3600 * 1000;
 /** How many recent runs the status line looks at for active ones. */
@@ -60,6 +60,21 @@ function short(text: string): string {
   return `${(space > SUBJECT_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:·-]+$/, '')}…`;
 }
 
+const MODEL_MAX = 24;
+
+/**
+ * A card-sized worker name: `opencode (muse-spark)` for opencode/muse-spark-1.3-contributor-free,
+ * just `opencode` when the worker's own default model runs. The provider prefix, a "-free" tier
+ * suffix and a trailing dotted version are dropped; parentheses keep it apart from the card's " · ".
+ */
+function workerName(t: Target): string {
+  if (!t.model) return t.backend;
+  const model = (t.model.split('/').pop() ?? t.model)
+    .replace(/-(contributor-)?free$/, '')
+    .replace(/-\d+\.\d+$/, '');
+  return `${t.backend} (${model.length > MODEL_MAX ? `${model.slice(0, MODEL_MAX - 1)}…` : model})`;
+}
+
 function what(m: RunMeta): string {
   if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
   if (m.reviewOf) return `of ${m.reviewOf}`;
@@ -79,7 +94,7 @@ function duration(m: RunMeta): string {
 /** The cards this run has not shown yet, in order; each phase is shown once. */
 function cardsFor(m: RunMeta): string[] {
   const phases: [string, () => string][] = [
-    ['started', () => `🏁 Pitroom ▶ ${kind(m)} on ${describeTarget(m.worker)} · ${what(m)}  (${m.id})`],
+    ['started', () => `🏁 Pitroom ▶ ${kind(m)} on ${workerName(m.worker)} · ${what(m)}  (${m.id})`],
   ];
   if (!isActive(m.state)) {
     phases.push([
@@ -87,7 +102,7 @@ function cardsFor(m: RunMeta): string[] {
       () => {
         const v = m.verdict;
         const bits = [
-          `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${describeTarget(m.ran ?? m.worker)}`,
+          `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${workerName(m.ran ?? m.worker)}`,
           what(m),
           duration(m),
           v && `SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()}`,

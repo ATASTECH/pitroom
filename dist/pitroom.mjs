@@ -2198,6 +2198,12 @@ function short(text) {
   const space = cut.lastIndexOf(" ");
   return `${(space > SUBJECT_MAX / 2 ? cut.slice(0, space) : cut).replace(/[\s,.;:·-]+$/, "")}\u2026`;
 }
+var MODEL_MAX = 24;
+function workerName(t) {
+  if (!t.model) return t.backend;
+  const model = (t.model.split("/").pop() ?? t.model).replace(/-(contributor-)?free$/, "").replace(/-\d+\.\d+$/, "");
+  return `${t.backend} (${model.length > MODEL_MAX ? `${model.slice(0, MODEL_MAX - 1)}\u2026` : model})`;
+}
 function what(m) {
   if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
   if (m.reviewOf) return `of ${m.reviewOf}`;
@@ -2213,7 +2219,7 @@ function duration2(m) {
 }
 function cardsFor(m) {
   const phases = [
-    ["started", () => `\u{1F3C1} Pitroom \u25B6 ${kind(m)} on ${describeTarget(m.worker)} \xB7 ${what(m)}  (${m.id})`]
+    ["started", () => `\u{1F3C1} Pitroom \u25B6 ${kind(m)} on ${workerName(m.worker)} \xB7 ${what(m)}  (${m.id})`]
   ];
   if (!isActive(m.state)) {
     phases.push([
@@ -2221,7 +2227,7 @@ function cardsFor(m) {
       () => {
         const v = m.verdict;
         const bits = [
-          `\u{1F3C1} Pitroom ${ICON2[m.state] ?? "\u2022"} ${kind(m)} ${m.state} on ${describeTarget(m.ran ?? m.worker)}`,
+          `\u{1F3C1} Pitroom ${ICON2[m.state] ?? "\u2022"} ${kind(m)} ${m.state} on ${workerName(m.ran ?? m.worker)}`,
           what(m),
           duration2(m),
           v && `SPEC ${v.spec.toUpperCase()} \xB7 QUALITY ${v.quality.toUpperCase()}`,
