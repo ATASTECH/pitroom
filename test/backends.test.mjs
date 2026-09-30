@@ -86,9 +86,13 @@ for (const b of allBackends()) {
   }
 
   for (const [name, want] of Object.entries(expected.failures)) {
-    test(`${b.id}: classifies recorded failure ${name}`, () => {
+    // The stderr half is a *.log file, which .gitignore keeps out of git: a fresh clone
+    // (or a worker's isolated copy) has no such file, so the case is skipped there.
+    const stderrFile = path.join(dir, 'failures', `${name}.stderr.log`);
+    const skip = !fs.existsSync(stderrFile) && `${name}.stderr.log is not in this checkout (gitignored)`;
+    test(`${b.id}: classifies recorded failure ${name}`, { skip }, () => {
       const stdout = fs.readFileSync(path.join(dir, 'failures', `${name}.stdout.jsonl`), 'utf8');
-      const stderr = fs.readFileSync(path.join(dir, 'failures', `${name}.stderr.log`), 'utf8');
+      const stderr = fs.readFileSync(stderrFile, 'utf8');
       const f = b.failure(b.parse(stdout), stderr, want.exitCode);
       assert.equal(f?.kind, want.kind);
       assert.ok(f.message.includes(want.messageIncludes), f.message);
