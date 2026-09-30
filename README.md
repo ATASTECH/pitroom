@@ -108,7 +108,7 @@ In isolate mode nothing reaches your tree until you apply it.
 
 ### How it stays safe
 
-Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, no `.env` or key files, no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched.
+Each run gets the worker's own safety mechanism set to the mode (for OpenCode, a permission profile injected through `OPENCODE_CONFIG_CONTENT`): no commit/push/reset/checkout/stash/clean/rebase, no bulk deletes, no `sudo`, a file-reading tool that refuses `.env` and key files (OpenCode and Claude Code workers), no web tools unless you pass `--web`, no subagents, no recursive delegation. Only `allow`/`deny` rules, so a headless run never stalls on a prompt. A **git guard** on the worker's PATH also stops `sh -c "git push"`, `env git reset`, aliases and scripts from committing, pushing, resetting, stashing or touching your index. Your `opencode.json` is never touched.
 
 ---
 
@@ -426,7 +426,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 
 ## FAQ
 
-**Where does my code go?** To whichever provider your worker's model uses. For private code, point the worker at a local model. `.env` files and private keys are blocked from the worker either way.
+**Where does my code go?** To whichever provider your worker's model uses. For private code, point the worker at a local model. The file-reading tools of OpenCode and Claude Code workers refuse `.env` files and private keys; Codex workers are not restricted that way and a shell command can still read them, so keep secrets out of the folder you delegate in.
 
 **How is "saved" computed?** It assumes your primary agent would have processed about the same tokens the worker did, priced at your primary's list prices (`PITROOM_PRIMARY` / `PITROOM_PRICE`), minus the worker's cost and the cost of reading the report. It is an estimate and is labelled as one.
 
