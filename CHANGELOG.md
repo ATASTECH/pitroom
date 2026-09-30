@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.3
+
+### Skills
+- `pitroom-debugging` no longer bundles `find-polluter.sh`, an executable that ran the project's tests in a loop (a directory scan flagged it as a security risk). The test-pollution hunt is now a written procedure: bisect the test files by hand, in an isolated copy, with the project's own test command.
+
 ## 0.6.2
 
 ### Directory listing

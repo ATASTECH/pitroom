@@ -98,13 +98,14 @@ npm test 2>&1 | grep 'DEBUG git init'
 
 If something appears during tests but you don't know which test:
 
-Use the bisection script `find-polluter.sh` in this directory:
+Bisect the test files by hand, in an isolated copy so a polluting test cannot touch the real tree (`pitroom run -i`, or a scratch clone):
 
-```bash
-./find-polluter.sh '.git' 'src/**/*.test.ts'
-```
+1. List the test files that could be responsible (for example the ones matching `src/**/*.test.ts`), in a fixed order.
+2. Before the first run, confirm the unwanted file or directory (for example `.git`) does not exist yet. If it does, remove it from the copy first.
+3. Run one test file at a time with your project's own test command, and after each run check whether the unwanted file has appeared.
+4. The first file after which it appears is the polluter. Stop there, then read that test and trace how it gets there (the stack-trace technique above).
 
-Runs tests one-by-one, stops at first polluter. See script for usage.
+If the list is long, halve it: run the first half together, check, and continue in the half that polluted. Only run test commands you would run anyway, and never pass unchecked file names to a shell.
 
 ## Real Example: Empty projectDir
 
