@@ -82,6 +82,14 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
     );
     for (const c of meta.changes.slice(0, 50)) out.push(`   ${c.status} ${c.path}`);
     if (meta.changes.length > 50) out.push(`   … ${meta.changes.length - 50} more`);
+    const deleted = meta.changes.filter((c) => c.status === 'D').length;
+    if (deleted && !meta.applied && !meta.reverted && !meta.discarded) {
+      out.push(
+        meta.mode === 'isolate'
+          ? `   ⚠ deletes ${deleted} file${deleted === 1 ? '' : 's'}: check they are wanted before applying (apply refuses without --allow-delete)`
+          : `   ⚠ deleted ${deleted} file${deleted === 1 ? '' : 's'} in your tree: check they are wanted (undo: pitroom revert ${meta.id})`,
+      );
+    }
     if (meta.changes.length) {
       out.push(`   diff:    pitroom show ${meta.id} --patch`);
       out.push(`   review:  pitroom review ${meta.id}`);

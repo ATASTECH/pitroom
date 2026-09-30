@@ -70,7 +70,7 @@ pitroom show <run>                  # the full report of the ones you need
 - Read each summary and understand what changed.
 - Check for conflicts: did two workers touch the same code or contradict each other?
 - Verify what you will rely on (`refs:` lines help), then combine the findings in your own words.
-- For `-i` crews: review each patch (`pitroom review <run>` or `pitroom show <run> --patch`), then `pitroom apply -g NAME`. It applies in order and stops at the first conflict; fix that one with `pitroom run --continue <run> "…"` or by hand, then apply the rest.
+- For `-i` crews: review each patch (`pitroom review <run>` or `pitroom show <run> --patch`), then `pitroom apply -g NAME`. It applies in order, stops at the first conflict and refuses a patch that deletes files (decide whether the deletion is wanted, then `--allow-delete`); fix that one with `pitroom run --continue <run> "…"` or by hand, then apply the rest.
 - Run the full test suite yourself afterwards, and spot-check: workers make systematic errors.
 
 ## When things go wrong

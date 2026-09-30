@@ -35,7 +35,7 @@ pitroom run -w "Rename getUserById to findUserById in src/ and update imports. N
 
 1. Read the report: `FILES CHANGED`, `VERIFICATION`, `OPEN ISSUES`, and the `verify:` line.
 2. `pitroom show <run> --patch`: review the diff as you would a colleague's.
-3. isolate: `pitroom apply <run>` (checked apply; refuses on conflict) or `pitroom discard <run>`. write: keep it, or `pitroom revert <run>`.
+3. isolate: `pitroom apply <run>` (checked apply; refuses on conflict, and on a patch that deletes files until you decide they are wanted: `--allow-delete`) or `pitroom discard <run>`. write: keep it, or `pitroom revert <run>`.
 4. Run the relevant tests yourself after applying.
 5. Needs another pass? `pitroom run --continue <run> "Also handle the refresh-token path."` (same session and copy; the patch accumulates).
 

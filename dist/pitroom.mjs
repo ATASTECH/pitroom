@@ -7,6 +7,12 @@ var UserError = class extends Error {
     this.code = code;
   }
 };
+var DeletionRefused = class extends UserError {
+  constructor(message, files) {
+    super(message, 3);
+    this.files = files;
+  }
+};
 
 // src/backends/claude/index.ts
 import { spawnSync } from "node:child_process";
@@ -1174,6 +1180,7 @@ var BOOL_FLAGS = {
   "--probe": "probe",
   "--copy": "copy",
   "--force": "force",
+  "--allow-delete": "allow-delete",
   "--yes": "yes",
   "--any": "any",
   "--brief": "brief",
@@ -1514,6 +1521,12 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
     );
     for (const c of meta.changes.slice(0, 50)) out.push(`   ${c.status} ${c.path}`);
     if (meta.changes.length > 50) out.push(`   \u2026 ${meta.changes.length - 50} more`);
+    const deleted = meta.changes.filter((c) => c.status === "D").length;
+    if (deleted && !meta.applied && !meta.reverted && !meta.discarded) {
+      out.push(
+        meta.mode === "isolate" ? `   \u26A0 deletes ${deleted} file${deleted === 1 ? "" : "s"}: check they are wanted before applying (apply refuses without --allow-delete)` : `   \u26A0 deleted ${deleted} file${deleted === 1 ? "" : "s"} in your tree: check they are wanted (undo: pitroom revert ${meta.id})`
+      );
+    }
     if (meta.changes.length) {
       out.push(`   diff:    pitroom show ${meta.id} --patch`);
       out.push(`   review:  pitroom review ${meta.id}`);
@@ -2598,6 +2611,7 @@ Rules:
 - Stay inside the task scope and the project directory.
 - Never commit, push, reset, checkout, restore, stash, clean, rebase or merge, and never discard or overwrite uncommitted work you did not create.
 - Never read or reveal secrets (.env files, keys, tokens).
+- Delete a file only when the task explicitly asks for it, and name every file you delete under FILES CHANGED. Whether anything else should be deleted or overwritten is the primary agent's decision: propose it under OPEN ISSUES and leave the file alone.
 - Do not ask questions. If something is ambiguous, choose the safest reasonable interpretation and state the assumption.
 - Be economical: open only what you need.
 
@@ -2720,7 +2734,7 @@ function inside(file, roots) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
-var VERSION2 = true ? "0.6.3" : "0.0.0-dev";
+var VERSION2 = true ? "0.6.4" : "0.0.0-dev";
 function planWork(o) {
   if (!o.plan) return { task: o.task.trim(), tier: o.tier };
   if (o.continueFrom) throw new UserError("a follow-up continues its parent's task; drop --plan/--step");
@@ -3020,10 +3034,21 @@ function runVerify(meta) {
   fs21.writeFileSync(runFile(meta.id, "verify.log"), output);
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
-function applyRun(meta) {
+function applyRun(meta, allowDelete = false) {
   if (meta.mode !== "isolate") throw new UserError(`run ${meta.id} edited your tree directly (${meta.mode}); nothing to apply`);
   if (meta.applied) throw new UserError(`run ${meta.id} was already applied`);
   if (!meta.changes?.length) throw new UserError(`run ${meta.id} has no changes`);
+  const deleted = meta.changes.filter((c) => c.status === "D").map((c) => c.path);
+  if (deleted.length && !allowDelete) {
+    const list2 = deleted.slice(0, 10).map((f) => `  ${f}`).join("\n") + (deleted.length > 10 ? `
+  \u2026 ${deleted.length - 10} more` : "");
+    throw new DeletionRefused(
+      `run ${meta.id} deletes ${deleted.length} file${deleted.length === 1 ? "" : "s"}; nothing was applied:
+${list2}
+Check that the deletion is what the user asked for: if so apply with --allow-delete, otherwise ask the user or discard the run.`,
+      deleted
+    );
+  }
   const res = applyPatch(meta.repoRoot, runFile(meta.id, "changes.patch"), false);
   if (!res.ok) throw new UserError(`patch does not apply cleanly (your tree changed since the snapshot):
 ${res.message}`, 1);
@@ -3229,19 +3254,21 @@ function cmdLs(p) {
 function cmdApply(p) {
   const group = flag(p, "group");
   if (!group) {
-    console.log(applyRun(freshMeta(resolveRun(p.positional[0]))));
+    console.log(applyRun(freshMeta(resolveRun(p.positional[0])), has(p, "allow-delete")));
     return 0;
   }
   const pending = groupIds(group).map((id) => freshMeta(id)).filter((m) => m.mode === "isolate" && m.state === "done" && m.changes?.length && !m.applied && !m.discarded);
   if (!pending.length) throw new UserError(`group "${group}" has no finished isolate patches to apply`);
   for (const [i, m] of pending.entries()) {
     try {
-      console.log(applyRun(m));
+      console.log(applyRun(m, has(p, "allow-delete")));
     } catch (e) {
       const rest = pending.slice(i + 1).map((r) => r.id);
       console.log(`\u2718 ${m.id}: ${e.message}`);
       if (rest.length) console.log(`   not applied yet: ${rest.join(" ")}`);
-      console.log(`   resolve it (e.g. pitroom run --continue ${m.id} "rebase your change on the current tree"), then apply the rest`);
+      if (!(e instanceof DeletionRefused)) {
+        console.log(`   resolve it (e.g. pitroom run --continue ${m.id} "rebase your change on the current tree"), then apply the rest`);
+      }
       return 1;
     }
   }
@@ -3588,7 +3615,9 @@ Usage
                                         live table (TTY) or one JSON line per change, until done
   pitroom show [run] [--patch|--events|--full|--json]
   pitroom ls [--running] [-g NAME]      recent runs
-  pitroom apply [run | -g NAME]         apply --isolate patch(es) to your tree (checked first)
+  pitroom apply [run | -g NAME] [--allow-delete]
+                                        apply --isolate patch(es) to your tree (checked first); a patch
+                                        that deletes files is refused unless --allow-delete
   pitroom discard [run]                 drop an --isolate run's copy (the patch is kept)
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers

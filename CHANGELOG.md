@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.4
+
+### Deleting is the user's call
+- `pitroom apply` (and `apply -g`) refuses a patch that deletes files unless you pass `--allow-delete`; nothing of the patch is applied. The run report flags deletions with a warning, for isolated runs and for `-w` runs (undo: `pitroom revert`).
+- Workers are told to delete a file only when the task explicitly asks for it, to list every deleted file, and to propose any other deletion under OPEN ISSUES instead of doing it.
+- The skills (`using-pitroom`, `pitroom-implement`, `pitroom-driven-development`, `pitroom-crew`) make the primary agent the decider: it sets each worker's permissions from the task and the user's session (read, isolate or write mode, `--web`), decides whether a deletion is wanted and passes `--allow-delete` itself, asking the user only when the worker deleted something that was not asked for. A fixed floor (no git history changes, no `sudo`, no publishing, no secrets) stays in place.
+
 ## 0.6.3
 
 ### Skills

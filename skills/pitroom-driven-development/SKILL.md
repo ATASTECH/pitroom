@@ -89,7 +89,7 @@ Adjudicate only at the cap; every adjudication is a note. A silent discard is fo
 When the review is clean, or every open finding is parked with a ruling at the cap:
 
 ```bash
-pitroom apply <last run>        # checked apply; refuses on conflict
+pitroom apply <last run>        # checked apply; refuses on conflict, and on deleted files until you decide they are wanted (--allow-delete)
 <the task's tests, run by you>
 git add <the task's files> && git commit -m "<the plan's commit message>"
 pitroom plan note PLAN "Task N: complete (<base7>..<head7>, review clean)"

@@ -103,3 +103,30 @@ test('stop -g cancels running and queued workers', () => {
   const w = s.run(['wait', '-g', 's', '--brief', '--timeout', '30'], env);
   assert.equal((w.stdout.match(/pitroom stopped/g) ?? []).length, 2, w.stdout);
 });
+
+test('apply refuses a patch that deletes files until --allow-delete', () => {
+  const s = sandbox();
+  const gone = path.join(s.repo, 'other.txt');
+  assert.ok(fs.existsSync(gone));
+  s.run(['crew', '-i', '-g', 'del', task('exec:rm other.txt;append:app.txt:kept;answer:SUMMARY: removed a file')]);
+  assert.equal(s.run(['wait', '-g', 'del', '--timeout', '30']).status, 0);
+  const id = /run (\S+)/.exec(s.run(['status', '-g', 'del']).stdout)?.[1] ?? s.run(['ls', '-g', 'del']).stdout.match(/\d{8}-\d{6}-[0-9a-f]{4}/)[0];
+
+  const refused = s.run(['apply', '-g', 'del']);
+  assert.equal(refused.status, 1, refused.stdout + refused.stderr);
+  assert.match(refused.stdout, /deletes 1 file/);
+  assert.match(refused.stdout, /other\.txt/);
+  assert.match(refused.stdout, /--allow-delete/);
+  assert.ok(fs.existsSync(gone), 'nothing was applied, the file is still there');
+  assert.doesNotMatch(fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8'), /kept/, 'the rest of the patch was not applied either');
+
+  const single = s.run(['apply', id]);
+  assert.equal(single.status, 3, single.stdout + single.stderr);
+  assert.match(single.stderr, /deletes 1 file.*other\.txt/s);
+  assert.ok(fs.existsSync(gone));
+
+  const allowed = s.run(['apply', '--allow-delete', id]);
+  assert.equal(allowed.status, 0, allowed.stdout + allowed.stderr);
+  assert.ok(!fs.existsSync(gone), 'deleted only with the flag');
+  assert.match(fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8'), /kept/);
+});

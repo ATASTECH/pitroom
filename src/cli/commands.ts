@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { configPath, effective, loadConfig } from '../core/config.js';
-import { UserError } from '../core/errors.js';
+import { DeletionRefused, UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
@@ -213,7 +213,7 @@ export function cmdLs(p: Parsed): number {
 export function cmdApply(p: Parsed): number {
   const group = flag(p, 'group');
   if (!group) {
-    console.log(applyRun(freshMeta(resolveRun(p.positional[0]))));
+    console.log(applyRun(freshMeta(resolveRun(p.positional[0])), has(p, 'allow-delete')));
     return 0;
   }
   // Apply a group's isolated patches in start order; stop at the first conflict.
@@ -223,12 +223,14 @@ export function cmdApply(p: Parsed): number {
   if (!pending.length) throw new UserError(`group "${group}" has no finished isolate patches to apply`);
   for (const [i, m] of pending.entries()) {
     try {
-      console.log(applyRun(m));
+      console.log(applyRun(m, has(p, 'allow-delete')));
     } catch (e) {
       const rest = pending.slice(i + 1).map((r) => r.id);
       console.log(`✘ ${m.id}: ${(e as Error).message}`);
       if (rest.length) console.log(`   not applied yet: ${rest.join(' ')}`);
-      console.log(`   resolve it (e.g. pitroom run --continue ${m.id} "rebase your change on the current tree"), then apply the rest`);
+      if (!(e instanceof DeletionRefused)) {
+        console.log(`   resolve it (e.g. pitroom run --continue ${m.id} "rebase your change on the current tree"), then apply the rest`);
+      }
       return 1;
     }
   }

@@ -24,7 +24,7 @@ const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
   '--bg': 'bg', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe',
-  '--copy': 'copy', '--force': 'force', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running',
+  '--copy': 'copy', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
 };
 

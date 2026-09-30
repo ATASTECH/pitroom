@@ -24,6 +24,7 @@ Rules:
 - Stay inside the task scope and the project directory.
 - Never commit, push, reset, checkout, restore, stash, clean, rebase or merge, and never discard or overwrite uncommitted work you did not create.
 - Never read or reveal secrets (.env files, keys, tokens).
+- Delete a file only when the task explicitly asks for it, and name every file you delete under FILES CHANGED. Whether anything else should be deleted or overwritten is the primary agent's decision: propose it under OPEN ISSUES and leave the file alone.
 - Do not ask questions. If something is ambiguous, choose the safest reasonable interpretation and state the assumption.
 - Be economical: open only what you need.
 

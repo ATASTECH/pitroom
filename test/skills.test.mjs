@@ -156,3 +156,13 @@ test('install links every skill and a working launcher; uninstall removes only t
   assert.ok(!fs.existsSync(launcher));
   assert.equal(fs.readFileSync(path.join(agents, 'someone-else'), 'utf8'), 'keep me');
 });
+
+test('the skills keep deletion decisions with the primary agent and the user', () => {
+  const { body } = frontmatter(path.join(skillsDir, 'using-pitroom', 'SKILL.md'));
+  assert.match(body, /Deletions are your decision/);
+  assert.match(body, /fixed floor/);
+  assert.match(body, /--allow-delete/);
+  for (const s of ['pitroom-implement', 'pitroom-driven-development', 'pitroom-crew']) {
+    assert.match(frontmatter(path.join(skillsDir, s, 'SKILL.md')).body, /--allow-delete/, s);
+  }
+});

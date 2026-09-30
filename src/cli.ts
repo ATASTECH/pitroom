@@ -26,7 +26,9 @@ Usage
                                         live table (TTY) or one JSON line per change, until done
   pitroom show [run] [--patch|--events|--full|--json]
   pitroom ls [--running] [-g NAME]      recent runs
-  pitroom apply [run | -g NAME]         apply --isolate patch(es) to your tree (checked first)
+  pitroom apply [run | -g NAME] [--allow-delete]
+                                        apply --isolate patch(es) to your tree (checked first); a patch
+                                        that deletes files is refused unless --allow-delete
   pitroom discard [run]                 drop an --isolate run's copy (the patch is kept)
   pitroom revert [run]                  undo the changes of a --write run (checked first)
   pitroom stop [run | -g NAME]          stop running or queued workers

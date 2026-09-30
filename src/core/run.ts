@@ -10,7 +10,7 @@ import type { Backend, Failure, Mode, Target } from '../backends/types.js';
 import { applyPatch, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
 import { resolveChain } from './chain.js';
 import { effective } from './config.js';
-import { UserError } from './errors.js';
+import { DeletionRefused, UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
 import { parseStatus, parseVerdict } from './answers.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
@@ -378,10 +378,22 @@ function runVerify(meta: RunMeta): RunMeta['verifyResult'] {
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split('\n').slice(-25).join('\n') };
 }
 
-export function applyRun(meta: RunMeta): string {
+/**
+ * Lands an isolated run's patch. A patch that deletes files is refused unless the user said yes
+ * (`allowDelete`): a worker may decide a file should go, your tree loses files only when the primary agent (or you) allows it.
+ */
+export function applyRun(meta: RunMeta, allowDelete = false): string {
   if (meta.mode !== 'isolate') throw new UserError(`run ${meta.id} edited your tree directly (${meta.mode}); nothing to apply`);
   if (meta.applied) throw new UserError(`run ${meta.id} was already applied`);
   if (!meta.changes?.length) throw new UserError(`run ${meta.id} has no changes`);
+  const deleted = meta.changes.filter((c) => c.status === 'D').map((c) => c.path);
+  if (deleted.length && !allowDelete) {
+    const list = deleted.slice(0, 10).map((f) => `  ${f}`).join('\n') + (deleted.length > 10 ? `\n  … ${deleted.length - 10} more` : '');
+    throw new DeletionRefused(
+      `run ${meta.id} deletes ${deleted.length} file${deleted.length === 1 ? '' : 's'}; nothing was applied:\n${list}\nCheck that the deletion is what the user asked for: if so apply with --allow-delete, otherwise ask the user or discard the run.`,
+      deleted,
+    );
+  }
   const res = applyPatch(meta.repoRoot!, runFile(meta.id, 'changes.patch'), false);
   if (!res.ok) throw new UserError(`patch does not apply cleanly (your tree changed since the snapshot):\n${res.message}`, 1);
   meta.applied = true;

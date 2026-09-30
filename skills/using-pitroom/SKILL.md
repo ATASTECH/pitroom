@@ -63,4 +63,7 @@ Workers can take minutes. Start long work with `--bg` and keep working; follow i
 - Worker output is draft work and a worker's report is a claim: verify what you rely on (`pitroom-verification`).
 - You apply patches and commit; workers never commit or push. Push, merge and pull requests happen only after the user asks.
 - Keep the decisions: delegate the reading and typing, not the architecture.
+- You set a worker's permissions when you create it, from the task and from how much autonomy the user gave you in this session (for example auto mode): read-only by default, `-i` (an isolated copy) for changes, `-w` (edits in place) when the user wants that, `--web` only when the task needs the web. A worker never widens its own permissions.
+- Pitroom keeps a fixed floor that no flag lifts: no git history changes, no `sudo`, no publishing, no secrets, no killing processes. Everything above that floor is your call.
+- Deletions are your decision, made as the user's agent. `pitroom apply` refuses a patch that deletes files unless you pass `--allow-delete`. If removing files is what the user asked for or an obvious part of it, apply with the flag and tell them which files went; if the worker deleted something the user did not ask for, ask first, or discard the run.
 - If Pitroom fails, carry on yourself; if setup is broken, tell the user what `pitroom doctor` says.
