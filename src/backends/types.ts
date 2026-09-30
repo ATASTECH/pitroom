@@ -48,6 +48,8 @@ export interface Invocation {
 /** A worker run, normalised from the CLI's event stream. */
 export interface ParsedRun {
   sessionId?: string;
+  /** The model, when the CLI's own output says which one it used. */
+  model?: string;
   /** The worker's final answer only (earlier narration dropped). */
   finalText: string;
   usage: Usage;

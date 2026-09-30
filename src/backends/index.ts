@@ -1,15 +1,17 @@
 // Registry of worker adapters. Adding a worker = implement `Backend` in
 // src/backends/<id>/ and register it here (see docs/backends.md).
 import { UserError } from '../core/errors.js';
+import { claude } from './claude/index.js';
+import { codex } from './codex/index.js';
 import { opencode } from './opencode/index.js';
 import type { Backend } from './types.js';
 
-const REGISTRY = new Map<string, Backend>([[opencode.id, opencode]]);
+const REGISTRY = new Map<string, Backend>([opencode, codex, claude].map((b) => [b.id, b]));
 
 export const DEFAULT_BACKEND = opencode.id;
 
 /** Recognised so users get a clear message instead of a confusing model-not-found. */
-const PLANNED = ['codex', 'claude', 'gemini'];
+const PLANNED = ['gemini'];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
 export const allBackends = (): Backend[] => [...REGISTRY.values()];

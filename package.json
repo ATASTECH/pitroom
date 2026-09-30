@@ -1,6 +1,6 @@
 {
   "name": "pitroom",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "A free pit crew for your expensive coding agent. Delegate research, fixes, tests and grunt work from Claude Code, Codex or any agent to OpenCode, with receipts that prove the savings.",
   "type": "module",
   "bin": {
@@ -27,15 +27,15 @@
     "prepublishOnly": "npm run typecheck && npm test"
   },
   "keywords": [
-    "opencode",
+    "agent",
+    "agent-skills",
     "claude-code",
     "codex",
-    "agent",
-    "subagent",
-    "delegation",
-    "agent-skills",
-    "llm",
     "cost",
+    "delegation",
+    "llm",
+    "opencode",
+    "subagent",
     "tokens"
   ],
   "license": "MIT",

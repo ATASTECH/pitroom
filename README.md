@@ -27,7 +27,7 @@ A real run on a free OpenCode Zen model: your agent reads ~554 tokens instead of
 ## Why Pitroom
 
 - **Your model, not ours.** No model is hardcoded. Pitroom uses your worker CLI's default model; switch between free, paid and local models there and Pitroom follows.
-- **Any worker CLI.** Workers are adapters behind one interface. OpenCode ships today; Codex, Claude Code and Gemini CLI are next ([how adapters work](docs/backends.md)). Safety, verification and receipts live in the core, so every worker gets them.
+- **Any worker CLI.** Workers are adapters behind one interface: OpenCode, Codex CLI and Claude Code today, Gemini CLI soon ([how adapters work](docs/backends.md)). One group can mix them, and a fallback chain can cross them. Safety, verification and receipts live in the core, so every worker gets them.
 - **Verified answers.** Every `path:line` the worker cites is checked on disk (file exists, line in range, the named symbol is nearby): `── refs: 17/18 verified · bad: src/x.ts:400 (file has 120 lines)`. Your agent trusts what checks out and skips re-reading it.
 - **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
 - **Receipts, not vibes.** Tokens the worker burned, tokens returned to your agent, compression ratio, and an estimate of what your primary model would have charged. `pitroom savings --card card.svg` makes a shareable card.
@@ -37,11 +37,11 @@ A real run on a free OpenCode Zen model: your agent reads ~554 tokens instead of
 - **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
 - **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
 - **Works with any agent.** Five [Agent Skills](https://agentskills.io) (`using-pitroom` decides when to delegate, then `pitroom-research`, `-crew`, `-implement`, `-review`) plus a CLI, and a Claude Code / Codex plugin whose session-start hook makes your agent consider delegating before it starts reading. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
-- **Small.** About 3,100 lines of TypeScript, one ~94 KB bundled file, zero runtime dependencies.
+- **Small.** About 3,700 lines of TypeScript, one ~113 KB bundled file, zero runtime dependencies.
 
 ## Quick start
 
-Requires [OpenCode](https://opencode.ai) v2+ (with a default model configured) and Node.js 18+.
+Requires Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
 ```bash
 npm i -g pitroom
@@ -160,17 +160,19 @@ A worker is named by a target: `backend[:model]`.
 ```bash
 pitroom run "…"                                          # preferred worker (config "worker", default opencode)
 pitroom run -W opencode:opencode/space-bunny-free "…"    # a specific backend and model
+pitroom run -W 'codex:#low' "…"                          # Codex's default model, low reasoning effort
+pitroom run -W claude:haiku "…"                          # Claude Code on a cheap model
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
 
-| Worker | Status | Read-only enforced by |
-|---|---|---|
-| OpenCode | ✅ | per-run permission rules |
-| Codex CLI | planned | OS sandbox (`-s read-only`) |
-| Claude Code | planned | permission mode + tool rules |
-| Gemini CLI | planned | approval mode + policy engine |
+| Worker | Status | Read-only enforced by | Cost in receipts | Notes |
+|---|---|---|---|---|
+| OpenCode (v2+) | ✅ | per-run permission rules | reported | private `--standalone` server per run |
+| Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
+| Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
+| Gemini CLI | soon | approval mode + policy engine | | |
 
-Fallbacks may cross backends once more adapters land (e.g. OpenCode rate-limited → Codex). Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md).
+Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a worker that is rate-limited, logged out or missing its model hands the task to the next. Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md).
 
 ## Configuration
 

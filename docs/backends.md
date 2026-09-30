@@ -56,9 +56,9 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | | read | write / isolate | resume | cost |
 |---|---|---|---|---|
 | **OpenCode v2** (`run --standalone --format json`) | permission profile: edit denied, shell allowlist, `execute` and web off | profile: edits on, history-changing git, bulk deletes and `execute` denied | `--session <id>` | reported |
-| **Codex** (`exec --json`) | `-s read-only` (OS sandbox) | `-s workspace-write` (sandbox, no network) | `exec resume <id>` | tokens only |
-| **Claude Code** (`-p --output-format stream-json`) | `--permission-mode plan`, deny Edit/Write/Bash writes via `--settings` | `acceptEdits` + `--settings` deny rules (`Bash(git push:*)`…) | `--resume <id>` | `total_cost_usd` |
-| **Gemini CLI** (`-p -o stream-json`) | `--approval-mode plan` | `auto_edit` + policy engine rules | index/latest only → `resume: 'none'` | tokens only |
+| **Codex** (`exec --json --ignore-user-config`) | `-c sandbox_mode="read-only"` (OS sandbox) | `-c sandbox_mode="workspace-write"` (writes only in the working dir, no network), `approval_policy="never"` | `exec resume <id>` | tokens only |
+| **Claude Code** (`-p --output-format stream-json --verbose`) | `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk`, tools `Read,Grep,Glob` only | same lockdown, tools `+Edit,Write,Bash`, `--disallowedTools Bash(git commit:*)`… | `--resume <id>` | `total_cost_usd` |
+| **Gemini CLI** (soon; `-p -o stream-json`) | `--approval-mode plan` | `auto_edit` + policy engine rules | index/latest only → `resume: 'none'` | tokens only |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -79,6 +79,23 @@ The OpenCode adapter targets OpenCode v2 (`doctor` fails on v1). What changed fr
 - **Auto-update**: workers run with `OPENCODE_DISABLE_AUTOUPDATE=1`, so a run never upgrades OpenCode underneath the user.
 
 Recorded v2 streams live in `test/fixtures/opencode/{events,failures}/v2-*`; the v1 ones stay as parser regression tests.
+
+## Codex notes
+
+- **`--ignore-user-config`.** `~/.codex/config.toml` can define MCP servers, which run outside Codex's sandbox and could have side effects in a read-only run, and profiles that loosen the sandbox. Disabling servers one by one is not reliable (`-c mcp_servers.<name>.enabled=false` breaks on names containing dots or spaces), so workers ignore the file; auth still works. The model is the target's, or Codex's built-in default; `#effort` sets the reasoning effort (`codex:gpt-5.6-sol#low`, `codex:#low`).
+- **Resume takes no `-s`/`-C`**, so the sandbox always goes through `-c sandbox_mode=…`; the tests assert it for new and resumed runs.
+- **Login shells.** Codex runs commands through `zsh -lc`; macOS's `path_helper` and `~/.zprofile` reorder `PATH`, which hides the git-guard shim. The second guard layer (git's own env config: a `reference-transaction` hook and `pushInsteadOf`) holds regardless, for every worker.
+- **Stream**: `item.completed` items of type `error` are warnings (deprecated settings, skills budget), not failures; failures are top-level `error` / `turn.failed`, whose message is a JSON API error. The JSON stream does not name the model, so it is read from the session's rollout file. Cost is not reported.
+- **Accounts**: some models are refused for ChatGPT accounts (`… is not supported when using Codex with a ChatGPT account`); that is `model-unavailable`, so the chain moves on.
+- **Node**: `codex` is a Node script (`#!/usr/bin/env node`); Pitroom runs such CLIs on its own Node 18+, since agents' shells often have an older Node first on `PATH`.
+
+## Claude Code notes
+
+- **Lockdown** (see the table): `--safe-mode` keeps the user's CLAUDE.md, skills, plugins, hooks and MCP out; `--restricted` removes command-running tools unless listed, confines file tools to the working directory and refuses `bypassPermissions`; `--permission-mode dontAsk` denies anything outside the allowlist instead of prompting. The init event of a real run lists exactly `Glob, Grep, Read` for a read-only worker.
+- **Not `--bare`**: it disables OAuth, which would break Claude subscriptions.
+- **Argument order**: `--tools`, `--allowedTools` and `--disallowedTools` take lists; non-list options follow them and the prompt comes after `--`, so no list can swallow it.
+- **Errors**: an API error arrives as an assistant message with `is_api_error_message` (e.g. `authentication_failed`, "OAuth session expired"); it is not counted as work, so the fallback chain can move on.
+- **Model**: the init event names it. The user's default is often an Opus-class model; `doctor` warns and suggests `-W claude:haiku`.
 
 ## Adding a worker
 

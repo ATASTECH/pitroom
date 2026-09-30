@@ -1,0 +1,21 @@
+{
+  "events": {
+    "read-sandbox-denied.jsonl": {
+      "sessionId": "01a0f162-8a33-70c0-b279-bee61481c2a0",
+      "steps": 2,
+      "total": 45374,
+      "edits": 0,
+      "finalTextStartsWith": "`math.js` exports the named function `add(a, b)`"
+    },
+    "write-file-change.jsonl": {
+      "sessionId": "01a0f163-3ae5-7891-baec-6d086f023a74",
+      "steps": 5,
+      "total": 70609,
+      "edits": 1,
+      "finalTextStartsWith": "Added and exported `multiply(a, b)` in `math.js`."
+    }
+  },
+  "failures": {
+    "unsupported-model": { "exitCode": 1, "kind": "model-unavailable", "messageIncludes": "is not supported when using Codex with a ChatGPT account" }
+  }
+}

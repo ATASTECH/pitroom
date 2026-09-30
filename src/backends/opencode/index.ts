@@ -7,28 +7,16 @@
 // own environment, so the injected profiles and the git guard on PATH would not
 // apply to the worker at all.
 import { spawnSync } from 'node:child_process';
-import fs from 'node:fs';
-import os from 'node:os';
-import path from 'node:path';
+import { findBinary, resolveCommand } from '../exec.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 import { AGENT, agentFor, configContent } from './profiles.js';
 
-function binary(): string {
-  if (process.env.PITROOM_OPENCODE_BIN) return process.env.PITROOM_OPENCODE_BIN;
-  const exts = process.platform === 'win32' ? ['.exe', '.cmd', ''] : [''];
-  for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const p = path.join(dir, `opencode${ext}`);
-      if (fs.existsSync(p) && fs.statSync(p).isFile()) return p;
-    }
-  }
-  const installer = path.join(os.homedir(), '.opencode', 'bin', 'opencode');
-  return fs.existsSync(installer) ? installer : 'opencode';
-}
+const binary = () => findBinary('opencode', 'PITROOM_OPENCODE_BIN', ['~/.opencode/bin/opencode']);
 
 function oc(args: string[], opts: { timeout?: number; env?: NodeJS.ProcessEnv } = {}) {
-  const r = spawnSync(binary(), args, {
+  const { command, prefix } = resolveCommand(binary());
+  const r = spawnSync(command, [...prefix, ...args], {
     encoding: 'utf8',
     timeout: opts.timeout ?? 60_000,
     env: opts.env ?? process.env,
@@ -55,9 +43,10 @@ function invocation(req: WorkerRequest) {
   if (req.sessionId) args.push('--session', req.sessionId);
   for (const f of req.files) args.push('--file', f);
   args.push(req.prompt);
+  const { command, prefix } = resolveCommand(binary());
   return {
-    command: binary(),
-    args,
+    command,
+    args: [...prefix, ...args],
     env: {
       OPENCODE_CONFIG_CONTENT: configContent(process.env.OPENCODE_CONFIG_CONTENT, req.web),
       // A worker run must not upgrade OpenCode underneath the user.

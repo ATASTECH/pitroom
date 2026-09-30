@@ -107,8 +107,8 @@ test('targets: backend[:model], bare models and models containing ":"', () => {
 });
 
 test('targets: planned workers are recognised with a clear message', () => {
-  assert.deepEqual(parseTarget('codex:gpt-5-codex', 'opencode'), { backend: 'codex', model: 'gpt-5-codex' });
-  assert.throws(() => getBackend('codex'), /"codex" worker is not supported yet/);
+  assert.deepEqual(parseTarget('gemini:gemini-3-flash', 'opencode'), { backend: 'gemini', model: 'gemini-3-flash' });
+  assert.throws(() => getBackend('gemini'), /"gemini" worker is not supported yet/);
   assert.throws(() => getBackend('nope'), /unknown worker "nope"/);
 });
 
@@ -126,4 +126,51 @@ test('opencode: every run uses a private --standalone server and no removed v1 f
     assert.deepEqual(perm.shell, perm.bash, 'v2 "shell" gets the same rules as v1 "bash"');
     assert.equal(perm.execute, 'deny', 'v2 namespaced tools (browser, opencode API) are off');
   }
+});
+
+test('codex: OS sandbox per mode (also on resume), user config ignored, effort from #variant', () => {
+  const b = getBackend('codex');
+  const arg = (inv, key) => inv.args.find((a) => a.startsWith(`${key}=`));
+  for (const [mode, sandbox] of [['read', 'read-only'], ['write', 'workspace-write'], ['isolate', 'workspace-write']]) {
+    for (const sessionId of [undefined, 'SES-1']) {
+      const inv = b.invocation(request({ mode, sessionId }));
+      assert.equal(arg(inv, 'sandbox_mode'), `sandbox_mode="${sandbox}"`, `${mode} ${sessionId ?? 'new'}`);
+      assert.equal(arg(inv, 'approval_policy'), 'approval_policy="never"');
+      assert.ok(inv.args.includes('--ignore-user-config'), 'user MCP servers and profiles stay out');
+      assert.ok(!inv.args.includes('-s') && !inv.args.includes('-C'), 'resume accepts neither');
+    }
+  }
+  const inv = b.invocation(request({ model: 'gpt-5.6-sol#low' }));
+  assert.equal(inv.args[inv.args.indexOf('--model') + 1], 'gpt-5.6-sol');
+  assert.equal(arg(inv, 'model_reasoning_effort'), 'model_reasoning_effort="low"');
+  assert.equal(inv.args.at(-1), 'PROMPT-SENTINEL');
+});
+
+test('claude: locked down in every mode; read gets only read tools; secrets denied', () => {
+  const b = getBackend('claude');
+  const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];
+  for (const mode of ['read', 'write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    for (const f of ['-p', '--safe-mode', '--restricted', '--strict-mcp-config']) assert.ok(inv.args.includes(f), `${mode}: ${f}`);
+    assert.equal(after(inv, '--permission-mode'), 'dontAsk');
+    assert.deepEqual(inv.args.slice(-2), ['--', 'PROMPT-SENTINEL'], 'prompt after --, never swallowed by a list option');
+    assert.match(after(inv, '--settings'), /Read\(\*\*\/\.env\)/);
+  }
+  const read = b.invocation(request({ mode: 'read' }));
+  assert.equal(after(read, '--tools'), 'Read,Grep,Glob');
+  assert.equal(after(read, '--allowedTools'), 'Read,Grep,Glob');
+  assert.ok(!read.args.includes('--disallowedTools'));
+  const write = b.invocation(request({ mode: 'write' }));
+  assert.equal(after(write, '--tools'), 'Read,Grep,Glob,Edit,Write,Bash');
+  assert.ok(write.args.includes('Bash(git commit:*)') && write.args.includes('Bash(git push:*)'));
+  assert.match(after(b.invocation(request({ mode: 'read', web: true })), '--tools'), /WebFetch,WebSearch/);
+});
+
+test('claude: an auth failure did no work, so the fallback chain may move on', () => {
+  const b = getBackend('claude');
+  const dir = path.join(FIXTURES, 'claude', 'failures');
+  const run = b.parse(fs.readFileSync(path.join(dir, 'auth-expired.stdout.jsonl'), 'utf8'));
+  assert.equal(run.usage.steps, 0);
+  assert.equal(run.model, 'claude-opus-5[1m]');
+  assert.equal(b.failure(run, '', 1).kind, 'auth');
 });

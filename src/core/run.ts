@@ -305,7 +305,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
     meta.warnings.push(`READ-ONLY VIOLATION: worker modified ${[...new Set(run.edits)].join(', ')}`);
   }
   if (meta.sessionId && backend.resolveModel) meta.resolvedModel = backend.resolveModel(meta.sessionId);
-  meta.resolvedModel ??= ran.model;
+  meta.resolvedModel ??= run.model ?? ran.model;
   const refs = extractRefs(run.finalText);
   if (refs.length) {
     meta.refs = verifyRefs(refs, [meta.cwd, meta.repoRoot ?? '', meta.dir]);

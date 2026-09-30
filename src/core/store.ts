@@ -90,7 +90,19 @@ export function writeMeta(meta: RunMeta): void {
 }
 
 export function readMeta(id: string): RunMeta {
-  return JSON.parse(fs.readFileSync(runFile(id, 'meta.json'), 'utf8')) as RunMeta;
+  return upgrade(JSON.parse(fs.readFileSync(runFile(id, 'meta.json'), 'utf8')));
+}
+
+/** Records written before workers were pluggable (≤0.2) had `model`/`fallbackModels` and no `worker`. */
+function upgrade(raw: any): RunMeta {
+  if (!raw.worker) raw.worker = raw.model ? { backend: 'opencode', model: raw.model } : { backend: 'opencode' };
+  if (!Array.isArray(raw.fallback)) {
+    raw.fallback = (raw.fallbackModels ?? []).map((m: string) => ({ backend: 'opencode', model: m }));
+  }
+  raw.warnings ??= [];
+  raw.files ??= [];
+  raw.link ??= [];
+  return raw as RunMeta;
 }
 
 export function listRunIds(): string[] {

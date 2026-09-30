@@ -1,0 +1,6 @@
+{
+  "events": {},
+  "failures": {
+    "auth-expired": { "exitCode": 1, "kind": "auth", "messageIncludes": "OAuth session expired" }
+  }
+}

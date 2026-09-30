@@ -7,8 +7,8 @@
   "plugins": [
     {
       "name": "pitroom",
-      "description": "Delegate research, fixes, tests and parallel investigations to cheap OpenCode workers, with verified answers, exact diffs and cost receipts.",
-      "version": "0.4.0",
+      "description": "Delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex or Claude Code workers, with verified answers, exact diffs and cost receipts.",
+      "version": "0.5.0",
       "source": "./",
       "author": {
         "name": "TahaAtas"

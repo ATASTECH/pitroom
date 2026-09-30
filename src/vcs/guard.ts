@@ -4,8 +4,10 @@
 // denied while `sh -c "git push"`, `env git push`, a Makefile or a script calling
 // git are not. The shim sees every git invocation that goes through PATH and
 // refuses anything that changes history, refs, the index or discards work.
-// Limits (documented): calling git by absolute path bypasses PATH (also denied
-// by the bash profile), and this is not an OS sandbox.
+// Layer 1 (this shim) gives friendly, precise refusals but lives on PATH, which
+// login shells and absolute paths bypass; layer 2 below (git's own env config)
+// catches those. Neither is an OS sandbox: working-tree edits in --write mode are
+// undone with `pitroom revert`, and --isolate never touches the user's tree.
 import fs from 'node:fs';
 import path from 'node:path';
 import { home } from '../core/store.js';
@@ -103,9 +105,49 @@ function findRealGit(skip: string): string | undefined {
   return undefined;
 }
 
+// Second layer, carried in environment variables so it survives what PATH does not:
+// login shells (macOS path_helper and ~/.zprofile reorder PATH; Codex runs commands
+// through `zsh -lc`), absolute paths like /usr/bin/git, and scripts. Git reads
+// GIT_CONFIG_COUNT/KEY_n/VALUE_n on every invocation:
+//   core.hooksPath → a reference-transaction hook that refuses every ref update
+//                    (commit, reset, branch/tag, stash, rebase, merge; --no-verify
+//                    does not skip it);
+//   url.<x>.pushInsteadOf "" → every push URL is rewritten to an unreachable one.
+const HOOK_VERSION = 1;
+const REF_HOOK = `#!/bin/sh
+# pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
+[ "$1" = prepared ] || exit 0
+echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
+exit 1
+`;
+
+export const hooksDir = () => path.join(home(), 'git-hooks', `v${HOOK_VERSION}`);
+
+function writeIfChanged(file: string, content: string): void {
+  if (fs.existsSync(file) && fs.readFileSync(file, 'utf8') === content) return;
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content, { mode: 0o755 });
+  fs.renameSync(tmp, file);
+}
+
+/** Appends git config entries to GIT_CONFIG_COUNT/KEY_n/VALUE_n, keeping any the user set. */
+function withGitConfig(env: NodeJS.ProcessEnv, entries: [string, string][]): NodeJS.ProcessEnv {
+  const out = { ...env };
+  let n = Number(env.GIT_CONFIG_COUNT) || 0;
+  for (const [key, value] of entries) {
+    out[`GIT_CONFIG_KEY_${n}`] = key;
+    out[`GIT_CONFIG_VALUE_${n}`] = value;
+    n++;
+  }
+  out.GIT_CONFIG_COUNT = String(n);
+  return out;
+}
+
 /**
- * Environment for the worker process: git shim first on PATH, and settings that
- * stop git from ever waiting for a password, an editor or a pager.
+ * Environment for the worker process: git guard (PATH shim + ref/push guard in git's
+ * own env config), and settings that stop git from waiting for a password, an
+ * editor or a pager.
  */
 export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const quiet = {
@@ -116,15 +158,14 @@ export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     PAGER: 'cat',
   };
   if (process.platform === 'win32') return { ...env, ...quiet };
+  writeIfChanged(path.join(hooksDir(), 'reference-transaction'), REF_HOOK);
+  env = withGitConfig(env, [
+    ['core.hooksPath', hooksDir()],
+    ['url.pitroom-push-blocked://.pushInsteadOf', ''],
+  ]);
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
-  const file = path.join(dir, 'git');
-  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== SHIM) {
-    fs.mkdirSync(dir, { recursive: true });
-    const tmp = `${file}.${process.pid}.tmp`;
-    fs.writeFileSync(tmp, SHIM, { mode: 0o755 });
-    fs.renameSync(tmp, file);
-  }
+  writeIfChanged(path.join(dir, 'git'), SHIM);
   return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path.delimiter}${env.PATH ?? ''}` };
 }

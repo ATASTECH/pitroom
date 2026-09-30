@@ -31,6 +31,16 @@ const MAX_BYTES = 5 * 1024 * 1024;
 const WINDOW = 5;
 const DEFINITION_LOOKBACK = 80;
 
+/**
+ * Backticked words that are probably code symbols rather than commands or plain
+ * words (`rg`, `git`, `ls`): called like `f()`, or with a capital, underscore,
+ * `$` or digit, or at least five characters long.
+ */
+function looksLikeSymbol(m: RegExpMatchArray): boolean {
+  const name = m[1]!;
+  return m[0].includes('(') || /[A-Z_$0-9]/.test(name) || name.length >= 5;
+}
+
 export function extractRefs(answer: string): Ref[] {
   const seen = new Map<string, Ref>();
   for (const line of answer.split('\n')) {
@@ -40,6 +50,7 @@ export function extractRefs(answer: string): Ref[] {
     // An identifier between two references of the same clause ("`a` in x.ts:1, `b` in y.ts:2"
     // vs "x.ts:1 has `a`, y.ts:2 has `b`") could belong to either: skip it rather than guess.
     const idents = [...line.matchAll(IDENT)].filter((i) => {
+      if (!looksLikeSymbol(i)) return false;
       const pos = i.index ?? 0;
       const before = matches.filter((m) => (m.index ?? 0) + m[0].length <= pos).at(-1);
       const after = matches.find((m) => (m.index ?? 0) >= pos + i[0].length);

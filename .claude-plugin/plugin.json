@@ -1,10 +1,20 @@
 {
   "name": "pitroom",
-  "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests and parallel investigations to cheap OpenCode workers, with verified answers, exact diffs and cost receipts.",
-  "version": "0.4.0",
+  "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex or Claude Code workers, with verified answers, exact diffs and cost receipts.",
+  "version": "0.5.0",
   "author": {
     "name": "TahaAtas"
   },
   "license": "MIT",
-  "keywords": ["opencode", "delegation", "subagents", "parallel", "cost", "tokens", "workers"]
+  "keywords": [
+    "claude-code",
+    "codex",
+    "cost",
+    "delegation",
+    "opencode",
+    "parallel",
+    "subagents",
+    "tokens",
+    "workers"
+  ]
 }

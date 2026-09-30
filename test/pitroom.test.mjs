@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { execFileSync } from 'node:child_process';
 import { sandbox } from './helpers.mjs';
 
 test('read mode returns the answer, a receipt, and touches nothing', () => {
@@ -187,6 +188,8 @@ test('file references in the answer are verified against disk', () => {
     '- the body of `hello()` continues at src/lib.js:9-10',
     // real case: after "): " a new clause starts, so `absent()` is not the subject of src/lib.js:14
     '- Order (`src/lib.js:14`): iteration follows `absent()` order',
+    // real case: `rg` is a command, not the subject of the reference that follows it
+    '- VERIFICATION: ran `rg` searches, and inspected `src/lib.js:14`',
     '- not refs: https://example.com:8080/x localhost:3000 v1.2.3:4',
   ].join('\\n');
   const r = s.run(['run', 'where is hello?'], { MOCK_ACTIONS: `answer:${answer}` });
@@ -293,4 +296,56 @@ test('a fallback equal to the failed OpenCode default is skipped, not retried', 
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const models = s.calls().filter((c) => c.argv[0] === 'run').map((c) => (c.argv.includes('--model') ? c.argv[c.argv.indexOf('--model') + 1] : 'default'));
   assert.deepEqual(models, ['default', 'mock/alive']);
+});
+
+test('git guard layer 2 holds through login shells, absolute paths and pushes', () => {
+  const s = sandbox();
+  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-remote-'));
+  s.git('init', '-q', '--bare', remote);
+  s.git('remote', 'add', 'origin', remote);
+  const head = s.git('rev-parse', 'HEAD');
+  const cmds = [
+    "/bin/sh -lc 'git commit -q --allow-empty --no-verify -m login-shell'",
+    '/usr/bin/git -c user.name=t -c user.email=t@t commit -q --allow-empty --no-verify -m absolute',
+    '/usr/bin/git branch side',
+    '/usr/bin/git push -q origin main',
+  ];
+  const r = s.run(['run', '--write', 'try git'], { MOCK_ACTIONS: cmds.map((c) => `exec:${c}`).join(';') + ';answer:SUMMARY: tried' });
+  assert.equal(r.status, 0, r.stderr);
+  for (const e of s.execs()) assert.notEqual(e.code, 0, `${e.exec} should fail: ${e.output}`);
+  assert.equal(s.git('rev-parse', 'HEAD'), head, 'no commit landed');
+  assert.doesNotMatch(s.git('branch'), /side/);
+  assert.equal(execFileSync('git', ['--git-dir', remote, 'for-each-ref'], { encoding: 'utf8' }), '', 'nothing was pushed');
+});
+
+test('records from before pluggable workers still list and show', () => {
+  const s = sandbox();
+  s.run(['run', 'x']);
+  const home = path.join(s.base, 'home', 'runs');
+  const id = fs.readdirSync(home)[0];
+  const file = path.join(home, id, 'meta.json');
+  const old = JSON.parse(fs.readFileSync(file, 'utf8'));
+  delete old.worker;
+  delete old.fallback;
+  delete old.ran;
+  old.model = 'legacy/model';
+  fs.writeFileSync(file, JSON.stringify(old));
+  const ls = s.run(['ls']);
+  assert.equal(ls.status, 0, ls.stderr);
+  assert.match(ls.stdout, /opencode:legacy\/model/);
+  assert.equal(s.run(['show', id]).status, 0);
+});
+
+test('fallback crosses backends: Claude Code (session expired) → OpenCode', () => {
+  const s = sandbox();
+  const claudeMock = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'claude', 'mock', 'claude.mjs');
+  const r = s.run(['run', '-W', 'claude', 'where is login?'], {
+    PITROOM_CLAUDE_BIN: claudeMock,
+    PITROOM_FALLBACK: 'opencode:mock/alive',
+    MOCK_ACTIONS: 'answer:SUMMARY: login is in auth.ts',
+  });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /fallback: claude \(default model\) failed \(Failed to authenticate: OAuth session expired/);
+  assert.match(r.stdout, /worker opencode/);
+  assert.match(r.stdout, /SUMMARY: login is in auth.ts/);
 });
