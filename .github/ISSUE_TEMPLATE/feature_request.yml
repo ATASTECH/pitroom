@@ -1,0 +1,41 @@
+name: Feature request
+description: An idea for Pitroom
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+      description: The behavior or command you have in mind. An example of the output helps.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - A worker adapter (a new CLI)
+        - Commands and options
+        - Skills
+        - Models, costs and effort
+        - Safety and permissions
+        - Documentation
+        - Something else
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched the existing issues and the README
+          required: true

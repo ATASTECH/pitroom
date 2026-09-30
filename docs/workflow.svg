@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620" role="img" aria-labelledby="t d">
+  <title id="t">Pitroom workflow</title>
+  <desc id="d">Brainstorm and plan with your agent, then for every task a worker implements in an isolated copy, another model reviews, fix rounds repeat until approved, and your agent applies, tests and commits; then a whole-branch review and finishing, which you decide.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0A0F24"/><stop offset="1" stop-color="#131B3C"/></linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#ffffff" fill-opacity="0.05"/></pattern>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="135%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/></filter>
+    <marker id="ar" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#7C8CC4"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#FF7A3D"/></marker>
+  </defs>
+  <rect width="1100" height="620" rx="22" fill="url(#bg)"/>
+  <rect width="1100" height="620" rx="22" fill="url(#dots)"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif' text-anchor="middle">
+    <rect x="87.2" y="27" width="61.599999999999994" height="22" rx="11" fill="#34D399" fill-opacity="0.14" stroke="#34D399" stroke-opacity="0.55"/>
+    <text x="118.0" y="42.5" fill="#34D399" font-size="11.5" font-weight="700" letter-spacing="0.6">DESIGN</text>
+    <rect x="445.8" y="27" width="48.4" height="22" rx="11" fill="#FF7A3D" fill-opacity="0.14" stroke="#FF7A3D" stroke-opacity="0.55"/>
+    <text x="470.0" y="42.5" fill="#FF7A3D" font-size="11.5" font-weight="700" letter-spacing="0.6">PLAN</text>
+    <g filter="url(#sh)">
+      <rect x="40" y="62" width="160" height="64" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M54,62 H45 a9,9 0 0 0 -9,9 V117 a9,9 0 0 0 9,9 H54" fill="none"/>
+      <rect x="40" y="76" width="5" height="36" rx="2.5" fill="#34D399"/>
+    </g>
+    <text x="138.0" y="91.0" fill="#F8FAFF" font-size="15.5" font-weight="700">Your idea</text>
+    <text x="138.0" y="111.0" fill="#AEB9DB" font-size="12.5">what you want built</text>
+    <circle cx="64" cy="94.0" r="11" fill="#34D399"/>
+    <text x="64" y="98.5" fill="#0A0F24" font-size="12.5" font-weight="800">1</text>
+    <g filter="url(#sh)">
+      <rect x="262" y="62" width="230" height="64" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M276,62 H267 a9,9 0 0 0 -9,9 V117 a9,9 0 0 0 9,9 H276" fill="none"/>
+      <rect x="262" y="76" width="5" height="36" rx="2.5" fill="#34D399"/>
+    </g>
+    <text x="395.0" y="91.0" fill="#F8FAFF" font-size="15.5" font-weight="700">brainstorming</text>
+    <text x="395.0" y="111.0" fill="#AEB9DB" font-size="12.5">a design you approve</text>
+    <circle cx="286" cy="94.0" r="11" fill="#34D399"/>
+    <text x="286" y="98.5" fill="#0A0F24" font-size="12.5" font-weight="800">2</text>
+    <g filter="url(#sh)">
+      <rect x="554" y="62" width="250" height="64" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M568,62 H559 a9,9 0 0 0 -9,9 V117 a9,9 0 0 0 9,9 H568" fill="none"/>
+      <rect x="554" y="76" width="5" height="36" rx="2.5" fill="#FF7A3D"/>
+    </g>
+    <text x="697.0" y="91.0" fill="#F8FAFF" font-size="15.5" font-weight="700">writing-plans</text>
+    <text x="697.0" y="111.0" fill="#AEB9DB" font-size="12.5">tasks, a worker tier each</text>
+    <circle cx="578" cy="94.0" r="11" fill="#FF7A3D"/>
+    <text x="578" y="98.5" fill="#0A0F24" font-size="12.5" font-weight="800">3</text>
+    <path d="M200,94 H258" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M492,94 H550" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M679,126 V168" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <rect x="40" y="168" width="1020" height="262" rx="20" fill="#ffffff" fill-opacity="0.025" stroke="#FF7A3D" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="8 7"/>
+    <rect x="78.5" y="155" width="55.0" height="22" rx="11" fill="#FF7A3D" fill-opacity="0.14" stroke="#FF7A3D" stroke-opacity="0.55"/>
+    <text x="106.0" y="170.5" fill="#FF7A3D" font-size="11.5" font-weight="700" letter-spacing="0.6">BUILD</text>
+    <text x="150" y="172.5" fill="#AEB9DB" font-size="13" font-weight="600" text-anchor="start">repeat for every task</text>
+    <g filter="url(#sh)">
+      <rect x="70" y="206" width="270" height="76" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M84,206 H75 a9,9 0 0 0 -9,9 V273 a9,9 0 0 0 9,9 H84" fill="none"/>
+      <rect x="70" y="220" width="5" height="48" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="223.0" y="241.0" fill="#F8FAFF" font-size="15.5" font-weight="700">run --plan --step N</text>
+    <text x="223.0" y="261.0" fill="#AEB9DB" font-size="12.5">a worker, in an isolated copy</text>
+    <circle cx="94" cy="244.0" r="11" fill="#38BDF8"/>
+    <text x="94" y="248.5" fill="#0A0F24" font-size="12.5" font-weight="800">4</text>
+    <g filter="url(#sh)">
+      <rect x="400" y="206" width="290" height="76" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M414,206 H405 a9,9 0 0 0 -9,9 V273 a9,9 0 0 0 9,9 H414" fill="none"/>
+      <rect x="400" y="220" width="5" height="48" rx="2.5" fill="#A78BFA"/>
+    </g>
+    <text x="563.0" y="241.0" fill="#F8FAFF" font-size="15.5" font-weight="700">review</text>
+    <text x="563.0" y="261.0" fill="#AEB9DB" font-size="12.5">another model: SPEC and QUALITY</text>
+    <circle cx="424" cy="244.0" r="11" fill="#A78BFA"/>
+    <text x="424" y="248.5" fill="#0A0F24" font-size="12.5" font-weight="800">5</text>
+    <g filter="url(#sh)">
+      <rect x="750" y="206" width="280" height="76" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M764,206 H755 a9,9 0 0 0 -9,9 V273 a9,9 0 0 0 9,9 H764" fill="none"/>
+      <rect x="750" y="220" width="5" height="48" rx="2.5" fill="#FF7A3D"/>
+    </g>
+    <text x="908.0" y="241.0" fill="#F8FAFF" font-size="15.5" font-weight="700">apply, test, commit</text>
+    <text x="908.0" y="261.0" fill="#AEB9DB" font-size="12.5">your agent does it, never a worker</text>
+    <circle cx="774" cy="244.0" r="11" fill="#FF7A3D"/>
+    <text x="774" y="248.5" fill="#0A0F24" font-size="12.5" font-weight="800">7</text>
+    <path d="M340,244 H396" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M690,244 H746" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <text x="718" y="234" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="middle">approved</text>
+    <g filter="url(#sh)">
+      <rect x="400" y="336" width="290" height="70" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M414,336 H405 a9,9 0 0 0 -9,9 V397 a9,9 0 0 0 9,9 H414" fill="none"/>
+      <rect x="400" y="350" width="5" height="42" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="563.0" y="368.0" fill="#F8FAFF" font-size="15.5" font-weight="700">run --continue</text>
+    <text x="563.0" y="388.0" fill="#AEB9DB" font-size="12.5">a fix round, then review again</text>
+    <circle cx="424" cy="371.0" r="11" fill="#38BDF8"/>
+    <text x="424" y="375.5" fill="#0A0F24" font-size="12.5" font-weight="800">6</text>
+    <path d="M505,282 V332" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M585,336 V286" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <text x="494" y="318" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="end">findings</text>
+    <text x="596" y="318" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="start">fixed</text>
+    <path d="M450,430 V476" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <rect x="119.2" y="499" width="61.599999999999994" height="22" rx="11" fill="#34D399" fill-opacity="0.14" stroke="#34D399" stroke-opacity="0.55"/>
+    <text x="150.0" y="514.5" fill="#34D399" font-size="11.5" font-weight="700" letter-spacing="0.6">FINISH</text>
+    <g filter="url(#sh)">
+      <rect x="270" y="476" width="360" height="76" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M284,476 H275 a9,9 0 0 0 -9,9 V543 a9,9 0 0 0 9,9 H284" fill="none"/>
+      <rect x="270" y="490" width="5" height="48" rx="2.5" fill="#A78BFA"/>
+    </g>
+    <text x="468.0" y="511.0" fill="#F8FAFF" font-size="15.5" font-weight="700">review --range</text>
+    <text x="468.0" y="531.0" fill="#AEB9DB" font-size="12.5">the whole branch, by another model</text>
+    <circle cx="294" cy="514.0" r="11" fill="#A78BFA"/>
+    <text x="294" y="518.5" fill="#0A0F24" font-size="12.5" font-weight="800">8</text>
+    <g filter="url(#sh)">
+      <rect x="720" y="476" width="340" height="76" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M734,476 H725 a9,9 0 0 0 -9,9 V543 a9,9 0 0 0 9,9 H734" fill="none"/>
+      <rect x="720" y="490" width="5" height="48" rx="2.5" fill="#34D399"/>
+    </g>
+    <text x="908.0" y="511.0" fill="#F8FAFF" font-size="15.5" font-weight="700">finishing</text>
+    <text x="908.0" y="531.0" fill="#AEB9DB" font-size="12.5">you choose: merge, PR or keep</text>
+    <circle cx="744" cy="514.0" r="11" fill="#34D399"/>
+    <text x="744" y="518.5" fill="#0A0F24" font-size="12.5" font-weight="800">9</text>
+    <path d="M630,514 H716" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <circle cx="40" cy="586" r="6" fill="#FF7A3D"/>
+    <text x="54" y="590.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">your agent</text>
+    <circle cx="135.0" cy="586" r="6" fill="#38BDF8"/>
+    <text x="149.0" y="590.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">a worker</text>
+    <circle cx="216.2" cy="586" r="6" fill="#A78BFA"/>
+    <text x="230.2" y="590.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">another model reviews</text>
+    <circle cx="387.1" cy="586" r="6" fill="#34D399"/>
+    <text x="401.1" y="590.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">you decide</text>
+  </g>
+</svg>

@@ -4,7 +4,7 @@
 
 ### A free pit crew for your expensive coding agent
 
-**Send the reading, fixes, tests and reviews to cheap workers. Keep the decisions.**
+**Cheaper and faster: hand the reading, fixes, tests and reviews to workers that run in parallel. Keep the decisions.**
 
 Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code workers
 
@@ -46,7 +46,7 @@ Claude Code, Codex and friends spend premium tokens *reading*: grepping, opening
 
 Pitroom goes one step further:
 
-> **Your agent stays in the driver's seat. A pit crew of cheap workers does the legwork, and hands back only the answer, the exact diff and a receipt.**
+> **Your agent stays in the driver's seat. A pit crew of cheap workers does the legwork in parallel, while your agent keeps going, and hands back only the answer, the exact diff and a receipt.**
 
 <table>
 <tr>
@@ -99,6 +99,7 @@ In isolate mode nothing reaches your tree until you apply it.
 - **Receipts, not vibes.** Tokens the worker burned, tokens returned to your agent, compression ratio, and an estimate of what your primary model would have charged. `pitroom savings --card card.svg` makes a shareable card.
 - **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
 - **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. Up to 20 workers run at once by default (`maxParallel`, 30 at most), the rest queue, and the fallback chain absorbs free-tier rate limits; parallel writers are refused.
+- **Faster, not only cheaper.** Workers run in the background and side by side (up to 20 at once) while your agent keeps working, so slow reading and review stop blocking it. In the [benchmark](#benchmarks), 470 s of worker time finished in 156 s of wall clock, about 3× faster than one question after another, and your agent's own context stayed small.
 - **Free first, dearer only when needed.** Runs and plan tasks start on the `cheap` tier, OpenCode's free model; `standard` (Codex) and `capable` (Claude Code) are for tasks that need them, and an optional `review` tier names who reviews. `pitroom models` shows what each worker offers, the effort levels (`low` … `xhigh`) each model accepts, what you say it costs (`costs`) and what it used; `--effort` sets the level per run. Details: [Models, costs and effort](#models-costs-and-effort).
 - **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
 - **Your agent sets the permissions.** It creates each worker with the permissions the task and your session allow (read-only, isolated copy, in-place edits, web), and a worker never widens its own. A fixed floor stays for every run: no git history changes, no `sudo`, no publishing, no secrets. A worker cannot land a deletion either: `pitroom apply` refuses a patch that deletes files unless your agent passes `--allow-delete`.
@@ -155,7 +156,7 @@ Measured on a real, public repository: [PI-Desktop](https://github.com/vastsa/PI
 | Which tests cover the RPC layer? | 59 s | 511,209 | 1,747 | 293× | 6/7 |
 | **All eight** | **156 s** wall clock | **5,492,971** | **7,684** | **715×** | 114/160 |
 
-Workers read 5.5 million tokens of code and docs (96 steps, 179 tool calls) and handed the agent 7,684 tokens, about 960 per answer. `pitroom savings` estimates $3.86 saved for these eight at Claude Sonnet list prices.
+Workers read 5.5 million tokens of code and docs (96 steps, 179 tool calls) and handed the agent 7,684 tokens, about 960 per answer. The eight runs add up to 470 s of worker time but finished in 156 s of wall clock, because four ran at a time (the limit then; the default is now 20): about 3× faster than one after another. That compares the same workers with themselves, not with your agent doing the reading alone, which I did not measure. `pitroom savings` estimates $3.86 saved for these eight at Claude Sonnet list prices.
 
 **Were the answers right?** Checked by hand against the repository: 46 key claims across all eight answers (the cited line and what it says) were all correct, and two completeness checks held (exactly 6 invoke and 3 event window channels; no tests in `config_sync_rpc.rs`). The i18n answer lists the 12 source files that import the package and leaves out 11 test and fixture files that do too, which the question did not ask about. Pitroom's own checker marks fewer references as verified than that: ¹ those two answers cite bare file names (`transcripts.rs:651`) that it cannot resolve to a path, and it counts them as unverified although the lines are right.
 
@@ -274,20 +275,7 @@ Long jobs: `--bg` returns immediately; `pitroom wait <id>` blocks for up to 9 mi
 
 Pitroom ships a full development methodology as skills, adapted from [superpowers](https://github.com/obra/superpowers) so that its subagents are cheap workers: your agent brainstorms and plans with you, then executes the plan task by task while workers do the typing and a second model does the reviewing.
 
-```mermaid
-flowchart TD
-  A["Your idea"] --> B["brainstorming<br/>design you approve"]
-  B --> C["writing-plans<br/>tasks, a worker tier each"]
-  C --> D1
-  subgraph LOOP["For every task (driven-development)"]
-    D1["run --plan --step N<br/>worker in an isolated copy"] --> D2["review<br/>another model: SPEC and QUALITY"]
-    D2 -- "findings" --> D3["run --continue<br/>fix round"]
-    D3 --> D2
-    D2 -- "approved" --> D4["apply, test, commit<br/>your agent, never the worker"]
-  end
-  D4 --> E["review --range<br/>the whole branch"]
-  E --> F["finishing<br/>merge, PR or keep: asked"]
-```
+<p align="center"><img src="docs/workflow.svg" width="100%" alt="Workflow: brainstorming, then a plan with a worker tier per task, then for every task a worker implements in an isolated copy, another model reviews, fix rounds repeat until approved, and your agent applies, tests and commits; then a whole-branch review and finishing."></p>
 
 | Step | Skill | Command |
 |---|---|---|
@@ -412,16 +400,7 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 ![Pitroom workflow: primary agent → Pitroom CLI → OpenCode, Codex or Claude Code workers → verified answer, exact diff and receipt returned to the primary agent.](docs/pitroom-flow.png)
 
-```mermaid
-flowchart LR
-  P["Primary agent<br/>Claude Code, Codex, …"] -- "pitroom run, crew, review" --> C["Pitroom CLI"]
-  C --> M{"Mode"}
-  M -- "read" --> W
-  M -- "isolate" --> I["Private copy of<br/>your current tree"] --> W
-  M -- "write" --> S["Your tree plus a<br/>throwaway git snapshot"] --> W
-  W["Worker CLI<br/>OpenCode, Codex or Claude Code<br/>its own permissions and the git guard"] -- "event stream" --> C
-  C -- "answer, exact diff, receipt" --> P
-```
+<p align="center"><img src="docs/architecture.svg" width="100%" alt="How a run flows: the primary agent delegates to the Pitroom CLI, which starts a worker CLI in read, isolate or write mode; events, then the answer, an exact diff and a receipt come back."></p>
 
 <details>
 <summary>Headless problems Pitroom handles for every worker</summary>
@@ -545,13 +524,14 @@ npm run typecheck
 
 **[Report an issue](https://github.com/ATASTECH/pitroom/issues/new)** ·
 [Open issues](https://github.com/ATASTECH/pitroom/issues) ·
-[Security policy](SECURITY.md)
+[Security policy](SECURITY.md) ·
+[Code of conduct](CODE_OF_CONDUCT.md)
 
 ---
 
 ## Credits
 
-The workflow skills (brainstorming, planning, worker-driven development, review, debugging, TDD, verification, worktrees, finishing) are adapted from [superpowers](https://github.com/obra/superpowers)
+The workflow skills (brainstorming, planning, worker-driven development, review, debugging, TDD, verification, worktrees, finishing) are adapted from [superpowers](https://github.com/obra/superpowers) by Jesse Vincent, under the MIT License; the notice is in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 

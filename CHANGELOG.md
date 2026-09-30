@@ -12,7 +12,13 @@
 - Up to 20 workers run at once by default (`maxParallel`), 30 at most; before, the default was 4. The rest queue and the fallback chain absorbs free-tier rate limits.
 - An optional `review` tier in `tiers` names who reviews a run (and needs no same-backend warning). The skills start on the `cheap` tier, OpenCode's free model, and raise a task only when it needs more; plans are written the same way.
 
+### Project files
+- `THIRD_PARTY_NOTICES.md` carries the MIT notice of superpowers, which the workflow skills are adapted from, and ships in the npm package; the README stays clean and links to it.
+- `CODE_OF_CONDUCT.md`, issue forms (bug report, feature request), a pull request template and a contact-link page for security reports.
+- `npm run bump -- patch|minor|major|X.Y.Z` moves the version in `package.json`, `package-lock.json` (which still said 0.1.0) and both plugin manifests together and adds a CHANGELOG heading; a test fails while any file disagrees or the new CHANGELOG heading still has its placeholder text.
+
 ### README
+- The workflow and the architecture are SVG diagrams (they render on GitHub and on npm, unlike mermaid). The speed gain is stated with measured numbers: 470 s of worker time in 156 s of wall clock.
 - Install commands per agent as copy-and-paste blocks (Claude Code, Codex, npm), with update and uninstall; diagrams for the workflow and for how a run flows; the free-first setup, `pitroom models`, costs and effort are explained; the hard-coded version line is gone (the badges show the real versions).
 
 ### Seeing Pitroom at work

@@ -172,9 +172,30 @@ test('the README keeps no hard-coded version, and its code fences and diagrams a
   assert.doesNotMatch(readme, /Current version/i, 'a version written by hand drifts; the badges show it');
   const fences = readme.split('\n').filter((l) => /^\s*```/.test(l));
   assert.equal(fences.length % 2, 0, 'every code fence is closed');
-  const mermaid = fences.filter((l) => /```mermaid/.test(l)).length;
-  assert.ok(mermaid >= 2, 'the workflow and the architecture are drawn');
+  // The diagrams are SVG files, which render on GitHub and on npm alike (mermaid does not on npm).
+  assert.doesNotMatch(readme, /```mermaid/);
+  for (const svg of ['docs/workflow.svg', 'docs/architecture.svg']) {
+    assert.ok(readme.includes(svg), `${svg} is shown in the README`);
+    const src = fs.readFileSync(path.join(root, svg), 'utf8');
+    assert.match(src, /^<svg [^>]*viewBox="0 0 \d+ \d+"/, `${svg} is an SVG with a viewBox`);
+    assert.match(src, /<title[^>]*>.+<\/title>/s, `${svg} has a title for screen readers`);
+  }
   for (const tag of ['details', 'div', 'table']) {
     assert.equal((readme.match(new RegExp(`<${tag}[ >]`, 'g')) ?? []).length, (readme.match(new RegExp(`</${tag}>`, 'g')) ?? []).length, `<${tag}> is balanced`);
+  }
+});
+
+test('third-party notices ship with the package and carry the superpowers MIT notice', () => {
+  const notices = fs.readFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8');
+  assert.match(notices, /Copyright \(c\) 2025 Jesse Vincent/);
+  assert.match(notices, /Permission is hereby granted, free of charge/);
+  assert.match(notices, /THE SOFTWARE IS PROVIDED "AS IS"/);
+  assert.ok(JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).files.includes('THIRD_PARTY_NOTICES.md'));
+  assert.match(fs.readFileSync(path.join(root, 'README.md'), 'utf8'), /THIRD_PARTY_NOTICES\.md/);
+});
+
+test('community files exist: code of conduct, issue forms, pull request template', () => {
+  for (const f of ['CODE_OF_CONDUCT.md', 'CONTRIBUTING.md', 'SECURITY.md', '.github/pull_request_template.md', '.github/ISSUE_TEMPLATE/bug_report.yml', '.github/ISSUE_TEMPLATE/feature_request.yml', '.github/ISSUE_TEMPLATE/config.yml']) {
+    assert.ok(fs.existsSync(path.join(root, f)), f);
   }
 });

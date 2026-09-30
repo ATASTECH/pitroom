@@ -26,6 +26,7 @@
     "README.md",
     "CHANGELOG.md",
     "PRIVACY.md",
+    "THIRD_PARTY_NOTICES.md",
     "LICENSE"
   ],
   "engines": {
@@ -35,7 +36,8 @@
     "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "npm run build && node --test test/*.test.mjs",
-    "prepublishOnly": "npm run typecheck && npm test"
+    "prepublishOnly": "npm run typecheck && npm test",
+    "bump": "node scripts/bump-version.mjs"
   },
   "keywords": [
     "agent",

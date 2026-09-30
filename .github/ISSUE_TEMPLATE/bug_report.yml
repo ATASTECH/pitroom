@@ -1,0 +1,74 @@
+name: Bug report
+description: Something does not work the way the README or `pitroom --help` says
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. A vulnerability goes through the private form instead: see [SECURITY.md](https://github.com/ATASTECH/pitroom/blob/main/SECURITY.md).
+        **Remove secrets, tokens and private code from anything you paste.**
+  - type: input
+    id: version
+    attributes:
+      label: Pitroom version
+      description: Output of `pitroom --version`
+      placeholder: "0.6.5"
+    validations:
+      required: true
+  - type: input
+    id: worker
+    attributes:
+      label: Worker and model
+      description: The worker CLI and model that ran (the run report says, or `pitroom show <run>`)
+      placeholder: "opencode, opencode/muse-spark-1.3-contributor-free"
+  - type: input
+    id: environment
+    attributes:
+      label: OS and Node.js
+      placeholder: "macOS 15, Node 24.14"
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How you installed it
+      options:
+        - npm (npm i -g pitroom)
+        - Claude Code plugin
+        - Codex plugin
+        - From a clone of the repository
+        - Other
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran and what you saw
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The commands, in order. A small repository or a fake task that shows it is best.
+      render: shell
+  - type: textarea
+    id: doctor
+    attributes:
+      label: "`pitroom doctor` output"
+      description: It lists the worker CLIs, models and skills. Check it for secrets first.
+      render: text
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you send
+      options:
+        - label: I searched the existing issues
+          required: true
+        - label: I removed secrets and private code from what I pasted
+          required: true

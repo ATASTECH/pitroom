@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security vulnerability (private)
+    url: https://github.com/ATASTECH/pitroom/security/advisories/new
+    about: Do not open a public issue for a vulnerability. See SECURITY.md.
+  - name: Read the docs first
+    url: https://github.com/ATASTECH/pitroom#readme
+    about: Install, modes, workers, models and costs, configuration and the FAQ.

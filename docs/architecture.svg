@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="510" viewBox="0 0 1180 510" role="img" aria-labelledby="t d">
+  <title id="t">How a Pitroom run flows</title>
+  <desc id="d">The primary agent delegates to the Pitroom CLI, which starts a worker CLI in read, isolate or write mode; events, then the answer, an exact diff and a receipt, come back to the agent.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0A0F24"/><stop offset="1" stop-color="#131B3C"/></linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse"><circle cx="2" cy="2" r="1" fill="#ffffff" fill-opacity="0.05"/></pattern>
+    <filter id="sh" x="-10%" y="-10%" width="120%" height="135%"><feDropShadow dx="0" dy="5" stdDeviation="6" flood-color="#000" flood-opacity="0.35"/></filter>
+    <marker id="ar" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#7C8CC4"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,1 L9,5 L0,9 z" fill="#FF7A3D"/></marker>
+  </defs>
+  <rect width="1180" height="510" rx="22" fill="url(#bg)"/>
+  <rect width="1180" height="510" rx="22" fill="url(#dots)"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif' text-anchor="middle">
+    <g filter="url(#sh)">
+      <rect x="40" y="168" width="210" height="96" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M54,168 H45 a9,9 0 0 0 -9,9 V255 a9,9 0 0 0 9,9 H54" fill="none"/>
+      <rect x="40" y="182" width="5" height="68" rx="2.5" fill="#FF7A3D"/>
+    </g>
+    <text x="145.0" y="213.0" fill="#F8FAFF" font-size="15.5" font-weight="700">Primary agent</text>
+    <text x="145.0" y="233.0" fill="#AEB9DB" font-size="12.5">Claude Code, Codex, …</text>
+    <g filter="url(#sh)">
+      <rect x="320" y="168" width="190" height="96" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M334,168 H325 a9,9 0 0 0 -9,9 V255 a9,9 0 0 0 9,9 H334" fill="none"/>
+      <rect x="320" y="182" width="5" height="68" rx="2.5" fill="#E2E8F0"/>
+    </g>
+    <text x="415.0" y="213.0" fill="#F8FAFF" font-size="15.5" font-weight="700">Pitroom CLI</text>
+    <text x="415.0" y="233.0" fill="#AEB9DB" font-size="12.5">run · crew · review</text>
+    <path d="M250,216 H316" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <text x="283" y="204" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="middle">delegates</text>
+    <g filter="url(#sh)">
+      <rect x="600" y="44" width="270" height="84" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M614,44 H605 a9,9 0 0 0 -9,9 V119 a9,9 0 0 0 9,9 H614" fill="none"/>
+      <rect x="600" y="58" width="5" height="56" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="735.0" y="83.0" fill="#F8FAFF" font-size="15.5" font-weight="700">read</text>
+    <text x="735.0" y="103.0" fill="#AEB9DB" font-size="12.5">read-only: edit tools denied</text>
+    <path d="M831,68 q11,-12 22,0 q-11,12 -22,0 z" fill="none" stroke="#38BDF8" stroke-width="2"/>
+    <circle cx="842" cy="68" r="3.2" fill="#38BDF8"/>
+    <g filter="url(#sh)">
+      <rect x="600" y="174" width="270" height="84" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M614,174 H605 a9,9 0 0 0 -9,9 V249 a9,9 0 0 0 9,9 H614" fill="none"/>
+      <rect x="600" y="188" width="5" height="56" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="735.0" y="213.0" fill="#F8FAFF" font-size="15.5" font-weight="700">isolate</text>
+    <text x="735.0" y="233.0" fill="#AEB9DB" font-size="12.5">a private copy of your tree</text>
+    <rect x="833" y="190" width="14" height="14" rx="3" fill="none" stroke="#38BDF8" stroke-width="2"/>
+    <rect x="839" y="196" width="14" height="14" rx="3" fill="#19224A" stroke="#38BDF8" stroke-width="2"/>
+    <g filter="url(#sh)">
+      <rect x="600" y="304" width="270" height="84" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M614,304 H605 a9,9 0 0 0 -9,9 V379 a9,9 0 0 0 9,9 H614" fill="none"/>
+      <rect x="600" y="318" width="5" height="56" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="735.0" y="343.0" fill="#F8FAFF" font-size="15.5" font-weight="700">write</text>
+    <text x="735.0" y="363.0" fill="#AEB9DB" font-size="12.5">your tree plus a snapshot</text>
+    <path d="M833,337 l2,-7 l9,-9 l5,5 l-9,9 z M844,321 l5,5" fill="none" stroke="#38BDF8" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M510,200 C555,200 555,86 596,86" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M510,216 H596" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M510,232 C555,232 555,346 596,346" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <rect x="494.5" y="15" width="121.0" height="22" rx="11" fill="#38BDF8" fill-opacity="0.14" stroke="#38BDF8" stroke-opacity="0.55"/>
+    <text x="555.0" y="30.5" fill="#38BDF8" font-size="11.5" font-weight="700" letter-spacing="0.6">YOU PICK A MODE</text>
+    <g filter="url(#sh)">
+      <rect x="950" y="130" width="190" height="170" rx="14" fill="#19224A" stroke="#2F3D7A" stroke-width="1.2"/>
+      <path d="M964,130 H955 a9,9 0 0 0 -9,9 V291 a9,9 0 0 0 9,9 H964" fill="none"/>
+      <rect x="950" y="144" width="5" height="142" rx="2.5" fill="#38BDF8"/>
+    </g>
+    <text x="1045.0" y="168" fill="#F8FAFF" font-size="15.5" font-weight="700">Worker CLI</text>
+    <text x="1050" y="194" fill="#AEB9DB" font-size="12.5" font-weight="400">OpenCode · Codex</text>
+    <text x="1050" y="212" fill="#AEB9DB" font-size="12.5" font-weight="400">Claude Code</text>
+    <text x="1050" y="246" fill="#38BDF8" font-size="12.5" font-weight="600">its own permissions</text>
+    <text x="1050" y="263" fill="#38BDF8" font-size="12.5" font-weight="600">+ the git guard</text>
+    <path d="M870,86 C915,86 915,170 946,170" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M870,216 H946" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M870,346 C915,346 915,262 946,262" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M1045,300 V436 H415 V268" fill="none" stroke="#7C8CC4" stroke-width="2" stroke-linecap="round" marker-end="url(#ar)"/>
+    <path d="M415,436 H145 V268" fill="none" stroke="#FF7A3D" stroke-width="2" stroke-linecap="round" marker-end="url(#ao)"/>
+    <text x="730" y="428" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="middle">events</text>
+    <text x="280" y="428" fill="#AEB9DB" font-size="12" font-style="italic" text-anchor="middle">answer  ·  exact diff  ·  receipt</text>
+    <circle cx="40" cy="480" r="6" fill="#FF7A3D"/>
+    <text x="54" y="484.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">your agent</text>
+    <circle cx="135.0" cy="480" r="6" fill="#E2E8F0"/>
+    <text x="149.0" y="484.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">Pitroom</text>
+    <circle cx="209.3" cy="480" r="6" fill="#38BDF8"/>
+    <text x="223.3" y="484.5" fill="#AEB9DB" font-size="12.5" text-anchor="start">a worker</text>
+  </g>
+</svg>

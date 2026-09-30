@@ -1,6 +1,6 @@
 # Contributing to Pitroom
 
-Thanks for helping. Issues and pull requests are welcome. For a vulnerability, do not open an issue: follow [SECURITY.md](SECURITY.md).
+Thanks for helping. Issues and pull requests are welcome, under the [code of conduct](CODE_OF_CONDUCT.md). For a vulnerability, do not open an issue: follow [SECURITY.md](SECURITY.md).
 
 ## Set up
 
