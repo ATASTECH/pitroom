@@ -20,6 +20,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 <br />
 
 **[Quick start](#quick-start)** ·
+[Benchmarks](#benchmarks) ·
 [Workflow](#workflow) ·
 [Skills](#skills) ·
 [Commands](#commands) ·
@@ -133,9 +134,41 @@ FILES CHANGED: none
    · returned ~554 tokens, 294× compression · est. saved $0.152 vs Claude Sonnet
 ```
 
-Every run prints a receipt, and `pitroom savings` adds them up:
+Every run prints a receipt, and `pitroom savings` adds them up (a bigger measurement follows in [Benchmarks](#benchmarks)):
 
 <p align="center"><img src="docs/card.svg" width="520" alt="Pitroom savings card"></p>
+
+---
+
+## Benchmarks
+
+Measured on a real, public repository: [PI-Desktop](https://github.com/vastsa/PI-Desktop) at commit `c2bfe35`, 2,349 tracked files and about 419,000 lines of TypeScript and Rust. Eight questions of the kind an agent asks before it changes code, run as one read-only crew (`pitroom crew`, at most four workers at a time) on OpenCode's free `muse-spark-1.3-contributor-free` model.
+
+| Question | Worker time | Tokens processed | Returned to the agent | Compression | Refs verified |
+|---|---|---|---|---|---|
+| Where is the plugin runtime, and which functions activate and deactivate a plugin? | 37 s | 405,380 | 767 | 529× | 10/11 |
+| When does the agent runtime compact a conversation? (function and exact condition) | 90 s | 1,250,719 | 763 | 1,639× | 17/17 |
+| Where is session state persisted to disk in the Rust host? | 71 s | 854,969 | 1,426 | 600× | 29/45 ¹ |
+| Which IPC channels expose window management to the renderer? | 32 s | 165,180 | 716 | 231× | 3/28 ¹ |
+| How does a tool call travel from the agent runtime to the Rust host? | 119 s | 1,818,524 | 866 | 2,100× | 14/15 |
+| Which packages and apps depend on the i18n package? | 33 s | 271,297 | 656 | 414× | 15/16 |
+| Where is auto-update implemented, and what does the Windows portable target change? | 29 s | 215,693 | 743 | 290× | 20/21 |
+| Which tests cover the RPC layer? | 59 s | 511,209 | 1,747 | 293× | 6/7 |
+| **All eight** | **156 s** wall clock | **5,492,971** | **7,684** | **715×** | 114/160 |
+
+Workers read 5.5 million tokens of code and docs (96 steps, 179 tool calls) and handed the agent 7,684 tokens, about 960 per answer. `pitroom savings` estimates $3.86 saved for these eight at Claude Sonnet list prices.
+
+**Were the answers right?** Checked by hand against the repository: 46 key claims across all eight answers (the cited line and what it says) were all correct, and two completeness checks held (exactly 6 invoke and 3 event window channels; no tests in `config_sync_rpc.rs`). The i18n answer lists the 12 source files that import the package and leaves out 11 test and fixture files that do too, which the question did not ask about. Pitroom's own checker marks fewer references as verified than that: ¹ those two answers cite bare file names (`transcripts.rs:651`) that it cannot resolve to a path, and it counts them as unverified although the lines are right.
+
+**A change in an isolated copy:** "add a one-line comment above `resolveUpdateMode`" finished in 16 s and 4 steps (142,491 tokens). The patch was one file and one line, the comment matched the code, and your working tree is untouched until you apply.
+
+**What this does not show**
+- One repository, one free model, one run per question: there is no variance here, and another model or repository will differ.
+- An open-ended task ("find up to five spelling mistakes in `docs/`") did not finish: it was stopped after 19 minutes and 57 tool calls. Give workers bounded tasks.
+- "Tokens processed" is what the workers read and wrote. What your agent would have spent doing the same reading itself is an estimate, not a measurement: the savings figure assumes it would process about the same tokens. The $0 worker cost is because the model is free.
+- The hand check covered key claims, not every citation.
+
+To repeat it on your own repository: `pitroom crew -d <repo> -g bench "<question 1>" "<question 2>" …`, then `pitroom wait -g bench`, `pitroom show <run>` and `pitroom savings --models`.
 
 ---
 
