@@ -1079,14 +1079,66 @@ function inside(file, roots) {
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+// src/core/templates.ts
+import fs6 from "node:fs";
+import path7 from "node:path";
+
+// src/core/install.ts
+import path6 from "node:path";
+import { fileURLToPath } from "node:url";
+function packageRoot() {
+  return path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..");
+}
+
+// src/core/templates.ts
+var FILES = {
+  implementer: "pitroom-driven-development/implementer-prompt.md",
+  "task-reviewer": "pitroom-driven-development/task-reviewer-prompt.md",
+  "re-review": "pitroom-driven-development/re-review-prompt.md",
+  "code-reviewer": "pitroom-review/code-reviewer.md"
+};
+function loadTemplate(name, root = packageRoot()) {
+  const file = path7.join(root, "skills", FILES[name]);
+  if (!fs6.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs6.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+}
+function fill(template, values) {
+  const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
+  if (missing.length) throw new Error(`no value for template placeholder(s): ${[...new Set(missing)].join(", ")}`);
+  return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
+}
+
+// src/core/answers.ts
+var TASK_STATUSES = ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"];
+function parseStatus(text) {
+  const value = /^\s*STATUS:\s*([A-Za-z_]+)/im.exec(text)?.[1]?.toUpperCase() ?? "";
+  return TASK_STATUSES.includes(value) ? value : "unknown";
+}
+function parseVerdict(text) {
+  const spec = /\bSPEC:\s*(PASS|FAIL)\b/i.exec(text)?.[1]?.toLowerCase();
+  const quality = /\bQUALITY:\s*(APPROVED|NEEDS[_ -]?FIXES)\b/i.exec(text)?.[1]?.toUpperCase();
+  const count = (k) => Number(new RegExp(`\\b${k}=(\\d+)`, "i").exec(text)?.[1] ?? 0);
+  return {
+    spec: spec === "pass" || spec === "fail" ? spec : "unknown",
+    quality: quality === "APPROVED" ? "approved" : quality ? "needs-fixes" : "unknown",
+    critical: count("critical"),
+    important: count("important"),
+    minor: count("minor")
+  };
+}
 export {
   DEFAULT_BACKEND,
   allBackends,
   backendIds,
   describeTarget,
   extractRefs,
+  fill,
   formatTarget,
   getBackend,
+  loadTemplate,
+  parseStatus,
   parseTarget,
+  parseVerdict,
   verifyRefs
 };
