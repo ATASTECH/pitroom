@@ -109,6 +109,26 @@ test('the Codex manifest meets the public directory limits (no hooks, short list
   assert.ok(codex.description.length <= 4000 && codex.author.name);
 });
 
+test('the Codex listing has an icon, a privacy policy and no other assistants in its text', () => {
+  const codex = json('.codex-plugin/plugin.json');
+  const ui = codex.interface;
+  for (const key of ['logo', 'composerIcon']) {
+    assert.match(ui[key], /^\.\//, `${key} is a ./-relative path`);
+    const svg = fs.readFileSync(path.join(root, ui[key]), 'utf8');
+    const box = /viewBox="0 0 (\d+) (\d+)"/.exec(svg);
+    assert.ok(box && box[1] === box[2] && Number(box[1]) >= 48, `${key}: a square viewBox of at least 48`);
+    assert.ok(fs.statSync(path.join(root, ui[key])).size < 5 * 1024 * 1024);
+  }
+  assert.match(ui.privacyPolicyURL, /^https:\/\//);
+  assert.ok(fs.existsSync(path.join(root, 'PRIVACY.md')));
+  // The portal warns when the name or description references another assistant, model or platform.
+  const text = [codex.name, codex.description, ui.displayName, ui.shortDescription, ui.longDescription, ...codex.keywords].join(' ');
+  assert.doesNotMatch(text, /claude|anthropic|opencode|codex|gemini|cursor|copilot|gpt|openai|chatgpt/i);
+  // What the listing references must ship in the npm package.
+  const files = json('package.json').files;
+  for (const f of ['assets', 'PRIVACY.md']) assert.ok(files.includes(f), `${f} is in the npm package`);
+});
+
 test('install links every skill and a working launcher; uninstall removes only those', () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-home-'));
   fs.mkdirSync(path.join(home, '.claude'));

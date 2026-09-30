@@ -33,9 +33,9 @@ Listing reaches claude.ai, Cowork and Claude Code. It needs a paid claude.ai pla
 1. Build the package from the published files only. The directory rejects lifecycle hooks, so leave `hooks/` out:
 
    ```bash
-   zip -r pitroom-codex.zip .codex-plugin skills README.md LICENSE CHANGELOG.md
+   zip -r pitroom-codex.zip .codex-plugin skills assets LICENSE
    ```
 
 2. Upload the ZIP at the plugin submission portal (<https://developers.openai.com/plugins/deploy/submission>) as an organization owner of a verified OpenAI organization.
-3. The listing fields come from `.codex-plugin/plugin.json` (`interface`). The portal may ask for an icon and, for plugins with an MCP server, a privacy policy: Pitroom has none.
+3. The listing fields come from `.codex-plugin/plugin.json` (`interface`), the icon from `assets/`, the privacy policy from `PRIVACY.md`. The name, descriptions and keywords must not mention other assistants, models or platforms (the portal warns). Each upload needs a new `version`.
 4. The skills call the `pitroom` command, which is installed separately (`npm i -g pitroom`). The long description says so.

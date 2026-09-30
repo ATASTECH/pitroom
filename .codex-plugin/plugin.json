@@ -1,7 +1,7 @@
 {
   "name": "pitroom",
-  "version": "0.6.1",
-  "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex or Claude Code workers, with verified answers, exact diffs and cost receipts.",
+  "version": "0.6.2",
+  "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests, reviews and parallel investigations to cheap worker agents running your own models, with verified answers, exact diffs and cost receipts.",
   "author": {
     "name": "TahaAtas"
   },
@@ -9,20 +9,20 @@
   "repository": "https://github.com/ATASTECH/pitroom",
   "license": "MIT",
   "keywords": [
-    "claude-code",
-    "codex",
+    "agent-skills",
     "cost",
     "delegation",
-    "opencode",
     "parallel",
     "subagents",
-    "workers"
+    "tokens",
+    "workers",
+    "workflow"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Pitroom",
     "shortDescription": "Cheap workers for your agent",
-    "longDescription": "Pitroom lets your coding agent hand bounded work to OpenCode, Codex or Claude Code workers running your own free, paid or local models: read-only research, isolated code changes, second-opinion reviews and parallel crews, with per-run permission profiles, a git guard, verified file references, exact diffs and cost receipts. Fourteen skills adapt a full development workflow (brainstorm, plan, worker-driven development, review, debugging, TDD, verification). Requires the pitroom command (npm i -g pitroom), Node.js 18 or newer and at least one worker CLI.",
+    "longDescription": "Pitroom lets your coding agent hand bounded work to worker agents running your own free, paid or local models: read-only research, isolated code changes, second-opinion reviews and parallel crews, with per-run permission profiles, a git guard, verified file references, exact diffs and cost receipts. Fourteen skills adapt a full development workflow (brainstorm, plan, worker-driven development, review, debugging, TDD, verification). Requires the pitroom command (npm i -g pitroom), Node.js 18 or newer and at least one worker agent CLI, installed and signed in.",
     "developerName": "TahaAtas",
     "category": "Developer Tools",
     "capabilities": [
@@ -30,6 +30,10 @@
       "Write"
     ],
     "websiteURL": "https://github.com/ATASTECH/pitroom",
-    "supportURL": "https://github.com/ATASTECH/pitroom/issues"
+    "supportURL": "https://github.com/ATASTECH/pitroom/issues",
+    "brandColor": "#FF6A2B",
+    "logo": "./assets/logo.svg",
+    "composerIcon": "./assets/icon.svg",
+    "privacyPolicyURL": "https://github.com/ATASTECH/pitroom/blob/main/PRIVACY.md"
   }
 }

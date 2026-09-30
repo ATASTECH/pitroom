@@ -1,6 +1,6 @@
 {
   "name": "pitroom",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "A free pit crew for your expensive coding agent: the superpowers development workflow, run by cheap workers. Delegate research, fixes, tests, reviews and whole plans from Claude Code, Codex or any agent to OpenCode, Codex or Claude Code workers, with receipts that prove the savings.",
   "type": "module",
   "author": "TahaAtas",
@@ -21,9 +21,11 @@
     "hooks",
     ".claude-plugin",
     ".codex-plugin",
+    "assets",
     "docs/backends.md",
     "README.md",
     "CHANGELOG.md",
+    "PRIVACY.md",
     "LICENSE"
   ],
   "engines": {

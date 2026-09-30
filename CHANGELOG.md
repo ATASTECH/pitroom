@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.2
+
+### Directory listing
+- The Codex manifest no longer names other assistants or platforms in its name, descriptions and keywords (the OpenAI directory flags them), and carries an app icon (`assets/logo.svg`, `assets/icon.svg`) and a `privacyPolicyURL`.
+- `PRIVACY.md`: what Pitroom stores and what reaches a worker's model provider.
+
 ## 0.6.1
 
 ### Install
