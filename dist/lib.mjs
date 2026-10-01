@@ -49,6 +49,9 @@ function resolveCommand(bin) {
   return { command: bin, prefix: [] };
 }
 
+// src/backends/types.ts
+var MAX_STEPS = 400;
+
 // src/backends/claude/events.ts
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
 var DENIED = /permission|not allowed|denied|blocked|disallowed/i;
@@ -67,6 +70,8 @@ function parseEvents(jsonl) {
   const tools = {};
   const edits = [];
   const pendingEdits = /* @__PURE__ */ new Map();
+  const timeline = [];
+  const stepOf = /* @__PURE__ */ new Map();
   const steps = /* @__PURE__ */ new Set();
   let sessionId;
   let model;
@@ -97,18 +102,26 @@ function parseEvents(jsonl) {
         if (c.type === "text" && String(c.text ?? "").trim()) {
           lastText = String(c.text).trim();
           lastActivity = `says: ${oneLine(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(lastText, 600) });
         } else if (c.type === "tool_use") {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
           lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ""}`.trim();
           if (EDIT_TOOLS.has(c.name) && c.input?.file_path) pendingEdits.set(c.id, String(c.input.file_path));
+          if (timeline.length < MAX_STEPS) {
+            const step = { kind: EDIT_TOOLS.has(c.name) ? "edit" : c.name === "Bash" ? "shell" : "tool", name: c.name, text: clip(String(target ?? ""), 240) };
+            timeline.push(step);
+            stepOf.set(String(c.id), step);
+          }
         }
       }
     } else if (e.type === "user") {
       for (const c of e.message?.content ?? []) {
         if (c?.type !== "tool_result") continue;
         const text = typeof c.content === "string" ? c.content : JSON.stringify(c.content ?? "");
+        const step = stepOf.get(String(c.tool_use_id));
+        if (step) step.ok = !c.is_error;
         if (c.is_error) {
           if (DENIED.test(text)) usage.denied++;
         } else if (pendingEdits.has(c.tool_use_id)) {
@@ -134,8 +147,9 @@ function parseEvents(jsonl) {
     }
   }
   usage.steps = steps.size;
-  return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, error };
+  return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
+var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 function num(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
@@ -321,6 +335,7 @@ function parseEvents2(jsonl) {
   };
   const tools = {};
   const edits = [];
+  const timeline = [];
   let sessionId;
   let finalText = "";
   let lastActivity;
@@ -348,14 +363,17 @@ function parseEvents2(jsonl) {
         if (it.type === "agent_message" && String(it.text ?? "").trim()) {
           finalText = String(it.text).trim();
           lastActivity = `says: ${oneLine2(finalText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip2(finalText, 600) });
         } else if (it.type === "command_execution") {
           if (it.status === "declined" || /operation not permitted|sandbox/i.test(String(it.aggregated_output ?? ""))) usage.denied++;
           lastActivity = `shell ${oneLine2(String(it.command ?? ""), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "shell", name: "shell", text: clip2(String(it.command ?? "").replace(/^\/bin\/\w+ -lc /, ""), 240), ok: it.exit_code === 0 });
         } else if (it.type === "file_change") {
           const paths = (it.changes ?? []).map((c) => String(c.path));
           if (it.status !== "failed" && it.status !== "declined") edits.push(...paths);
           else usage.denied++;
           lastActivity = `edit ${oneLine2(paths.join(", "), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "edit", name: "edit", text: clip2(paths.join(", "), 240), ok: it.status !== "failed" && it.status !== "declined" });
         }
         break;
       }
@@ -379,7 +397,7 @@ function parseEvents2(jsonl) {
         break;
     }
   }
-  return { sessionId, finalText, usage, tools, edits, lastActivity, error };
+  return { sessionId, finalText, usage, tools, edits, lastActivity, timeline, error };
 }
 function describe(raw) {
   const s = String(raw ?? "unknown Codex error");
@@ -399,6 +417,7 @@ function oneLine2(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
+var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 
 // src/backends/codex/index.ts
 var binary2 = () => findBinary("codex", "PITROOM_CODEX_BIN");
@@ -543,6 +562,7 @@ function parseEvents3(ndjson) {
   };
   const tools = {};
   const edits = [];
+  const timeline = [];
   const textByMessage = /* @__PURE__ */ new Map();
   let sessionId;
   let lastActivity;
@@ -565,6 +585,7 @@ function parseEvents3(ndjson) {
         if (!textByMessage.has(key)) textByMessage.set(key, []);
         textByMessage.get(key).push(text);
         lastActivity = `says: ${oneLine3(text)}`;
+        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(text.trim(), 600), at: stamp(e.timestamp) });
         break;
       }
       case "tool_use": {
@@ -577,6 +598,11 @@ function parseEvents3(ndjson) {
           edits.push(String(st.input?.filePath ?? st.input?.path ?? name));
         }
         lastActivity = `${name} ${describe2(st.input)}`.trim();
+        if (timeline.length < MAX_STEPS) {
+          const kind = EDIT_TOOLS2.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
+          const text = kind === "shell" ? String(st.input?.command ?? "") : describe2(st.input);
+          timeline.push({ kind, name, text: clip3(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
+        }
         break;
       }
       case "step_finish": {
@@ -599,7 +625,7 @@ function parseEvents3(ndjson) {
   }
   const groups = [...textByMessage.values()];
   const finalText = (groups[groups.length - 1] ?? []).join("\n").trim();
-  return { sessionId, finalText, usage, tools, edits, lastActivity, error };
+  return { sessionId, finalText, usage, tools, edits, lastActivity, timeline, error };
 }
 function describeError(err) {
   if (!err || typeof err !== "object") return "unknown OpenCode error";
@@ -612,6 +638,8 @@ function describeError(err) {
   const tags = [err.type, inner, err.status && `HTTP ${err.status}`].filter(Boolean);
   return tags.length ? `${message} [${tags.join(", ")}]` : message;
 }
+var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var stamp = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
 function num3(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
