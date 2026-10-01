@@ -3,7 +3,7 @@
 //   {type: assistant, message: {id, content: [text | tool_use]}}   (is_api_error_message → an error, not work)
 //   {type: user, message: {content: [tool_result {tool_use_id, is_error, content}]}}
 //   {type: result, result, is_error, total_cost_usd, usage, permission_denials, terminal_reason}
-import type { ParsedRun, Usage } from '../types.js';
+import { MAX_STEPS, type ParsedRun, type Usage, type Step } from '../types.js';
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const DENIED = /permission|not allowed|denied|blocked|disallowed/i;
@@ -16,6 +16,8 @@ export function parseEvents(jsonl: string): ParsedRun {
   const tools: Record<string, number> = {};
   const edits: string[] = [];
   const pendingEdits = new Map<string, string>();
+  const timeline: Step[] = [];
+  const stepOf = new Map<string, Step>();
   const steps = new Set<string>();
   let sessionId: string | undefined;
   let model: string | undefined;
@@ -47,18 +49,26 @@ export function parseEvents(jsonl: string): ParsedRun {
         if (c.type === 'text' && String(c.text ?? '').trim()) {
           lastText = String(c.text).trim();
           lastActivity = `says: ${oneLine(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: 'say', text: clip(lastText, 600) });
         } else if (c.type === 'tool_use') {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
           lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ''}`.trim();
           if (EDIT_TOOLS.has(c.name) && c.input?.file_path) pendingEdits.set(c.id, String(c.input.file_path));
+          if (timeline.length < MAX_STEPS) {
+            const step: Step = { kind: EDIT_TOOLS.has(c.name) ? 'edit' : c.name === 'Bash' ? 'shell' : 'tool', name: c.name, text: clip(String(target ?? ''), 240) };
+            timeline.push(step);
+            stepOf.set(String(c.id), step);
+          }
         }
       }
     } else if (e.type === 'user') {
       for (const c of e.message?.content ?? []) {
         if (c?.type !== 'tool_result') continue;
         const text = typeof c.content === 'string' ? c.content : JSON.stringify(c.content ?? '');
+        const step = stepOf.get(String(c.tool_use_id));
+        if (step) step.ok = !c.is_error;
         if (c.is_error) {
           if (DENIED.test(text)) usage.denied++;
         } else if (pendingEdits.has(c.tool_use_id)) {
@@ -84,8 +94,10 @@ export function parseEvents(jsonl: string): ParsedRun {
     }
   }
   usage.steps = steps.size;
-  return { sessionId, model, finalText: finalText ?? (error ? '' : lastText), usage, tools, edits, lastActivity, error };
+  return { sessionId, model, finalText: finalText ?? (error ? '' : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;

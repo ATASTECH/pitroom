@@ -49,6 +49,10 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
 
     const detail = JSON.parse((await get(`${url}api/run/${id}`)).body);
     assert.match(detail.report, /done/);
+    assert.equal(detail.task, 'list the files', 'the task the agent gave the worker');
+    assert.ok(Array.isArray(detail.steps), 'what the worker did, step by step');
+    assert.ok(detail.answer, 'the worker\'s answer');
+    assert.equal(detail.info.worker.startsWith('opencode'), true);
 
     assert.equal((await get(`${url}api/run/not-a-run`)).status, 404);
     assert.equal((await get(`${url}api/run/..%2F..%2Fetc`)).status, 404);

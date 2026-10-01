@@ -1,7 +1,7 @@
 // Parses `opencode run --format json` NDJSON events into a ParsedRun.
 // Handles OpenCode v2 (tool "shell", no tokens.total, errors as {type, message, status})
 // and the v1 shapes (tool "bash", tokens.total, errors as {name, data.message}).
-import type { ParsedRun, Usage } from '../types.js';
+import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
 
 const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit', 'apply_patch']);
 const DENIED = /rule which prevents you|permission denied|permission\.rejected/i;
@@ -13,6 +13,7 @@ export function parseEvents(ndjson: string): ParsedRun {
   };
   const tools: Record<string, number> = {};
   const edits: string[] = [];
+  const timeline: Step[] = [];
   const textByMessage = new Map<string, string[]>();
   let sessionId: string | undefined;
   let lastActivity: string | undefined;
@@ -36,6 +37,7 @@ export function parseEvents(ndjson: string): ParsedRun {
         if (!textByMessage.has(key)) textByMessage.set(key, []);
         textByMessage.get(key)!.push(text);
         lastActivity = `says: ${oneLine(text)}`;
+        if (timeline.length < MAX_STEPS) timeline.push({ kind: 'say', text: clip(text.trim(), 600), at: stamp(e.timestamp) });
         break;
       }
       case 'tool_use': {
@@ -48,6 +50,11 @@ export function parseEvents(ndjson: string): ParsedRun {
           edits.push(String(st.input?.filePath ?? st.input?.path ?? name));
         }
         lastActivity = `${name} ${describe(st.input)}`.trim();
+        if (timeline.length < MAX_STEPS) {
+          const kind = EDIT_TOOLS.has(name) ? 'edit' : /^(bash|shell)$/.test(name) ? 'shell' : 'tool';
+          const text = kind === 'shell' ? String(st.input?.command ?? '') : describe(st.input);
+          timeline.push({ kind, name, text: clip(text, 240), ok: st.status === 'completed' ? true : st.status === 'error' ? false : undefined, at: stamp(e.timestamp) });
+        }
         break;
       }
       case 'step_finish': {
@@ -73,7 +80,7 @@ export function parseEvents(ndjson: string): ParsedRun {
   // "let me look at…" narration is dropped to keep the primary's context small.
   const groups = [...textByMessage.values()];
   const finalText = (groups[groups.length - 1] ?? []).join('\n').trim();
-  return { sessionId, finalText, usage, tools, edits, lastActivity, error };
+  return { sessionId, finalText, usage, tools, edits, lastActivity, timeline, error };
 }
 
 /** One line that keeps what failure classification needs: message, error type, HTTP status. */
@@ -89,6 +96,9 @@ function describeError(err: any): string {
   const tags = [err.type, inner, err.status && `HTTP ${err.status}`].filter(Boolean);
   return tags.length ? `${message} [${tags.join(', ')}]` : message;
 }
+
+const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+const stamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
 
 function num(v: unknown): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;

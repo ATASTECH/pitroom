@@ -78,6 +78,9 @@ for (const b of allBackends()) {
       assert.ok(run.finalText.startsWith(want.finalTextStartsWith), run.finalText.slice(0, 80));
       if ('denied' in want) assert.equal(run.usage.denied, want.denied, 'refused tool calls counted');
       if ('edits' in want) assert.equal(run.edits.length, want.edits, 'completed edits detected');
+      assert.ok(Array.isArray(run.timeline), 'a step-by-step timeline');
+      if (run.usage.toolCalls > 0) assert.ok(run.timeline.some((s) => s.kind !== 'say' && s.text), 'tool calls appear in it');
+      assert.ok(run.timeline.every((s) => s.text.length <= 600), 'step texts are short');
       if (b.capabilities.reportsCost) assert.equal(typeof run.usage.cost, 'number');
       assert.equal(b.failure(run, '', 0), undefined, 'a clean run is not a failure');
       // Streams are read while still being written: a torn last line must not throw.

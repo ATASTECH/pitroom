@@ -45,6 +45,21 @@ export interface Invocation {
   env: Record<string, string>;
 }
 
+/** One thing a worker did, in order: it said something, ran a command, edited a file or used a tool. */
+export interface Step {
+  kind: 'say' | 'shell' | 'edit' | 'tool';
+  /** The tool's name, when it is one. */
+  name?: string;
+  text: string;
+  /** Whether the tool call worked; unknown while it is still running. */
+  ok?: boolean;
+  /** Epoch milliseconds, for the CLIs whose stream has timestamps. */
+  at?: number;
+}
+
+/** Steps are kept in order up to this many; the rest of a very long run is dropped. */
+export const MAX_STEPS = 400;
+
 /** A worker run, normalised from the CLI's event stream. */
 export interface ParsedRun {
   sessionId?: string;
@@ -57,6 +72,8 @@ export interface ParsedRun {
   /** Files changed by completed edit tools (used to police read-only runs). */
   edits: string[];
   lastActivity?: string;
+  /** What the worker did, step by step (for the dashboard's expanded card). */
+  timeline?: Step[];
   error?: string;
 }
 

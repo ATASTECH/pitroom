@@ -6,12 +6,15 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { getBackend } from '../backends/index.js';
+import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { PAGE } from './dash-page.js';
 import { headline } from './group.js';
 import { readLedger, totals } from './receipt.js';
-import { formatReport, live, progress } from './report.js';
-import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds } from './store.js';
+import { formatReport, live, progress, readSummary } from './report.js';
+import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds, runFile } from './store.js';
+import { describeTarget } from './target.js';
 import { elapsed, kind, what, workerName } from './ui.js';
 
 export const DEFAULT_PORT = 7878;
@@ -96,15 +99,94 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
   };
 }
 
-/** The report of one run, as `pitroom show` prints it. */
-export function runDetail(id: string): { id: string; report: string } | undefined {
+export interface RunDetail {
+  id: string;
+  state: string;
+  /** What the agent asked the worker to do. */
+  task: string;
+  /** What the worker did, in order; `t` is seconds since the run started when the stream has timestamps. */
+  steps: (Step & { t?: number })[];
+  answer: string;
+  changes: { status: string; path: string }[];
+  patch?: string;
+  info: Record<string, string | number | undefined>;
+  attempts: { target: string; error: string }[];
+  warnings: string[];
+  refs?: { valid: number; total: number; invalid: string[] };
+  verify?: { command: string; ok: boolean; tail: string };
+  error?: string;
+  /** The same report `pitroom show` prints. */
+  report: string;
+}
+
+const TASK_MAX = 6000;
+const PATCH_LINES = 300;
+
+function readFile(id: string, name: string): string {
+  const f = runFile(id, name);
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+}
+
+/** Everything the expanded card shows about one run. */
+export function runDetail(id: string): RunDetail | undefined {
   if (!RUN_ID.test(id)) return undefined;
+  let m: RunMeta;
   try {
-    const m = freshMeta(id);
-    return { id, report: isActive(m.state) ? progress(m) : formatReport(m, undefined, 120) };
+    m = freshMeta(id);
   } catch {
     return undefined;
   }
+  const start = Date.parse(m.startedAt);
+  let steps: RunDetail['steps'] = [];
+  try {
+    const events = readFile(id, 'events.jsonl');
+    steps = (events ? (getBackend((m.ran ?? m.worker).backend).parse(events).timeline ?? []) : []).map((s) => ({
+      ...s,
+      t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1000)) : undefined,
+    }));
+  } catch {
+    // an event stream being written, or from a worker this version does not know
+  }
+  // Paths relative to where the worker ran read better than absolute ones.
+  const rel = (t: string) => [m.cwd, m.dir].filter(Boolean).reduce((x, base) => x.split(`${base}/`).join(''), t);
+  steps = steps.map((x) => ({ ...x, text: rel(x.text) }));
+  const answer = isActive(m.state) ? '' : readSummary(m);
+  // The worker's closing words are the result, shown below; do not show them twice.
+  const lastSay = steps.at(-1);
+  if (lastSay?.kind === 'say' && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
+  const patch = readFile(id, 'changes.patch');
+  const patchLines = patch.split('\n');
+  const u = m.usage;
+  return {
+    id,
+    state: m.state,
+    task: (m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : m.task).slice(0, TASK_MAX),
+    steps,
+    answer,
+    changes: m.changes ?? [],
+    patch: patch ? `${patchLines.slice(0, PATCH_LINES).join('\n')}${patchLines.length > PATCH_LINES ? `\n… ${patchLines.length - PATCH_LINES} more lines (pitroom show ${id} --patch)` : ''}` : undefined,
+    info: {
+      worker: describeTarget(m.ran ?? m.worker),
+      model: m.resolvedModel,
+      mode: m.mode,
+      started: m.startedAt,
+      time: elapsed(m),
+      steps: u?.steps,
+      toolCalls: u?.toolCalls,
+      tokens: u?.total,
+      returnedTokens: m.returnedTokens,
+      cost: u?.cost,
+      saved: m.savedUsd,
+      group: m.group,
+      directory: m.dir,
+    },
+    attempts: m.attempts ?? [],
+    warnings: m.warnings ?? [],
+    refs: m.refs ? { valid: m.refs.valid, total: m.refs.total, invalid: m.refs.invalid.map((r) => `${r.ref} (${r.reason})`) } : undefined,
+    verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail } : undefined,
+    error: m.error,
+    report: isActive(m.state) ? progress(m) : formatReport(m, undefined, 120),
+  };
 }
 
 const HEADERS = {
