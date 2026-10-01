@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.6
 
 ### Node.js 22.13 or newer
 - Pitroom now needs Node.js 22.13+ (`engines`, the launcher, the CI matrix of 22 and 24, the build target). It is the first release line with a built-in SQLite (`node:sqlite`) that needs no flag, which the run history uses.

@@ -1,6 +1,6 @@
 {
   "name": "pitroom",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "description": "A free pit crew for your expensive coding agent: delegate research, fixes, tests, reviews and parallel investigations to cheap worker agents running your own models, with verified answers, exact diffs and cost receipts.",
   "author": {
     "name": "TahaAtas"
