@@ -88,7 +88,7 @@ function addRun(o) {
   const dur = o.state === 'running' ? Math.round((Date.now() - startedAt.getTime()) / 1000) : o.seconds ?? (kind === 'review' ? between(25, 220) : between(14, 160));
   const endedAt = o.state === 'running' ? undefined : new Date(startedAt.getTime() + dur * 1000);
   let id; do { id = `${stamp(startedAt)}-${Math.floor(rnd() * 65536).toString(16).padStart(4, '0')}`; } while (used.has(id)); used.add(id);
-  const tokens = o.tokens ?? between(18_000, kind === 'review' ? 260_000 : 140_000);
+  const tokens = o.tokens ?? between(75_000, kind === 'review' ? 1_400_000 : 1_000_000);
   const task = o.task, files = o.files ?? [];
   const meta = {
     id, version: VERSION, mode: kind === 'change' ? 'isolate' : 'read', task: kind === 'review' ? 'You are a senior code reviewer. Review completed work against its plan or requirements.' : task,
@@ -132,7 +132,7 @@ process.on('exit', () => {
 
 // ~21 days of history for the statistics
 for (let day = 21; day >= 1; day--) {
-  for (let i = between(1, 5); i > 0; i--) {
+  for (let i = between(25, 60); i > 0; i--) {
     const kind = pick(['research', 'research', 'change', 'review']);
     const when = now - day * 86_400_000 + between(8, 19) * 3_600_000 + between(0, 59) * 60_000;
     const state = rnd() < 0.86 ? 'done' : rnd() < 0.7 ? 'failed' : 'timeout';
@@ -151,15 +151,18 @@ for (let day = 21; day >= 1; day--) {
 const mins = (m) => now - m * 60_000;
 const codex = WORKERS[3], muse = WORKERS[0], mimo = WORKERS[1], bunny = WORKERS[2];
 addRun({ kind: 'change', worker: codex, startedAt: now - 83_000, state: 'running', pid: sleeper.pid, task: CHANGES[0][0], files: CHANGES[0][1], answer: 'Adding the backoff helper and wiring it into the client.', tokens: 41_000 });
+addRun({ kind: 'change', worker: mimo, startedAt: now - 52_000, state: 'running', pid: sleeper.pid, task: CHANGES[3][0], files: CHANGES[3][1], answer: 'Swapping the moment calls for date-fns equivalents.', tokens: 28_000 });
+addRun({ kind: 'research', worker: WORKERS[4], startedAt: now - 11_000, state: 'running', pid: sleeper.pid, task: RESEARCH[1][0], files: ['test/orders/total.test.ts'], answer: 'Listing the checkout tests.', tokens: 9_000 });
 addRun({ kind: 'research', worker: muse, startedAt: now - 26_000, state: 'running', pid: sleeper.pid, task: RESEARCH[0][0], files: ['src/config/rate-limit.ts'], answer: 'Reading where the limiter is configured.', tokens: 22_000 });
-addRun({ kind: 'change', worker: muse, startedAt: mins(7), seconds: 118, state: 'done', task: CHANGES[1][0], files: CHANGES[1][1], applied: true, tokens: 96_000, group: 'rename-user' });
-addRun({ kind: 'review', worker: bunny, startedAt: mins(12), seconds: 142, state: 'done', task: REVIEWS[0], verdict: { spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 1 }, answer: 'STRENGTHS: the backoff is bounded and tested.\nIMPORTANT: none.\nMINOR: `retry.ts:31` could name the jitter constant.', tokens: 180_000 });
-addRun({ kind: 'research', worker: mimo, startedAt: mins(24), seconds: 64, state: 'done', task: RESEARCH[2][0], files: ['src/orders/routes.ts'], answer: RESEARCH[2][1], tokens: 71_000 });
-addRun({ kind: 'review', worker: mimo, startedAt: mins(41), seconds: 207, state: 'done', task: REVIEWS[1], verdict: { spec: 'pass', quality: 'needs-fixes', critical: 0, important: 2, minor: 1 }, answer: 'STRENGTHS: the fix is minimal.\nIMPORTANT:\n- src/orders/total.ts:63 — the discount is applied before tax in one branch only.\n- test/orders/total.test.ts:40 — no case for a 100% coupon.\nMINOR: stale comment at total.ts:18.', refsOk: 3, tokens: 224_000 });
+addRun({ kind: 'change', worker: muse, startedAt: mins(7), seconds: 118, state: 'done', task: CHANGES[1][0], files: CHANGES[1][1], applied: true, tokens: 520_000, group: 'rename-user' });
+addRun({ kind: 'review', worker: bunny, startedAt: mins(12), seconds: 142, state: 'done', task: REVIEWS[0], verdict: { spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 1 }, answer: 'STRENGTHS: the backoff is bounded and tested.\nIMPORTANT: none.\nMINOR: `retry.ts:31` could name the jitter constant.', tokens: 940_000 });
+addRun({ kind: 'research', worker: mimo, startedAt: mins(24), seconds: 64, state: 'done', task: RESEARCH[2][0], files: ['src/orders/routes.ts'], answer: RESEARCH[2][1], tokens: 310_000 });
+addRun({ kind: 'review', worker: mimo, startedAt: mins(41), seconds: 207, state: 'done', task: REVIEWS[1], verdict: { spec: 'pass', quality: 'needs-fixes', critical: 0, important: 2, minor: 1 }, answer: 'STRENGTHS: the fix is minimal.\nIMPORTANT:\n- src/orders/total.ts:63 — the discount is applied before tax in one branch only.\n- test/orders/total.test.ts:40 — no case for a 100% coupon.\nMINOR: stale comment at total.ts:18.', refsOk: 3, tokens: 1_180_000 });
 addRun({ kind: 'research', worker: bunny, startedAt: mins(58), state: 'failed', task: RESEARCH[1][0], error: 'Rate limit exceeded: free-models-per-day', seconds: 9, tokens: 3_000 });
-addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 52_000 });
+addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 260_000 });
 
 // the savings ledger (this week's total on the Live tab)
+console.log(`sample week: $${runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 7 * 86_400_000).reduce((a, m) => a + m.savedUsd, 0).toFixed(0)} saved, ${runs.length} runs`);
 fs.writeFileSync(path.join(HOME, 'ledger.jsonl'), runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 30 * 86_400_000).map((m) => JSON.stringify({ id: m.id, at: m.endedAt ?? m.startedAt, mode: m.mode, state: 'done', backend: m.worker.backend, model: m.worker.model, tokens: m.usage.total, returned: m.returnedTokens, workerCost: 0, saved: m.savedUsd, price: 'Claude Sonnet' })).join('\n') + '\n');
 
 // ── serve it and take the screenshots ────────────────────────────────────────────────────────────────────
@@ -184,6 +187,7 @@ const evaluate = (expression) => send('Runtime.evaluate', { expression });
 async function shot(file, { hash = '', height = 900, click, wait = 2200 }) {
   await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1.5, mobile: false });
+  await send('Page.navigate', { url: 'about:blank' });
   await send('Page.navigate', { url: `${url}${hash}` });
   await sleep(2600);
   if (click) { await evaluate(click); await sleep(wait); }

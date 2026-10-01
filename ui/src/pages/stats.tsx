@@ -16,7 +16,7 @@ function Tile({ label, value, sub, tone, hint }: { label: string; value: string;
   return (
     <Card className="gap-1 px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500 fill-mode-both">
       <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}{hint && <Hint>{hint}</Hint>}</p>
-      <p className={`text-3xl font-semibold tabular-nums tracking-tight ${tone ?? ''}`}>{value}</p>
+      <p className={`text-3xl lg:text-2xl font-semibold tabular-nums tracking-tight ${tone ?? ''}`}>{value}</p>
       {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
     </Card>
   );
