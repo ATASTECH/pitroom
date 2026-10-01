@@ -1481,26 +1481,43 @@ function badgeUrl(t) {
 }
 var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 function card(t, period) {
-  const stat = (x, value, label) => `<text x="${x}" y="148" class="v">${esc(value)}</text><text x="${x}" y="170" class="l">${esc(label)}</text>`;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="600" height="220" viewBox="0 0 600 220" role="img" aria-label="pitroom saved ${esc(usd(t.saved))}">
+  const W = 720, H = 316, M = 32, GAP = 12;
+  const tile = (i, value, label) => {
+    const w = (W - 2 * M - 2 * GAP) / 3, x = M + i * (w + GAP);
+    return `<rect x="${x}" y="196" width="${w}" height="72" rx="14" fill="#fff" fill-opacity=".035" stroke="#fff" stroke-opacity=".1"/>
+<text x="${x + 18}" y="224" class="lab">${esc(label.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
+  };
+  const when2 = period.toUpperCase();
+  const pill = 22 + when2.length * 7.4;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="pitroom saved ${esc(usd(t.saved))}">
 <style>
-text{font-family:ui-sans-serif,-apple-system,Segoe UI,Helvetica,Arial,sans-serif;fill:#ede9fe}
-.h{font-size:15px;font-weight:600;fill:#a78bfa;letter-spacing:.08em}
-.big{font-size:54px;font-weight:800;fill:#fff}
-.sub{font-size:15px;fill:#c4b5fd}
-.v{font-size:22px;font-weight:700;fill:#fff}
-.l{font-size:12px;fill:#a78bfa}
-.f{font-size:11px;fill:#8b5cf6}
+text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#f4f4f5}
+.name{font-size:20px;font-weight:650;letter-spacing:-.01em}
+.sub{font-size:12.5px;fill:#a1a1aa}
+.pill{font-size:11px;font-weight:600;letter-spacing:.1em;fill:#a1a1aa}
+.lab{font-size:11px;font-weight:500;letter-spacing:.09em;fill:#a1a1aa}
+.big{font-size:60px;font-weight:700;letter-spacing:-.03em;fill:#3ddc97}
+.of{font-size:14px;fill:#a1a1aa}
+.val{font-size:26px;font-weight:650;letter-spacing:-.02em}
+.foot{font-size:11.5px;fill:#71717a}
 </style>
-<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#1e1b4b"/><stop offset="1" stop-color="#3b0764"/></linearGradient></defs>
-<rect width="600" height="220" rx="18" fill="url(#g)"/>
-<text x="32" y="42" class="h">PITROOM \xB7 ${esc(period.toUpperCase())}</text>
-<text x="32" y="98" class="big">${esc(usd(t.saved))}</text>
-<text x="${Math.min(60 + usd(t.saved).length * 30, 330)}" y="98" class="sub">saved on my main coding agent</text>
-${stat(32, compact(t.tokens), "tokens offloaded")}
-${stat(200, t.ratio ? `${Math.round(t.ratio)}\xD7` : "\u2014", "context compression")}
-${stat(380, String(t.runs), "delegated tasks")}
-<text x="32" y="202" class="f">estimated vs. ${esc(primaryPrice().name)} pricing \xB7 npx pitroom</text>
+<defs>
+<radialGradient id="o" cx="1" cy="0" r=".7"><stop offset="0" stop-color="#ff6a2b" stop-opacity=".24"/><stop offset="1" stop-color="#ff6a2b" stop-opacity="0"/></radialGradient>
+<radialGradient id="b" cx="0" cy="0" r=".7"><stop offset="0" stop-color="#38bdf8" stop-opacity=".16"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+<linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a2b"/><stop offset="1" stop-color="#ffa86b"/></linearGradient>
+<clipPath id="c"><rect width="${W}" height="${H}" rx="20"/></clipPath>
+</defs>
+<g clip-path="url(#c)"><rect width="${W}" height="${H}" fill="#0b0b0f"/><rect width="${W}" height="${H}" fill="url(#o)"/><rect width="${W}" height="${H}" fill="url(#b)"/></g>
+<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="19.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
+<rect x="${M}" y="28" width="38" height="38" rx="11" fill="url(#m)"/>
+<path d="M4 4h4v4H4zm8 0h4v4h-4zM8 8h4v4H8zm8 0h4v4h-4zM4 12h4v4H4zm8 0h4v4h-4zm-4 4h4v4H8zm8 0h4v4h-4z" fill="#fff" transform="translate(${M + 7} 35) scale(1)"/>
+<text x="${M + 52}" y="45" class="name">Pitroom</text><text x="${M + 52}" y="63" class="sub">Your agent's pit crew</text>
+<rect x="${W - M - pill}" y="34" width="${pill}" height="26" rx="13" fill="#fff" fill-opacity=".04" stroke="#fff" stroke-opacity=".14"/>
+<text x="${W - M - pill / 2}" y="51" class="pill" text-anchor="middle">${esc(when2)}</text>
+<text x="${M}" y="112" class="lab">SAVED ON YOUR MAIN CODING AGENT</text>
+<text x="${M}" y="168" class="big">${esc(usd(t.saved))}</text>
+${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.round(t.ratio)}\xD7` : "\u2014", "Context compression")}${tile(2, String(t.runs), "Delegated tasks")}
+<text x="${M}" y="296" class="foot">Estimated against ${esc(primaryPrice().name)} pricing \xB7 npx pitroom</text>
 </svg>
 `;
 }

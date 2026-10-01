@@ -147,12 +147,13 @@ addRun({ kind: 'research', worker: bunny, startedAt: mins(58), state: 'failed', 
 addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 52_000 });
 
 // the savings ledger (this week's total on the Live tab)
-fs.writeFileSync(path.join(HOME, 'ledger.jsonl'), runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 7 * 86_400_000).map((m) => JSON.stringify({ id: m.id, at: m.endedAt ?? m.startedAt, mode: m.mode, state: 'done', backend: m.worker.backend, model: m.worker.model, tokens: m.usage.total, returned: m.returnedTokens, workerCost: 0, saved: m.savedUsd, price: 'Claude Sonnet' })).join('\n') + '\n');
+fs.writeFileSync(path.join(HOME, 'ledger.jsonl'), runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 30 * 86_400_000).map((m) => JSON.stringify({ id: m.id, at: m.endedAt ?? m.startedAt, mode: m.mode, state: 'done', backend: m.worker.backend, model: m.worker.model, tokens: m.usage.total, returned: m.returnedTokens, workerCost: 0, saved: m.savedUsd, price: 'Claude Sonnet' })).join('\n') + '\n');
 
 // ── serve it and take the screenshots ────────────────────────────────────────────────────────────────────
 const env = { ...process.env, PITROOM_HOME: HOME };
 const cli = path.join(root, 'dist', 'pitroom.mjs');
 execFileSync(process.execPath, [cli, 'history', 'import'], { env, stdio: 'ignore' });
+execFileSync(process.execPath, [cli, 'savings', '--since', '30d', '--card', path.join(root, 'docs', 'card.svg')], { env, stdio: 'ignore' });
 const url = execFileSync(process.execPath, [cli, 'dash', '--detach', '--port', '0'], { env, encoding: 'utf8' }).trim().split('\n')[0];
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

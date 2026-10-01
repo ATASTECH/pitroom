@@ -136,7 +136,7 @@ FILES CHANGED: none
    · returned ~554 tokens, 294× compression · est. saved $0.152 vs Claude Sonnet
 ```
 
-Every run prints a receipt, and `pitroom savings` adds them up (a bigger measurement follows in [Benchmarks](#benchmarks)):
+Every run prints a receipt, and `pitroom savings` adds them up (`--card` writes this shareable card; the numbers here are sample data, and a real measurement follows in [Benchmarks](#benchmarks)):
 
 <p align="center"><img src="docs/card.svg" width="520" alt="Pitroom savings card"></p>
 
