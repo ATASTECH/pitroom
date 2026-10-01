@@ -1,11 +1,20 @@
+import claude from '@/assets/mascots/claude.gif';
+import codex from '@/assets/mascots/codex.gif';
+import opencode from '@/assets/mascots/opencode.gif';
 import { cn } from '@/lib/utils';
 
+const MASCOTS: Record<string, string> = { claude, codex, opencode };
 const TITLES: Record<string, string> = { opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code' };
 
-/** The worker CLI's mark (OpenCode from svgl, Codex and Claude Code from LobeHub icons), shown only to say which tool ran. */
-export function WorkerIcon({ backend, className }: { backend: string; className?: string }) {
+/**
+ * Which tool a run used: its animated pixel mascot (CodeIsland, MIT) while the worker is active, its mark
+ * (OpenCode from svgl, Codex and Claude Code from LobeHub icons) once it has stopped.
+ */
+export function WorkerIcon({ backend, active, className }: { backend: string; active?: boolean; className?: string }) {
   const title = TITLES[backend];
   if (!title) return null;
+  const mascot = active ? MASCOTS[backend] : undefined;
+  if (mascot) return <img src={mascot} alt={title} title={title} draggable={false} className="size-8 shrink-0 [image-rendering:pixelated]" />;
   return (
     <svg viewBox={backend === 'opencode' ? '0 0 512 512' : '0 0 24 24'} role="img" aria-label={title} className={cn('size-5 shrink-0', backend === 'opencode' && 'ring-1 ring-foreground/20', className)}>
       <title>{title}</title>

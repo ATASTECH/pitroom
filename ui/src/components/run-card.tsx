@@ -32,9 +32,9 @@ function Header({ run, expanded, when }: { run: DashRun; expanded?: boolean; whe
   const active = run.state === 'running' || run.state === 'queued';
   return (
     <div className={cn('grid grid-cols-[auto_1fr_auto] items-start gap-3.5 p-4 text-left', expanded && 'pr-12')}>
-      <div className="mt-0.5 flex flex-col items-center justify-between gap-2.5 self-stretch">
+      <div className="mt-0.5 flex w-5 flex-col items-center justify-between gap-2.5 self-stretch">
         <StateIcon state={run.state} />
-        <WorkerIcon backend={splitWorker(run.worker).backend} className="size-[18px] rounded-[5px] opacity-90" />
+        <WorkerIcon backend={splitWorker(run.worker).backend} active={run.state === 'running'} className="size-[18px] rounded-[5px] opacity-90" />
       </div>
       <div className="min-w-0 space-y-1.5">
         <div className="flex flex-wrap items-center gap-1.5">

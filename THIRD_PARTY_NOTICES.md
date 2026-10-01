@@ -39,6 +39,10 @@ The MIT License for the projects above is the one reproduced for superpowers, wi
 
 Pitroom starts worker CLIs you install yourself (OpenCode, Codex CLI, Claude Code). They are not part of this package and keep their own licenses and terms.
 
+## Pixel mascots (CodeIsland)
+
+The animated Claude Code, Codex and OpenCode characters shown on a running card (`ui/src/assets/mascots`) are from [CodeIsland](https://github.com/wxtsky/CodeIsland), MIT License, Copyright (c) 2026 wxtsky. The license text is the one reproduced for superpowers above, with that copyright holder.
+
 ## Product names and marks
 
 `docs/architecture.svg` and the dashboard's run cards show the logos of OpenCode, Codex (OpenAI) and Claude Code (Anthropic) only to say which tools Pitroom can drive. The files come from [svgl](https://svgl.app) (OpenCode) and the MIT-licensed [LobeHub icons](https://github.com/lobehub/lobe-icons) set (Codex, Claude Code). The names and logos belong to their owners. Pitroom is not affiliated with or endorsed by them.

@@ -41,6 +41,7 @@ await build({
   target: 'es2022',
   minify: true,
   jsx: 'automatic',
+  loader: { '.gif': 'dataurl' },
   tsconfig: 'ui/tsconfig.json',
   define: { 'process.env.NODE_ENV': '"production"' },
   legalComments: 'none',
