@@ -150,7 +150,7 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 
 **Live.** What is running now, and the latest runs. Running cards show a timer and the worker's last words; finished ones show the result and, for reviews, the findings.
 
-<p align="center"><img src="docs/dash-live.png" width="100%" alt="The Live tab: two running workers with timers and progress bars, then finished runs with approved and needs-fixes badges, step counts, tokens and savings"></p>
+<p align="center"><img src="docs/dash-live.png" width="100%" alt="The Live tab: four running workers with timers and progress bars, then finished runs with approved and needs-fixes badges, step counts, tokens and savings"></p>
 
 **Click a card and it grows into a panel** with the task, what the worker did step by step (files read, searches, commands, edits, with times, failed ones marked), its result, the files and diff it changed, and the details (model, tokens, cost, fallbacks, reference check).
 
