@@ -36,6 +36,14 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
     const page = await get(url);
     assert.equal(page.status, 200);
     assert.match(page.body, /<title>Pitroom<\/title>/);
+    assert.match(page.body, /\/assets\/app\.js/, 'the React app is loaded as a file');
+    const js = await get(`${url}assets/app.js`);
+    assert.equal(js.status, 200);
+    assert.match(js.headers['content-type'], /javascript/);
+    assert.ok(js.body.length > 100_000, 'the bundle is served');
+    assert.equal((await get(`${url}assets/app.css`)).status, 200);
+    assert.equal((await get(`${url}assets/other.js`)).status, 404, 'only the two bundle files');
+    assert.equal((await get(`${url}assets/..%2Fpitroom.mjs`)).status, 404, 'no path traversal');
     assert.match(page.headers['content-security-policy'], /default-src 'none'/);
 
     const state = JSON.parse((await get(`${url}api/state`)).body);

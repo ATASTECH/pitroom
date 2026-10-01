@@ -3,13 +3,15 @@
 // 127.0.0.1 only; it never starts, stops or changes a run. Open the address in any browser,
 // including the browser pane of an agent app.
 import { spawn } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
-import { PAGE } from './dash-page.js';
+import { MISSING, PAGE, THEME_SCRIPT } from './dash-page.js';
 import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { readLedger, totals } from './receipt.js';
@@ -196,8 +198,25 @@ const HEADERS = {
   'cache-control': 'no-store',
   'x-content-type-options': 'nosniff',
   'referrer-policy': 'no-referrer',
-  'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; img-src data:; base-uri 'none'; form-action 'none'",
+  // Own files only, plus the hash of the one inline theme script; styles may be inline (the components position popups with them).
+  'content-security-policy': `default-src 'none'; script-src 'self' 'sha256-${crypto.createHash('sha256').update(THEME_SCRIPT).digest('base64')}'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'`,
 };
+
+/** The bundled dashboard files (dist/ui), next to the CLI bundle. */
+const ASSETS: Record<string, string> = { '/assets/app.js': 'text/javascript; charset=utf-8', '/assets/app.css': 'text/css; charset=utf-8' };
+const assetsDir = () => fileURLToPath(new URL('./ui/', import.meta.url));
+const assetCache = new Map<string, Buffer>();
+function readAsset(route: string): Buffer | undefined {
+  const hit = assetCache.get(route);
+  if (hit) return hit;
+  try {
+    const data = fs.readFileSync(path.join(assetsDir(), path.basename(route)));
+    assetCache.set(route, data);
+    return data;
+  } catch {
+    return undefined;
+  }
+}
 
 function handler(touch: () => void): http.RequestListener {
   const send = (res: http.ServerResponse, code: number, type: string, body: string) => {
@@ -212,7 +231,14 @@ function handler(touch: () => void): http.RequestListener {
     if (!LOCAL_HOST.test(req.headers.host ?? '')) return json(res, 403, { error: 'forbidden host' });
     if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'read-only' });
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    if (url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', PAGE);
+    if (url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', readAsset('/assets/app.js') ? PAGE : MISSING);
+    const type = ASSETS[url.pathname];
+    if (type) {
+      const data = readAsset(url.pathname);
+      if (!data) return json(res, 404, { error: 'dashboard files missing' });
+      res.writeHead(200, { ...HEADERS, 'content-type': type });
+      return void res.end(req.method === 'HEAD' ? undefined : data);
+    }
     if (url.pathname === '/api/state') {
       const group = url.searchParams.get('group') ?? undefined;
       const limit = Number(url.searchParams.get('limit') ?? 40);

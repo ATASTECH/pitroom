@@ -14,6 +14,26 @@ The above copyright notice and this permission notice shall be included in all c
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+## The dashboard (`dist/ui`)
+
+`pitroom dash` serves a React app that is bundled into `dist/ui/app.js` and `app.css` when Pitroom is built. The bundle contains, or was written from, these projects (the licenses are those of the versions used):
+
+| Project | License | Copyright |
+|---|---|---|
+| [React](https://github.com/facebook/react) and react-dom | MIT | Meta Platforms, Inc. and affiliates |
+| [Base UI](https://github.com/mui/base-ui) | MIT | Material-UI SAS (2019) |
+| [shadcn/ui](https://github.com/shadcn-ui/ui) components (`ui/src/components/ui`) | MIT | shadcn |
+| [Agent Elements](https://github.com/21st-dev/agent-elements) (`ui/src/components/agent-elements`) | MIT | 21st.dev (2026) |
+| [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Tailwind Labs, Inc. |
+| [tw-animate-css](https://github.com/Wombosvideo/tw-animate-css) | MIT | Wombosvideo (2025) |
+| [Tabler Icons](https://github.com/tabler/tabler-icons) | MIT | Paweł Kuna (2020-2026) |
+| [clsx](https://github.com/lukeed/clsx) | MIT | Luke Edwards |
+| [tailwind-merge](https://github.com/dcastil/tailwind-merge) | MIT | Dany Castillo (2021) |
+| [Lucide](https://github.com/lucide-icons/lucide) | ISC | Lucide Icons and Contributors (2026) |
+| [class-variance-authority](https://github.com/joe-bell/cva) | Apache-2.0 | Joe Bell |
+
+The MIT License for the projects above is the one reproduced for superpowers, with each project's own copyright holder in place of the name there. The ISC and Apache-2.0 licenses are in the projects' repositories. Pitroom's own code in `ui/src` is MIT like the rest of the package.
+
 ## Not bundled
 
 Pitroom starts worker CLIs you install yourself (OpenCode, Codex CLI, Claude Code). They are not part of this package and keep their own licenses and terms.

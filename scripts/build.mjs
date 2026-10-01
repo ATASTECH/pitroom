@@ -1,5 +1,6 @@
 // Bundles src/ into a single dependency-free CLI (dist/pitroom.mjs); skills call it via `pitroom`.
 import { build } from 'esbuild';
+import { execFileSync } from 'node:child_process';
 import { chmodSync, readFileSync } from 'node:fs';
 
 const { version } = JSON.parse(readFileSync('package.json', 'utf8'));
@@ -28,6 +29,24 @@ await build({
   define: { __VERSION__: JSON.stringify(version) },
   legalComments: 'none',
 });
+
+// The dashboard (React, Tailwind and shadcn on Base UI) is bundled once into static files that
+// `pitroom dash` serves; the CLI itself needs none of it and the package has no runtime dependencies.
+await build({
+  entryPoints: ['ui/src/main.tsx'],
+  outfile: 'dist/ui/app.js',
+  bundle: true,
+  platform: 'browser',
+  format: 'esm',
+  target: 'es2022',
+  minify: true,
+  jsx: 'automatic',
+  tsconfig: 'ui/tsconfig.json',
+  define: { 'process.env.NODE_ENV': '"production"' },
+  legalComments: 'none',
+  logLevel: 'warning',
+});
+execFileSync('node_modules/.bin/tailwindcss', ['-i', 'ui/src/styles.css', '-o', 'dist/ui/app.css', '--minify'], { stdio: ['ignore', 'ignore', 'inherit'] });
 
 chmodSync(out, 0o755);
 console.log(`built ${out} (v${version})`);

@@ -48,3 +48,7 @@ By contributing you agree that your contribution is licensed under the [MIT Lice
 ## Releases
 
 Maintainers: see [docs/releasing.md](docs/releasing.md).
+
+## The dashboard
+
+`pitroom dash` serves a React app from `ui/` ([shadcn/ui](https://ui.shadcn.com) on Base UI, plus [Agent Elements](https://agent-elements.21st.dev) tool rows). `npm run build` bundles it into `dist/ui` (esbuild for the script, the Tailwind CLI for the styles); those files are committed like the rest of `dist/`. The React toolchain is a dev dependency only: the CLI has no runtime dependencies. Add a shadcn component with `npx shadcn@latest add <name>` (the config is `components.json`), then check that it imports `cn` from `@/lib/utils`, and run `npm run typecheck`. The server only answers GET and the page loads nothing from outside, so keep it that way: no CDN scripts, fonts or images.

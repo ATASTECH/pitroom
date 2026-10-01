@@ -11,6 +11,10 @@
 - After a run the raw event stream is compressed (about a sixth of its size) and the stderr log is kept only for runs that did not succeed. `pitroom clean` now keeps the history: `show`, `show --patch` and a short run id keep working for cleaned runs.
 - The dashboard serves `/api/history` and `/api/stats`.
 
+### A new dashboard
+- `pitroom dash` is now a React app built from [shadcn/ui](https://ui.shadcn.com) components on [Base UI](https://base-ui.com) and [Agent Elements](https://agent-elements.21st.dev) tool rows, with tabs: **Live** (running and recent runs, animated cards that expand into the task, the worker's steps, the result, the diff and the details), **History** (full-text search and filters over the SQLite history, a table, a side panel per run) and **Stats** (success rate, time, tokens and savings per worker and model, runs per day). Light and dark themes.
+- It is built once into `dist/ui` (esbuild and the Tailwind CLI, from `ui/`) and served as two static files; the CLI still has no runtime dependencies. The page's Content-Security-Policy allows only its own files and one hashed inline script.
+
 ### Seeing Pitroom in the Claude Code and Codex apps
 - `pitroom dash` serves a live, read-only page of every run on `127.0.0.1` (state, worker and model, time, steps, tokens, savings, result; click a run for its report). `--detach` starts it in the background and prints the address (a running one is reused), `--stop` ends it, `--open` opens a browser, and it closes itself after four idle hours. The host must be `localhost`, `127.0.0.1` or `[::1]`, and only GET is answered.
 - `pitroom watch --brief` prints one card line when a run starts, when it falls back and when it ends, then a total: made for Claude Code's Monitor tool and for a Codex command block.

@@ -446,7 +446,7 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 The Claude Code and Codex **apps** show neither hook messages nor a status line. For them there are two things that need no setup:
 
-- `pitroom dash --detach` prints the address of a live page of every run (state, worker and model, time, steps, tokens, result; click a run for its report). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
+- `pitroom dash --detach` prints the address of a live dashboard with three tabs: **Live** (every running and recent run as an animated card; click one for the task, what the worker did step by step, its result, the diff and the details), **History** (search and filter everything Pitroom ever ran) and **Stats** (success rate, time, tokens and savings per worker and model). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
 - `pitroom watch -g NAME --brief` prints one card line when a worker starts and one when it ends. In Claude Code, the agent runs it through the Monitor tool and the lines appear in the app; in Codex the command's output block fills as it goes.
 
 ---

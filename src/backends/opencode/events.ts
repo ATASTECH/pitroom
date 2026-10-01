@@ -52,7 +52,8 @@ export function parseEvents(ndjson: string): ParsedRun {
         lastActivity = `${name} ${describe(st.input)}`.trim();
         if (timeline.length < MAX_STEPS) {
           const kind = EDIT_TOOLS.has(name) ? 'edit' : /^(bash|shell)$/.test(name) ? 'shell' : 'tool';
-          const text = kind === 'shell' ? String(st.input?.command ?? '') : describe(st.input);
+          // the full path or pattern, not the shortened description: the dashboard shortens it for display
+          const text = kind === 'shell' ? String(st.input?.command ?? '') : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? '') || describe(st.input);
           timeline.push({ kind, name, text: clip(text, 240), ok: st.status === 'completed' ? true : st.status === 'error' ? false : undefined, at: stamp(e.timestamp) });
         }
         break;

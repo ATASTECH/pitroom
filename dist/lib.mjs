@@ -600,7 +600,7 @@ function parseEvents3(ndjson) {
         lastActivity = `${name} ${describe2(st.input)}`.trim();
         if (timeline.length < MAX_STEPS) {
           const kind = EDIT_TOOLS2.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
-          const text = kind === "shell" ? String(st.input?.command ?? "") : describe2(st.input);
+          const text = kind === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
           timeline.push({ kind, name, text: clip3(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
         }
         break;
