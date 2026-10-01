@@ -2,12 +2,12 @@ import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { type DashRun, api } from '@/api';
 import { RunCard } from '@/components/run-card';
+import { Segmented } from '@/components/segmented';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { usePoll } from '@/hooks/use-poll';
 import { usd } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -72,11 +72,7 @@ export function LivePage({ focus }: { focus?: string }) {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter these runs" className="pl-8" />
         </div>
-        <ToggleGroup value={[filter]} onValueChange={(v) => v[0] && setFilter(v[0] as typeof filter)} variant="outline" spacing={0}>
-          <ToggleGroupItem value="all">All</ToggleGroupItem>
-          <ToggleGroupItem value="running">Running</ToggleGroupItem>
-          <ToggleGroupItem value="problem">Needs attention</ToggleGroupItem>
-        </ToggleGroup>
+        <Segmented value={filter} onChange={setFilter} options={[{ value: 'all', label: 'All' }, { value: 'running', label: 'Running' }, { value: 'problem', label: 'Needs attention' }]} />
         {data && data.groups.length > 0 && (
           <Select value={group || 'all'} onValueChange={(v) => setGroup(v === 'all' ? '' : (v ?? ''))} items={{ all: 'All groups', ...Object.fromEntries(data.groups.map((g) => [g, g])) }}>
             <SelectTrigger className="w-40"><SelectValue /></SelectTrigger>

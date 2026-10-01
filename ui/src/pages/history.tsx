@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { ago, clock, tokens, usd } from '@/lib/format';
 
@@ -72,7 +73,7 @@ export function HistoryPage({ onOpen }: { onOpen: (id: string) => void }) {
                 <TableCell className="hidden text-right tabular-nums sm:table-cell">{r.seconds != null ? clock(r.seconds) : '-'}</TableCell>
                 <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">{r.tokens ? tokens(r.tokens) : '-'}</TableCell>
                 <TableCell className="hidden text-right tabular-nums text-success lg:table-cell">{r.saved ? usd(r.saved) : '-'}</TableCell>
-                <TableCell className="whitespace-nowrap text-right text-muted-foreground" title={new Date(r.startedAt).toLocaleString()}>{ago(r.startedAt)}</TableCell>
+                <TableCell className="whitespace-nowrap text-right text-muted-foreground"><Tooltip><TooltipTrigger render={<span />}>{ago(r.startedAt)}</TooltipTrigger><TooltipContent>{new Date(r.startedAt).toLocaleString()}</TooltipContent></Tooltip></TableCell>
               </TableRow>
             ))}
             {!busy && !rows.length && <TableRow className="hover:bg-transparent"><TableCell colSpan={7} className="py-12 text-center text-muted-foreground">No runs match.</TableCell></TableRow>}

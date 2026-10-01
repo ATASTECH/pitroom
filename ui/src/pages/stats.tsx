@@ -1,10 +1,10 @@
 import { api } from '@/api';
 import { WorkerBadge } from '@/components/badges';
+import { Segmented } from '@/components/segmented';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { usePoll } from '@/hooks/use-poll';
 import { clock, tokens, usd } from '@/lib/format';
@@ -29,9 +29,7 @@ export function StatsPage() {
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-2">
         <h2 className="text-lg font-semibold tracking-tight">Statistics</h2>
-        <ToggleGroup value={[days]} onValueChange={(v) => v[0] && setDays(v[0])} variant="outline" spacing={0}>
-          <ToggleGroupItem value="7">7 days</ToggleGroupItem><ToggleGroupItem value="30">30 days</ToggleGroupItem><ToggleGroupItem value="90">90 days</ToggleGroupItem><ToggleGroupItem value="0">All</ToggleGroupItem>
-        </ToggleGroup>
+        <Segmented value={days} onChange={setDays} options={[{ value: '7', label: '7 days' }, { value: '30', label: '30 days' }, { value: '90', label: '90 days' }, { value: '0', label: 'All' }]} />
       </div>
       {!t ? <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}</div> : (
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
