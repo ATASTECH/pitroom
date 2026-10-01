@@ -162,8 +162,8 @@ addRun({ kind: 'research', worker: bunny, startedAt: mins(58), state: 'failed', 
 addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 260_000 });
 
 // the savings ledger (this week's total on the Live tab)
-console.log(`sample week: $${runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 7 * 86_400_000).reduce((a, m) => a + m.savedUsd, 0).toFixed(0)} saved, ${runs.length} runs`);
-fs.writeFileSync(path.join(HOME, 'ledger.jsonl'), runs.filter((m) => m.state === 'done' && now - Date.parse(m.startedAt) < 30 * 86_400_000).map((m) => JSON.stringify({ id: m.id, at: m.endedAt ?? m.startedAt, mode: m.mode, state: 'done', backend: m.worker.backend, model: m.worker.model, tokens: m.usage.total, returned: m.returnedTokens, workerCost: 0, saved: m.savedUsd, price: 'Claude Sonnet' })).join('\n') + '\n');
+console.log(`sample week: $${runs.filter((m) => m.endedAt && now - Date.parse(m.startedAt) < 7 * 86_400_000).reduce((a, m) => a + m.savedUsd, 0).toFixed(0)} saved, ${runs.length} runs`);
+fs.writeFileSync(path.join(HOME, 'ledger.jsonl'), runs.filter((m) => m.endedAt && m.usage?.steps && now - Date.parse(m.startedAt) < 30 * 86_400_000).map((m) => JSON.stringify({ id: m.id, at: m.endedAt, mode: m.mode, state: m.state, backend: m.worker.backend, model: m.worker.model, tokens: m.usage.total, returned: m.returnedTokens, workerCost: 0, saved: m.savedUsd, price: 'Claude Sonnet' })).join('\n') + '\n');
 
 // ── serve it and take the screenshots ────────────────────────────────────────────────────────────────────
 const env = { ...process.env, PITROOM_HOME: HOME };
