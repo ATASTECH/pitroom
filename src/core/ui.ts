@@ -48,7 +48,7 @@ const RUN_ID = /\b\d{8}-\d{6}-[0-9a-f]{4}\b/g;
 const PITROOM_CALL = /(^|[\s;&|(`])(\S*\/)?pitroom(\.mjs)?(\s|$)/;
 const ICON: Record<string, string> = { done: '✔', failed: '✘', timeout: '⏱', stopped: '■' };
 
-function kind(m: RunMeta): string {
+export function kind(m: RunMeta): string {
   if (m.reviewOf) return m.reviewKind === 'range' ? 'branch review' : m.reviewKind === 'fix' ? 're-review' : 'review';
   return m.mode === 'read' ? 'research' : m.mode === 'isolate' ? 'change (isolated copy)' : 'change';
 }
@@ -71,7 +71,7 @@ const MODEL_MAX = 24;
  * just `opencode` when the worker's own default model runs. The provider prefix, a "-free" tier
  * suffix and a trailing dotted version are dropped; parentheses keep it apart from the card's " · ".
  */
-function workerName(t: Target): string {
+export function workerName(t: Target): string {
   if (!t.model) return t.backend;
   const model = (t.model.split('/').pop() ?? t.model)
     .replace(/-(contributor-)?free$/, '')
@@ -79,9 +79,10 @@ function workerName(t: Target): string {
   return `${t.backend} (${model.length > MODEL_MAX ? `${model.slice(0, MODEL_MAX - 1)}…` : model})`;
 }
 
-function what(m: RunMeta): string {
+export function what(m: RunMeta): string {
   if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
-  if (m.reviewOf) return `of ${m.reviewOf}`;
+  // a range review is named by two full commit hashes; nine characters tell them apart
+  if (m.reviewOf) return `of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}`;
   const line = m.task.split('\n').find((l) => l.trim()) ?? '';
   // A hand-written plan brief opens with this boilerplate; the task and the plan are what count.
   const brief = /^You are implementing Task (\d+)\b.*?\bplan\s+(\S+)/i.exec(line);
@@ -89,34 +90,33 @@ function what(m: RunMeta): string {
   return short(line);
 }
 
-function duration(m: RunMeta): string {
+export function elapsed(m: RunMeta): string {
   const s = Math.round((Date.parse(m.endedAt ?? '') - Date.parse(m.startedAt)) / 1000);
   if (!Number.isFinite(s) || s < 0) return '';
   return s >= 60 ? `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s` : `${s}s`;
 }
 
+/** The card for a run that has just started. */
+export const startedCard = (m: RunMeta): string => `🏁 Pitroom ▶ ${kind(m)} on ${workerName(m.worker)} · ${what(m)}  (${m.id})`;
+
+/** The card for a run that has ended (done, failed, timed out or stopped). */
+export function endedCard(m: RunMeta): string {
+  const v = m.verdict;
+  const bits = [
+    `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${workerName(m.ran ?? m.worker)}`,
+    what(m),
+    elapsed(m),
+    v && `SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()}`,
+    m.changes?.length ? `${m.changes.length} file${m.changes.length === 1 ? '' : 's'} changed` : '',
+    m.savedUsd ? `~${usd(m.savedUsd)} saved` : '',
+  ];
+  return `${bits.filter(Boolean).join(' · ')}  (${m.id})`;
+}
+
 /** The cards this run has not shown yet, in order; each phase is shown once. */
 function cardsFor(m: RunMeta): string[] {
-  const phases: [string, () => string][] = [
-    ['started', () => `🏁 Pitroom ▶ ${kind(m)} on ${workerName(m.worker)} · ${what(m)}  (${m.id})`],
-  ];
-  if (!isActive(m.state)) {
-    phases.push([
-      'ended',
-      () => {
-        const v = m.verdict;
-        const bits = [
-          `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${workerName(m.ran ?? m.worker)}`,
-          what(m),
-          duration(m),
-          v && `SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()}`,
-          m.changes?.length ? `${m.changes.length} file${m.changes.length === 1 ? '' : 's'} changed` : '',
-          m.savedUsd ? `~${usd(m.savedUsd)} saved` : '',
-        ];
-        return `${bits.filter(Boolean).join(' · ')}  (${m.id})`;
-      },
-    ]);
-  }
+  const phases: [string, () => string][] = [['started', () => startedCard(m)]];
+  if (!isActive(m.state)) phases.push(['ended', () => endedCard(m)]);
   if (m.applied) {
     phases.push(['applied', () => `🏁 Pitroom ⤵ applied ${m.changes?.length ?? 0} file(s) from ${m.id} to your tree`]);
   }

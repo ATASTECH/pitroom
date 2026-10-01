@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Seeing Pitroom in the Claude Code and Codex apps
+- `pitroom dash` serves a live, read-only page of every run on `127.0.0.1` (state, worker and model, time, steps, tokens, savings, result; click a run for its report). `--detach` starts it in the background and prints the address (a running one is reused), `--stop` ends it, `--open` opens a browser, and it closes itself after four idle hours. The host must be `localhost`, `127.0.0.1` or `[::1]`, and only GET is answered.
+- `pitroom watch --brief` prints one card line when a run starts, when it falls back and when it ends, then a total: made for Claude Code's Monitor tool and for a Codex command block.
+- Cards name a range review by 9-character hashes instead of 40.
+- The skills tell the agent to start the dashboard and give you its address when workers run in the background.
+
 ## 0.6.5
 
 ### Models, costs and effort

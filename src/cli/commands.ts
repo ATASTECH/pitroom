@@ -12,6 +12,7 @@ import { formatReport, progress } from '../core/report.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
 import { formatModels, modelTable } from '../core/models.js';
+import { dashCommand } from '../core/dash.js';
 import { hookCards, statusLine } from '../core/ui.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
@@ -175,14 +176,31 @@ export async function cmdWatch(p: Parsed): Promise<number> {
     console.log(group ? `no runs in group "${group}"` : 'nothing is running');
     return 0;
   }
+  const brief = has(p, 'brief');
   const { metas, timedOut } = await watch(group ? () => groupIds(group) : () => initial, {
-    json: has(p, 'json') || !process.stdout.isTTY,
+    json: !brief && (has(p, 'json') || !process.stdout.isTTY),
+    brief,
     intervalMs: parseDuration(flag(p, 'interval') ?? '2') * 1000,
     timeoutMs: flag(p, 'timeout') ? parseDuration(flag(p, 'timeout')!) * 1000 : 0,
     write: (s) => process.stdout.write(s),
   });
   if (timedOut) return 75;
   return metas.some((m) => m.state !== 'done') ? 1 : 0;
+}
+
+/** A live page of the runs, for agent apps that show neither hooks nor a status line. */
+export async function cmdDash(p: Parsed): Promise<number> {
+  const port = flag(p, 'port');
+  if (port !== undefined && !(/^\d+$/.test(port) && Number(port) <= 65535)) throw new UserError('--port takes a number from 0 to 65535 (0 picks a free one)');
+  return dashCommand({
+    port: port === undefined ? undefined : Number(port),
+    idleMs: flag(p, 'idle') ? parseDuration(flag(p, 'idle')!) * 1000 : undefined,
+    detach: has(p, 'detach'),
+    stop: has(p, 'stop'),
+    open: has(p, 'open'),
+    serve: has(p, 'serve'),
+    log: (s) => console.log(s),
+  });
 }
 
 export function cmdShow(p: Parsed): number {

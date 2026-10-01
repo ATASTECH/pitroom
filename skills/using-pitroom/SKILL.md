@@ -57,7 +57,7 @@ Call `pitroom` (on PATH after `pitroom install`; otherwise the command in your s
 
 Model and effort: tiers already name the workers. Before you pick anything else, run `pitroom models`: it lists what each worker offers (Codex, Claude Code, OpenCode), the effort levels each model accepts, what the user says it costs (`costs` in the config) and what it used so far. Take the cheapest model that fits the task, never a dearer one by habit: start on the `cheap` tier (OpenCode's free model) and move up only when the task needs it or a cheaper worker already failed. Set `--effort` from the task: `low` for lookups and mechanical edits, `medium` for ordinary changes, `high` for reviews and non-obvious bugs, `xhigh` or above only when the user asks or a lower level failed. More effort costs more tokens and time.
 
-Workers can take minutes. Start long work with `--bg` and keep working; follow it with `pitroom watch --json` through your host's background or monitor facility, or call `pitroom wait --timeout 540` again while it exits 75. Never poll with `sleep`.
+Workers can take minutes. Start long work with `--bg` and keep working; follow it with `pitroom watch --brief` (one card line per start and end) through your host's background or monitor facility, or call `pitroom wait --timeout 540` again while it exits 75. Never poll with `sleep`.
 
 ## When you do use it
 
@@ -65,6 +65,7 @@ Workers can take minutes. Start long work with `--bg` and keep working; follow i
 - Worker output is draft work and a worker's report is a claim: verify what you rely on (`pitroom-verification`).
 - You apply patches and commit; workers never commit or push. Push, merge and pull requests happen only after the user asks.
 - Keep the decisions: delegate the reading and typing, not the architecture.
+- Background workers: run `pitroom dash --detach` once and give the user the address it prints: a live page of every run for the apps (Claude Code, Codex) that show neither Pitroom's cards nor its status line.
 - Say what you delegated: one line per worker run naming the worker and model (the run report has both) and what it cost or saved. Not every host shows Pitroom's cards or status line, and the user should always know which model touched their code. `pitroom savings --models` lists them all.
 - You set a worker's permissions when you create it, from the task and from how much autonomy the user gave you in this session (for example auto mode): read-only by default, `-i` (an isolated copy) for changes, `-w` (edits in place) when the user wants that, `--web` only when the task needs the web. A worker never widens its own permissions.
 - Pitroom keeps a fixed floor that no flag lifts: no git history changes, no `sudo`, no publishing, no secrets, no killing processes. Everything above that floor is your call.

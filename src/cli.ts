@@ -22,7 +22,11 @@ Usage
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run… | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
-  pitroom watch [run… | -g NAME] [--json] [--interval 2]
+  pitroom watch [run… | -g NAME] [--json | --brief] [--interval 2]
+                                        --brief: one card line per start and end (made for Claude Code's Monitor tool)
+  pitroom dash [--detach] [--port N] [--open] [--stop]
+                                        a live page of the runs on 127.0.0.1 (read-only): open it in any browser
+                                        or an agent app's browser pane; --detach runs it in the background
                                         live table (TTY) or one JSON line per change, until done
   pitroom show [run] [--patch|--events|--full|--json]
   pitroom ls [--running] [-g NAME]      recent runs
@@ -88,6 +92,7 @@ const COMMANDS: Record<string, Command> = {
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,
+  dash: cmd.cmdDash,
   show: cmd.cmdShow,
   ls: cmd.cmdLs,
   list: cmd.cmdLs,

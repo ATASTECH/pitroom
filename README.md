@@ -402,7 +402,8 @@ pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- sep
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
-pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json --interval
+pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
+pitroom dash [--detach] [--port N] [--open] [--stop]   a live page of the runs on 127.0.0.1
 pitroom show [run]                                --patch --events --full --json
 pitroom apply [run | -g NAME] · pitroom discard|revert [run] · pitroom stop [run | -g NAME]
 pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
@@ -416,7 +417,7 @@ Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4`
 
 </details>
 
-### Seeing Pitroom at work in Claude Code
+### Seeing Pitroom at work
 
 Two settings make every delegation visible, whether or not the agent mentions it. A status line shows running workers and this week's savings (`--then` keeps your own status line first); a card appears after each `pitroom` command the agent runs, once per phase (started, finished with its result, applied). The plugin registers the card hook itself; with `pitroom install`, add both to `~/.claude/settings.json`:
 
@@ -428,6 +429,11 @@ Two settings make every delegation visible, whether or not the agent mentions it
   }
 }
 ```
+
+The Claude Code and Codex **apps** show neither hook messages nor a status line. For them there are two things that need no setup:
+
+- `pitroom dash --detach` prints the address of a live page of every run (state, worker and model, time, steps, tokens, result; click a run for its report). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
+- `pitroom watch -g NAME --brief` prints one card line when a worker starts and one when it ends. In Claude Code, the agent runs it through the Monitor tool and the lines appear in the app; in Codex the command's output block fills as it goes.
 
 ---
 

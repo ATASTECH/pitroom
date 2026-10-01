@@ -53,10 +53,11 @@ Read-only by default. For changes add `-i` (each worker edits its own isolated c
 ## 4. Watch
 
 Follow the group live without polling:
+- `pitroom watch -g NAME --brief`: one card line when a worker starts and one when it ends, then a total; the user can read it, so prefer it in a host that shows monitor output (Claude Code's Monitor tool).
 - `pitroom watch -g NAME --json`: one JSON line per change (`queued`, `started`, `progress`, `fallback`, `done`/`failed`, then `all-done`). Run it through your host's background or monitor facility so each line reaches you as it happens; it exits by itself when the group is done.
 - No such facility: `pitroom wait -g NAME --timeout 540`, and call it again while it exits with 75.
 - `pitroom status -g NAME`: one table snapshot.
-- Tell the user they can see the same table live with `pitroom watch -g NAME` in a terminal.
+- Tell the user how to see it live: `pitroom dash --detach` prints the address of a read-only page on 127.0.0.1 with every run (open it in a browser or the app's browser pane), or `pitroom watch -g NAME` in a terminal.
 
 While workers run, do the parts you kept for yourself.
 
