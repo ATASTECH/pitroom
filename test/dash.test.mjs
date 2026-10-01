@@ -48,6 +48,7 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
 
     const state = JSON.parse((await get(`${url}api/state`)).body);
     assert.equal(state.running, 0);
+    assert.equal(typeof state.price, 'string', 'the price the savings are estimated against');
     const run = state.runs.find((r) => r.id === id);
     assert.ok(run, 'the finished run is listed');
     assert.equal(run.state, 'done');

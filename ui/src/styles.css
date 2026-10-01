@@ -32,6 +32,17 @@
   --color-info: var(--info);
 }
 
+/* Edges of a scrolling box fade out while there is more to scroll (set by useScrollFade). */
+@property --fade-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --fade-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.scroll-fade {
+  transition: --fade-t 0.25s, --fade-b 0.25s;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 var(--fade-t), #000 calc(100% - var(--fade-b)), transparent 100%);
+}
+.scroll-fade[data-fade-top="true"] { --fade-t: 28px; }
+.scroll-fade[data-fade-bottom="true"] { --fade-b: 28px; }
+
 @keyframes indeterminate {
   from { transform: translateX(-110%); }
   to { transform: translateX(280%); }

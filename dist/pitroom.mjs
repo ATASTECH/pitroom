@@ -2876,6 +2876,7 @@ function dashState(opts = {}) {
     if (runs.length < limit) runs.push(toRun(m));
   }
   return {
+    price: primaryPrice().name,
     running: runs.filter((r) => r.state === "running" || r.state === "queued").length,
     saved: totals(readLedger(Date.now() - WEEK_MS2)).saved,
     groups: [...groups].sort(),
@@ -3011,7 +3012,7 @@ function handler(touch) {
     }
     if (url.pathname === "/api/stats") {
       const days = Number(url.searchParams.get("days") ?? 30);
-      return json(res, 200, historyStats(days > 0 ? Date.now() - days * 864e5 : void 0));
+      return json(res, 200, { ...historyStats(days > 0 ? Date.now() - days * 864e5 : void 0), price: primaryPrice().name });
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {

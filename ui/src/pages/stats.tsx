@@ -1,5 +1,7 @@
 import { api } from '@/api';
 import { WorkerBadge } from '@/components/badges';
+import { Hint } from '@/components/hint';
+import { SavingsNote } from '@/components/savings-note';
 import { Segmented } from '@/components/segmented';
 import { Card } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
@@ -10,10 +12,10 @@ import { usePoll } from '@/hooks/use-poll';
 import { clock, tokens, usd } from '@/lib/format';
 import { useState } from 'react';
 
-function Tile({ label, value, sub, tone }: { label: string; value: string; sub?: string; tone?: string }) {
+function Tile({ label, value, sub, tone, hint }: { label: string; value: string; sub?: string; tone?: string; hint?: React.ReactNode }) {
   return (
     <Card className="gap-1 px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500 fill-mode-both">
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}{hint && <Hint>{hint}</Hint>}</p>
       <p className={`text-3xl font-semibold tabular-nums tracking-tight ${tone ?? ''}`}>{value}</p>
       {sub && <p className="text-xs text-muted-foreground">{sub}</p>}
     </Card>
@@ -37,7 +39,7 @@ export function StatsPage() {
           <Tile label="Success" value={t.runs ? `${Math.round((100 * t.ok) / t.runs)}%` : '-'} tone="text-success" />
           <Tile label="Worker time" value={clock(t.seconds)} />
           <Tile label="Tokens" value={tokens(t.tokens)} />
-          <Tile label="Saved" value={usd(t.saved)} tone="text-success" />
+          <Tile label="Est. saved" value={usd(t.saved)} tone="text-success" hint={<SavingsNote price={data?.price} />} />
         </div>
       )}
       {data && data.byDay.length > 0 && (

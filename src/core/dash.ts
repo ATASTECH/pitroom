@@ -14,7 +14,7 @@ import { UserError } from './errors.js';
 import { MISSING, PAGE, THEME_SCRIPT } from './dash-page.js';
 import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
-import { readLedger, totals } from './receipt.js';
+import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
 import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds, runFile } from './store.js';
 import { describeTarget } from './target.js';
@@ -46,6 +46,8 @@ export interface DashRun {
 }
 
 export interface DashState {
+  /** The primary model whose list price the savings are estimated against. */
+  price: string;
   running: number;
   saved: number;
   groups: string[];
@@ -103,6 +105,7 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
     if (runs.length < limit) runs.push(toRun(m));
   }
   return {
+    price: primaryPrice().name,
     running: runs.filter((r) => r.state === 'running' || r.state === 'queued').length,
     saved: totals(readLedger(Date.now() - WEEK_MS)).saved,
     groups: [...groups].sort(),
@@ -273,7 +276,7 @@ function handler(touch: () => void): http.RequestListener {
     }
     if (url.pathname === '/api/stats') {
       const days = Number(url.searchParams.get('days') ?? 30);
-      return json(res, 200, historyStats(days > 0 ? Date.now() - days * 86_400_000 : undefined));
+      return json(res, 200, { ...historyStats(days > 0 ? Date.now() - days * 86_400_000 : undefined), price: primaryPrice().name });
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {

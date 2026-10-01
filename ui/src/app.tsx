@@ -32,6 +32,35 @@ function ThemeToggle() {
   );
 }
 
+/** Soft fades at the top and bottom of the window while the page has more to scroll. */
+function PageFade() {
+  const [top, setTop] = useState(false);
+  const [bottom, setBottom] = useState(false);
+  useEffect(() => {
+    const update = () => {
+      setTop(window.scrollY > 8);
+      setBottom(window.scrollY + window.innerHeight < document.documentElement.scrollHeight - 8);
+    };
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    const ro = new ResizeObserver(update);
+    ro.observe(document.body);
+    return () => {
+      window.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+      ro.disconnect();
+    };
+  }, []);
+  const edge = 'pointer-events-none fixed inset-x-0 z-30 transition-opacity duration-300';
+  return (
+    <>
+      <div aria-hidden className={cn(edge, 'top-0 h-14 bg-gradient-to-b from-background via-background/60 to-transparent', top ? 'opacity-100' : 'opacity-0')} />
+      <div aria-hidden className={cn(edge, 'bottom-0 h-20 bg-gradient-to-t from-background via-background/60 to-transparent', bottom ? 'opacity-100' : 'opacity-0')} />
+    </>
+  );
+}
+
 export function App() {
   const hash = location.hash.slice(1);
   const [tab, setTab] = useState<Tab>(hash === 'history' || hash === 'stats' ? hash : 'live');
@@ -61,8 +90,9 @@ export function App() {
             {tab === 'history' && <HistoryPage onOpen={setOpen} />}
             {tab === 'stats' && <StatsPage />}
           </div>
-          <footer className="mt-10 text-center text-xs text-muted-foreground/70">Read-only · this machine only</footer>
+          <footer className="mt-10 text-center text-xs text-muted-foreground/70">Read-only · this machine only · stops itself when left idle (<code className="font-mono">pitroom dash --stop</code> ends it now)</footer>
         </main>
+        <PageFade />
         <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
           <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
             <SheetHeader><SheetTitle>Run</SheetTitle><SheetDescription className="font-mono text-xs">{open}</SheetDescription></SheetHeader>

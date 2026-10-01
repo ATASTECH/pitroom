@@ -20,6 +20,7 @@ export interface DashRun {
 }
 
 export interface DashState {
+  price: string;
   running: number;
   saved: number;
   groups: string[];
@@ -70,6 +71,7 @@ export interface HistoryRow {
 }
 
 export interface Stats {
+  price: string;
   totals: { runs: number; ok: number; failed: number; seconds: number; tokens: number; saved: number };
   byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number }[];
   byDay: { day: string; runs: number; ok: number; saved: number }[];

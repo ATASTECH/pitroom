@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { type RunDetail, api } from '@/api';
 import { Pill } from '@/components/badges';
 import { AgentActivity } from '@/components/agents/agent-activity';
+import { FadeDiv } from '@/components/fade-div';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePoll } from '@/hooks/use-poll';
@@ -20,12 +21,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 const Block = ({ children, mono }: { children: React.ReactNode; mono?: boolean }) => (
-  <div className={cn('max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg border bg-muted/40 p-3 text-[13px] leading-relaxed', mono && 'font-mono text-xs')}>{children}</div>
+  <FadeDiv className={cn('max-h-60 whitespace-pre-wrap break-words rounded-lg border bg-muted/40 p-3 text-[13px] leading-relaxed', mono && 'font-mono text-xs')}>{children}</FadeDiv>
 );
 
 function Diff({ patch }: { patch: string }) {
   return (
-    <div className="max-h-72 overflow-auto rounded-lg border bg-muted/40">
+    <FadeDiv className="max-h-72 rounded-lg border bg-muted/40">
       <pre className="min-w-max p-3 font-mono text-xs leading-5">
         {patch.split('\n').map((l, i) => (
           <div key={i} className={cn(l.startsWith('+') && !l.startsWith('+++') && 'bg-success/10 text-success', l.startsWith('-') && !l.startsWith('---') && 'bg-destructive/10 text-destructive', l.startsWith('@@') && 'text-info')}>
@@ -33,7 +34,7 @@ function Diff({ patch }: { patch: string }) {
           </div>
         ))}
       </pre>
-    </div>
+    </FadeDiv>
   );
 }
 

@@ -1,7 +1,9 @@
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { type DashRun, api } from '@/api';
+import { Hint } from '@/components/hint';
 import { RunCard } from '@/components/run-card';
+import { SavingsNote } from '@/components/savings-note';
 import { Segmented } from '@/components/segmented';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
@@ -28,10 +30,10 @@ function useCount(to: number, ms = 450) {
   return v;
 }
 
-function Stat({ label, value, tone, pulse }: { label: string; value: string; tone?: string; pulse?: boolean }) {
+function Stat({ label, value, tone, pulse, hint }: { label: string; value: string; tone?: string; pulse?: boolean; hint?: React.ReactNode }) {
   return (
     <Card className={cn('relative gap-1 overflow-hidden px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500 fill-mode-both', pulse && 'border-info/30')}>
-      <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}{hint && <Hint>{hint}</Hint>}</p>
       <p className={cn('flex items-center gap-2.5 text-3xl font-semibold tabular-nums tracking-tight', tone)}>
         {pulse !== undefined && <span className={cn('size-2.5 rounded-full', pulse ? 'animate-ping-slow bg-info' : 'bg-muted-foreground/40')} />}
         {value}
@@ -65,7 +67,7 @@ export function LivePage({ focus }: { focus?: string }) {
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Running now" value={String(Math.round(running))} pulse={(data?.running ?? 0) > 0} tone={data?.running ? 'text-info' : undefined} />
         <Stat label="Finished" value={String(Math.round(finished))} />
-        <Stat label="Saved this week" value={usd(saved)} tone="text-success" />
+        <Stat label="Est. saved this week" value={usd(saved)} tone="text-success" hint={<SavingsNote price={data?.price} />} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
