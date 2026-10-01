@@ -2818,6 +2818,12 @@ var oneLine5 = (s, max) => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 };
+function findings(m) {
+  const v = m.verdict;
+  if (!v) return "";
+  const parts = [v.critical && `${v.critical} critical`, v.important && `${v.important} important`, v.minor && `${v.minor} minor`].filter(Boolean);
+  return parts.length ? parts.join(" \xB7 ") : "no findings";
+}
 function toRun(m) {
   const l = m.state === "running" ? live(m) : void 0;
   return {
@@ -2835,7 +2841,7 @@ function toRun(m) {
     verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} \xB7 QUALITY ${m.verdict.quality.toUpperCase()}` : void 0,
     changes: m.changes?.length || void 0,
     applied: m.applied || void 0,
-    note: l?.last ? oneLine5(String(l.last), 140) : isActive(m.state) ? "" : headline(m, 200) || oneLine5(m.error ?? "", 200)
+    note: l?.last ? oneLine5(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : headline(m, 200) || oneLine5(m.error ?? "", 200)
   };
 }
 function dashState(opts = {}) {
@@ -2887,7 +2893,7 @@ function runDetail(id) {
   }
   const rel = (t) => [m.cwd, m.dir].filter(Boolean).reduce((x, base2) => x.split(`${base2}/`).join(""), t);
   steps = steps.map((x) => ({ ...x, text: rel(x.text) }));
-  const answer = isActive(m.state) ? "" : readSummary(m);
+  const answer = isActive(m.state) ? "" : readSummary(m).replace(/^SUMMARY:\s*SPEC[^\n]*\n+/i, "").replace(/^DETAILS:[ \t]*\n+/i, "").trim();
   const lastSay = steps.at(-1);
   if (lastSay?.kind === "say" && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
   const patch = kept?.patch ?? readFile(id, "changes.patch");
@@ -2903,7 +2909,8 @@ function runDetail(id) {
     patch: patch ? `${patchLines.slice(0, PATCH_LINES).join("\n")}${patchLines.length > PATCH_LINES ? `
 \u2026 ${patchLines.length - PATCH_LINES} more lines (pitroom show ${id} --patch)` : ""}` : void 0,
     info: {
-      worker: describeTarget(m.ran ?? m.worker),
+      worker: (m.ran ?? m.worker).backend,
+      // the model has its own line
       model: m.resolvedModel,
       mode: m.mode,
       started: m.startedAt,

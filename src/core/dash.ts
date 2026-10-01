@@ -57,6 +57,14 @@ const oneLine = (s: string, max: number) => {
   return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 };
 
+/** A review's findings as a short count: the verdict itself is already a badge, so its raw SUMMARY line is not repeated. */
+function findings(m: RunMeta): string {
+  const v = m.verdict;
+  if (!v) return '';
+  const parts = [v.critical && `${v.critical} critical`, v.important && `${v.important} important`, v.minor && `${v.minor} minor`].filter(Boolean);
+  return parts.length ? parts.join(' · ') : 'no findings';
+}
+
 function toRun(m: RunMeta): DashRun {
   const l = m.state === 'running' ? live(m) : undefined;
   return {
@@ -74,7 +82,7 @@ function toRun(m: RunMeta): DashRun {
     verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} · QUALITY ${m.verdict.quality.toUpperCase()}` : undefined,
     changes: m.changes?.length || undefined,
     applied: m.applied || undefined,
-    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : headline(m, 200) || oneLine(m.error ?? '', 200),
+    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verdict ? findings(m) : headline(m, 200) || oneLine(m.error ?? '', 200),
   };
 }
 
@@ -155,7 +163,13 @@ export function runDetail(id: string): RunDetail | undefined {
   // Paths relative to where the worker ran read better than absolute ones.
   const rel = (t: string) => [m.cwd, m.dir].filter(Boolean).reduce((x, base) => x.split(`${base}/`).join(''), t);
   steps = steps.map((x) => ({ ...x, text: rel(x.text) }));
-  const answer = isActive(m.state) ? '' : readSummary(m);
+  // A review's answer opens with its verdict line, which the badges and counts already show; start at the findings.
+  const answer = isActive(m.state)
+    ? ''
+    : readSummary(m)
+        .replace(/^SUMMARY:\s*SPEC[^\n]*\n+/i, '')
+        .replace(/^DETAILS:[ \t]*\n+/i, '')
+        .trim();
   // The worker's closing words are the result, shown below; do not show them twice.
   const lastSay = steps.at(-1);
   if (lastSay?.kind === 'say' && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
@@ -171,7 +185,7 @@ export function runDetail(id: string): RunDetail | undefined {
     changes: m.changes ?? [],
     patch: patch ? `${patchLines.slice(0, PATCH_LINES).join('\n')}${patchLines.length > PATCH_LINES ? `\n… ${patchLines.length - PATCH_LINES} more lines (pitroom show ${id} --patch)` : ''}` : undefined,
     info: {
-      worker: describeTarget(m.ran ?? m.worker),
+      worker: (m.ran ?? m.worker).backend, // the model has its own line
       model: m.resolvedModel,
       mode: m.mode,
       started: m.startedAt,

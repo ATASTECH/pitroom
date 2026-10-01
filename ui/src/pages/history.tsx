@@ -1,7 +1,7 @@
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { type HistoryRow, type Stats, api } from '@/api';
-import { WorkerBadge } from '@/components/badges';
+import { VerdictBadge, WorkerBadge } from '@/components/badges';
 import { StateIcon } from '@/components/state-icon';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -67,7 +67,7 @@ export function HistoryPage({ onOpen }: { onOpen: (id: string) => void }) {
             {rows.map((r) => (
               <TableRow key={r.id} className="cursor-pointer" onClick={() => onOpen(r.id)}>
                 <TableCell><StateIcon state={r.state} className="size-4" /></TableCell>
-                <TableCell className="max-w-0 min-w-48"><div className="truncate font-medium">{r.task}</div><div className="truncate text-xs text-muted-foreground">{r.kind}{r.verdict ? ` · ${r.verdict}` : ''}{r.files ? ` · ${r.files} file${r.files === 1 ? '' : 's'}` : ''}</div></TableCell>
+                <TableCell className="max-w-0 min-w-48"><div className="truncate font-medium">{r.task}</div><div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">{r.kind}{r.verdict && <VerdictBadge verdict={r.verdict} />}{r.files ? <span>· {r.files} file{r.files === 1 ? '' : 's'}</span> : null}</div></TableCell>
                 <TableCell className="hidden md:table-cell"><WorkerBadge backend={r.backend} model={r.model} /></TableCell>
                 <TableCell className="hidden text-right tabular-nums sm:table-cell">{r.seconds != null ? clock(r.seconds) : '-'}</TableCell>
                 <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">{r.tokens ? tokens(r.tokens) : '-'}</TableCell>

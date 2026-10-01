@@ -57,7 +57,7 @@ function Body({ d }: { d: RunDetail }) {
   const running = d.state === 'running' || d.state === 'queued';
   return (
     <div className="space-y-5">
-      <Section title="Task"><Block>{d.task}</Block></Section>
+      {!/^Review of /.test(d.task) && <Section title="Task"><Block>{d.task}</Block></Section>}
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
         {d.steps.length ? <AgentActivity items={traceItems(d.steps)} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={260} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
       </Section>
