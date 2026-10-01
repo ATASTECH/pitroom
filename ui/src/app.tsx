@@ -87,12 +87,13 @@ export function App() {
           </Tabs>
           <div key={tab} className="animate-in fade-in slide-in-from-bottom-1 duration-300">
             {tab === 'live' && <LivePage focus={focus} />}
-            {tab === 'history' && <HistoryPage onOpen={setOpen} />}
+            {tab === 'history' && <HistoryPage />}
             {tab === 'stats' && <StatsPage />}
           </div>
           <footer className="mt-10 text-center text-xs text-muted-foreground/70">Read-only · this machine only · stops itself when left idle (<code className="font-mono">pitroom dash --stop</code> ends it now)</footer>
         </main>
         <PageFade />
+        {/* only for a #run-id link; the lists open runs as cards */}
         <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
           <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
             <SheetHeader><SheetTitle>Run</SheetTitle><SheetDescription className="font-mono text-xs">{open}</SheetDescription></SheetHeader>

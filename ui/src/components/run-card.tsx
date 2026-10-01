@@ -13,7 +13,7 @@ import { TextShimmer } from '@/components/motion/text-shimmer';
 import { RunDetailView } from '@/components/run-detail';
 import { StateIcon } from '@/components/state-icon';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { clock, tokens, usd } from '@/lib/format';
+import { ago, clock, tokens, usd } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
 function Elapsed({ run, active }: { run: DashRun; active: boolean }) {
@@ -27,7 +27,7 @@ function Elapsed({ run, active }: { run: DashRun; active: boolean }) {
 }
 
 /** The card's face. The collapsed card and the expanded one render the same header, so motion morphs one into the other. */
-function Header({ run, expanded }: { run: DashRun; expanded?: boolean }) {
+function Header({ run, expanded, when }: { run: DashRun; expanded?: boolean; when?: boolean }) {
   const active = run.state === 'running' || run.state === 'queued';
   return (
     <div className={cn('grid grid-cols-[auto_1fr_auto] items-start gap-3.5 p-4 text-left', expanded && 'pr-12')}>
@@ -58,22 +58,24 @@ function Header({ run, expanded }: { run: DashRun; expanded?: boolean }) {
           {[run.steps ? `${run.steps} step${run.steps === 1 ? '' : 's'}` : '', run.tokens ? `${tokens(run.tokens)} tokens` : ''].filter(Boolean).join(' · ')}
         </span>
         {run.saved ? <span className="text-xs text-success">~{usd(run.saved)}</span> : null}
+        {when && <span title={new Date(run.startedAt).toLocaleString()} className="text-xs text-muted-foreground/80">{ago(run.startedAt)}</span>}
       </div>
     </div>
   );
 }
 
 /** A run as an expandable card (Shadix UI): click it and it grows into a focused panel with everything about the run. */
-export function RunCard({ run, index }: { run: DashRun; index: number }) {
+/** `when` adds how long ago it started (the History list, where the order is by time rather than by activity). */
+export function RunCard({ run, index, when }: { run: DashRun; index: number; when?: boolean }) {
   const active = run.state === 'running' || run.state === 'queued';
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both" style={{ animationDelay: `${Math.min(index, 8) * 45}ms`, animationDuration: '500ms' }}>
       <ExpandableCard>
         <ExpandableCardBody className={cn('rounded-xl border pb-0 shadow-none transition-colors duration-300 hover:border-foreground/25', run.state === 'running' && 'border-info/30')}>
-          <Header run={run} />
+          <Header run={run} when={when} />
         </ExpandableCardBody>
         <ExpandableCardExpandContainer className="max-h-[88vh] w-full border pb-0 shadow-2xl">
-          <div className="shrink-0"><Header run={run} expanded /></div>
+          <div className="shrink-0"><Header run={run} expanded when={when} /></div>
           {/* the header stays put; everything below it scrolls */}
           <ScrollArea className="max-h-[calc(88vh-6.5rem)] border-t">
             <ExpandableCardContent className="px-4 pb-5 pt-4 sm:pl-[3.4rem]">

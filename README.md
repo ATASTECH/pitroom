@@ -156,9 +156,9 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 
 <p align="center"><img src="docs/dash-card.png" width="100%" alt="An expanded run card: the task, a ten-step activity list, the result, five changed files and the details"></p>
 
-**History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
+**History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period; each run opens as the same card as on Live. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
 
-<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and a table of runs"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model"></p>
+<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model"></p>
 
 The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 
@@ -470,7 +470,7 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 The Claude Code and Codex **apps** show neither hook messages nor a status line. For them there are two things that need no setup:
 
-- `pitroom dash --detach` prints the address of a live dashboard with three tabs: **Live** (every running and recent run as an animated card; click one for the task, what the worker did step by step, its result, the diff and the details), **History** (search and filter everything Pitroom ever ran) and **Stats** (success rate, time, tokens and savings per worker and model). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
+- `pitroom dash --detach` prints the address of a live dashboard with three tabs: **Live** (every running and recent run as an animated card; click one for the task, what the worker did step by step, its result, the diff and the details), **History** (search and filter everything Pitroom ever ran; every run opens as the same card) and **Stats** (success rate, time, tokens and savings per worker and model). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
 - `pitroom watch -g NAME --brief` prints one card line when a worker starts and one when it ends. In Claude Code, the agent runs it through the Monitor tool and the lines appear in the app; in Codex the command's output block fills as it goes.
 
 ---

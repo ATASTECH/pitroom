@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.8
+
+### Dashboard
+- The History tab lists runs as the same expandable cards as the Live tab (with how long ago each started), so a past run opens in the same panel: task, steps, result, changes, details. The side sheet only remains for a `#run-id` link.
+- The Stats tiles fit large amounts (a heavy week no longer overflows the "Est. saved" tile).
+
+### README
+- Screenshots of a livelier sample week; the Stats and Live screenshots are no longer captured with a card left open. The sample savings card now adds up with the sample history.
+
 ## 0.6.7
 
 ### Dashboard

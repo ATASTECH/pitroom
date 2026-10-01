@@ -1,20 +1,27 @@
 import { Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { type HistoryRow, type Stats, api } from '@/api';
-import { VerdictBadge, WorkerBadge } from '@/components/badges';
-import { StateIcon } from '@/components/state-icon';
+import { type DashRun, type HistoryRow, type Stats, api } from '@/api';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { ago, clock, tokens, usd } from '@/lib/format';
+import { RunCard } from '@/components/run-card';
+import { clock } from '@/lib/format';
 
 const STATES = { all: 'Any state', done: 'Done', problem: 'Needs attention' };
 const PERIODS = { '0': 'All time', '1': 'Last 24 hours', '7': 'Last 7 days', '30': 'Last 30 days' };
 
-export function HistoryPage({ onOpen }: { onOpen: (id: string) => void }) {
+/** The same short model name the Live cards show (the CLI's workerName). */
+const shortModel = (m: string) => (m.split('/').pop() ?? m).replace(/-(contributor-)?free$/, '').replace(/-\d+\.\d+$/, '');
+
+/** A history row in the shape the Live cards use, so both lists open the same card. */
+const toRun = (r: HistoryRow): DashRun => ({
+  id: r.id, state: r.state, kind: r.kind, worker: r.model ? `${r.backend} (${shortModel(r.model)})` : r.backend, task: r.task, group: r.group,
+  startedAt: r.startedAt, time: r.seconds != null ? clock(r.seconds) : '', steps: r.steps ?? 0, tokens: r.tokens, saved: r.saved,
+  verdict: r.verdict, changes: r.files || undefined, applied: r.applied || undefined, note: '',
+});
+
+export function HistoryPage() {
   const [q, setQ] = useState('');
   const [search, setSearch] = useState('');
   const [state, setState] = useState('all');
@@ -54,31 +61,10 @@ export function HistoryPage({ onOpen }: { onOpen: (id: string) => void }) {
         <Select value={model} onValueChange={(v) => setModel(v ?? 'all')} items={{ all: 'Any model', ...Object.fromEntries(models.map((m) => [m, m.split('/').pop()])) }}><SelectTrigger className="w-44"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Any model</SelectItem>{models.map((m) => <SelectItem key={m} value={m}>{m.split('/').pop()}</SelectItem>)}</SelectContent></Select>
         <Select value={days} onValueChange={(v) => setDays(v ?? '0')} items={PERIODS}><SelectTrigger className="w-40"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(PERIODS).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent></Select>
       </div>
-      <div className="overflow-hidden rounded-xl border bg-card animate-in fade-in duration-500">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="w-10" /><TableHead>Task</TableHead><TableHead className="hidden md:table-cell">Worker</TableHead>
-              <TableHead className="hidden text-right sm:table-cell">Time</TableHead><TableHead className="hidden text-right lg:table-cell">Tokens</TableHead>
-              <TableHead className="hidden text-right lg:table-cell">Saved</TableHead><TableHead className="text-right">When</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {busy && !rows.length && [0, 1, 2, 3].map((i) => <TableRow key={i}><TableCell colSpan={7}><Skeleton className="h-6" /></TableCell></TableRow>)}
-            {rows.map((r) => (
-              <TableRow key={r.id} className="cursor-pointer" onClick={() => onOpen(r.id)}>
-                <TableCell><StateIcon state={r.state} className="size-4" /></TableCell>
-                <TableCell className="max-w-0 min-w-48"><div className="truncate font-medium">{r.task}</div><div className="flex items-center gap-1.5 truncate text-xs text-muted-foreground">{r.kind}{r.verdict && <VerdictBadge verdict={r.verdict} />}{r.files ? <span>· {r.files} file{r.files === 1 ? '' : 's'}</span> : null}</div></TableCell>
-                <TableCell className="hidden md:table-cell"><WorkerBadge backend={r.backend} model={r.model} /></TableCell>
-                <TableCell className="hidden text-right tabular-nums sm:table-cell">{r.seconds != null ? clock(r.seconds) : '-'}</TableCell>
-                <TableCell className="hidden text-right tabular-nums text-muted-foreground lg:table-cell">{r.tokens ? tokens(r.tokens) : '-'}</TableCell>
-                <TableCell className="hidden text-right tabular-nums text-success lg:table-cell">{r.saved ? usd(r.saved) : '-'}</TableCell>
-                <TableCell className="whitespace-nowrap text-right text-muted-foreground"><Tooltip><TooltipTrigger render={<span tabIndex={0} className="cursor-default outline-none focus-visible:underline" />}>{ago(r.startedAt)}</TooltipTrigger><TooltipContent>{new Date(r.startedAt).toLocaleString()}</TooltipContent></Tooltip></TableCell>
-              </TableRow>
-            ))}
-            {!busy && !rows.length && <TableRow className="hover:bg-transparent"><TableCell colSpan={7} className="py-12 text-center text-muted-foreground">No runs match.</TableCell></TableRow>}
-          </TableBody>
-        </Table>
+      <div className="space-y-2.5">
+        {busy && !rows.length && [0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}
+        {rows.map((r, i) => <RunCard key={r.id} run={toRun(r)} index={i} when />)}
+        {!busy && !rows.length && <div className="py-16 text-center text-muted-foreground">No runs match.</div>}
       </div>
       <div className="flex items-center justify-between text-sm text-muted-foreground">
         <span>{total != null ? `${rows.length} of ${total} runs` : ''}</span>
