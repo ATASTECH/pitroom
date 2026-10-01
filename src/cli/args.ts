@@ -16,7 +16,7 @@ const VALUE_FLAGS: Record<string, string> = {
   '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '--effort': 'effort', '-g': 'group', '--group': 'group',
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
-  '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle',
+  '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
   '--plan': 'plan', '--step': 'step',
 };
 

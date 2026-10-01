@@ -47,6 +47,14 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
     assert.match(run.worker, /opencode/);
     assert.equal(JSON.parse((await get(`${url}api/state?group=nope`)).body).runs.length, 0, 'a group filter');
 
+    const hist = JSON.parse((await get(`${url}api/history?q=list`)).body);
+    assert.equal(hist.total, 1, 'the history is searchable through the API');
+    assert.equal(hist.rows[0].id, id);
+    assert.equal(JSON.parse((await get(`${url}api/history?q=zzzz`)).body).total, 0);
+    const stats = JSON.parse((await get(`${url}api/stats`)).body);
+    assert.equal(stats.totals.runs, 1);
+    assert.equal(stats.byWorker[0].backend, 'opencode');
+
     const detail = JSON.parse((await get(`${url}api/run/${id}`)).body);
     assert.match(detail.report, /done/);
     assert.equal(detail.task, 'list the files', 'the task the agent gave the worker');

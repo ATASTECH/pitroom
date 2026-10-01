@@ -11,6 +11,7 @@ import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { PAGE } from './dash-page.js';
 import { headline } from './group.js';
+import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
 import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds, runFile } from './store.js';
@@ -137,9 +138,11 @@ export function runDetail(id: string): RunDetail | undefined {
     return undefined;
   }
   const start = Date.parse(m.startedAt);
-  let steps: RunDetail['steps'] = [];
-  try {
-    const events = readFile(id, 'events.jsonl');
+  // A finished run's steps and patch come from the history (its raw stream is compressed or gone).
+  const kept = isActive(m.state) ? undefined : archivedRun(id);
+  let steps: RunDetail['steps'] = kept?.steps ?? [];
+  if (!steps.length) try {
+    const events = readRunFile(id, 'events.jsonl');
     steps = (events ? (getBackend((m.ran ?? m.worker).backend).parse(events).timeline ?? []) : []).map((s) => ({
       ...s,
       t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1000)) : undefined,
@@ -154,7 +157,7 @@ export function runDetail(id: string): RunDetail | undefined {
   // The worker's closing words are the result, shown below; do not show them twice.
   const lastSay = steps.at(-1);
   if (lastSay?.kind === 'say' && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
-  const patch = readFile(id, 'changes.patch');
+  const patch = kept?.patch ?? readFile(id, 'changes.patch');
   const patchLines = patch.split('\n');
   const u = m.usage;
   return {
@@ -214,6 +217,20 @@ function handler(touch: () => void): http.RequestListener {
       const group = url.searchParams.get('group') ?? undefined;
       const limit = Number(url.searchParams.get('limit') ?? 40);
       return json(res, 200, dashState({ group: group && group.length <= 100 ? group : undefined, limit: Number.isFinite(limit) ? limit : 40 }));
+    }
+    if (url.pathname === '/api/history') {
+      const q = url.searchParams;
+      const days = Number(q.get('days') ?? 0);
+      return json(res, 200, listHistory({
+        text: (q.get('q') ?? '').slice(0, 200), model: q.get('model') || undefined, backend: q.get('backend') || undefined,
+        state: q.get('state') || undefined, group: q.get('group') || undefined,
+        sinceMs: days > 0 ? Date.now() - days * 86_400_000 : undefined, beforeId: RUN_ID.test(q.get('before') ?? '') ? q.get('before')! : undefined,
+        limit: Number(q.get('limit') ?? 30) || 30,
+      }));
+    }
+    if (url.pathname === '/api/stats') {
+      const days = Number(url.searchParams.get('days') ?? 30);
+      return json(res, 200, historyStats(days > 0 ? Date.now() - days * 86_400_000 : undefined));
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {
@@ -339,6 +356,7 @@ export async function dashCommand(o: DashOptions): Promise<number> {
     }
     throw new UserError('pitroom dash did not start (is the port taken? try --port 0)');
   }
+  importRuns(); // runs from before the history existed
   const explicit = o.port !== undefined;
   let dash: Dash;
   try {

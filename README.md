@@ -404,6 +404,8 @@ pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
 pitroom dash [--detach] [--port N] [--open] [--stop]   a live page of the runs on 127.0.0.1
+pitroom history [TEXT] [--model M] [--state S] [--since 30d] [--limit N] [--json]   finished runs, searchable
+pitroom history stats [--since 30d] · pitroom history import   per worker and model · take in older runs
 pitroom show [run]                                --patch --events --full --json
 pitroom apply [run | -g NAME] · pitroom discard|revert [run] · pitroom stop [run | -g NAME]
 pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
@@ -416,6 +418,18 @@ pitroom doctor [--probe] · pitroom config · pitroom install [--copy] [--force]
 Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4` timeout · `5` read-only violation · `6` verify failed · `75` still running.
 
 </details>
+
+### History
+
+Every finished run is also written to a SQLite database (`history.db` in Pitroom's state directory; Node's built-in `node:sqlite`, nothing to install). It keeps the task, worker and model, time, tokens, savings, the steps the worker took, its answer and the diff, and it is searchable:
+
+```bash
+pitroom history "login bug"            # full-text search over the task, the answer and the steps
+pitroom history --state problem --since 7d
+pitroom history stats --since 30d      # runs, success rate, average time and tokens per worker and model
+```
+
+While a run runs, its raw event stream is a plain file (the simplest thing that survives a crash). When it ends, the stream is compressed, and the stderr log is kept only for runs that did not succeed. `pitroom clean` removes old run directories but the history keeps them: `pitroom show <run>` still prints their report, steps, and patch. Runs from before the history existed are taken in by `pitroom history import` (it also runs on the first `pitroom history` and `pitroom dash`). The files remain the source: the database can be deleted and rebuilt with `history import` for the runs still on disk.
 
 ### Seeing Pitroom at work
 

@@ -5,6 +5,12 @@
 ### Node.js 22.13 or newer
 - Pitroom now needs Node.js 22.13+ (`engines`, the launcher, the CI matrix of 22 and 24, the build target). It is the first release line with a built-in SQLite (`node:sqlite`) that needs no flag, which the run history uses.
 
+### History in SQLite
+- Every finished run is written to `history.db` (built-in `node:sqlite`, FTS5): the task, worker and model, time, tokens, savings, the worker's steps, its answer and the diff, plus the whole record.
+- `pitroom history [TEXT]` searches and filters (`--model`, `--state`, `--group`, `--since`, `--limit`, `--json`); `pitroom history stats` shows runs, success rate, average time and tokens per worker and model; `pitroom history import` takes in older runs (it also runs by itself on first use).
+- After a run the raw event stream is compressed (about a sixth of its size) and the stderr log is kept only for runs that did not succeed. `pitroom clean` now keeps the history: `show`, `show --patch` and a short run id keep working for cleaned runs.
+- The dashboard serves `/api/history` and `/api/stats`.
+
 ### Seeing Pitroom in the Claude Code and Codex apps
 - `pitroom dash` serves a live, read-only page of every run on `127.0.0.1` (state, worker and model, time, steps, tokens, savings, result; click a run for its report). `--detach` starts it in the background and prints the address (a running one is reused), `--stop` ends it, `--open` opens a browser, and it closes itself after four idle hours. The host must be `localhost`, `127.0.0.1` or `[::1]`, and only GET is answered.
 - `pitroom watch --brief` prints one card line when a run starts, when it falls back and when it ends, then a total: made for Claude Code's Monitor tool and for a Codex command block.

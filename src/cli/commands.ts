@@ -13,6 +13,7 @@ import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '..
 import { fill, loadTemplate } from '../core/templates.js';
 import { formatModels, modelTable } from '../core/models.js';
 import { dashCommand } from '../core/dash.js';
+import { archivedRun, historyFile, historyStats, importRuns, listHistory, openDb, readRunFile, recordRun } from '../core/history.js';
 import { hookCards, statusLine } from '../core/ui.js';
 import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
 import {
@@ -203,11 +204,51 @@ export async function cmdDash(p: Parsed): Promise<number> {
   });
 }
 
+const when = (iso: string) => new Date(iso).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+const secs = (s: number | undefined | null) => (s == null ? '-' : s >= 3600 ? `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m` : s >= 60 ? `${Math.floor(s / 60)}m${String(Math.round(s % 60)).padStart(2, '0')}s` : `${Math.round(s)}s`);
+
+/** Finished runs from the SQLite history: search, filter, per-worker statistics, import. */
+export function cmdHistory(p: Parsed): number {
+  if (!openDb()) throw new UserError('the history needs Node.js 22.13+ (node:sqlite)', 3);
+  const sub = p.positional[0];
+  if (sub === 'import') {
+    const r = importRuns();
+    console.log(`imported ${r.imported} run(s); ${r.known} were already in the history (${historyFile()})`);
+    return 0;
+  }
+  importRuns(); // cheap when up to date; takes in runs from before the history existed
+  const since = sinceMs(flag(p, 'since'));
+  if (sub === 'stats') {
+    const s = historyStats(since);
+    if (has(p, 'json')) return console.log(JSON.stringify(s, null, 2)), 0;
+    const t = s.totals;
+    console.log(`${t.runs} runs · ${t.ok} ok · ${t.failed} not ok · ${secs(t.seconds)} of worker time · ${(t.tokens / 1e6).toFixed(1)}M tokens · ~${usd(t.saved)} saved`);
+    const rows = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ''}`, String(w.runs), `${Math.round((100 * w.ok) / w.runs)}%`, secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1000)}k` : '-', `~${usd(w.saved)}`]);
+    const head = ['WORKER', 'RUNS', 'OK', 'AVG TIME', 'AVG TOKENS', 'SAVED'];
+    const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+    const fmt = (r: string[]) => r.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join('  ');
+    if (rows.length) console.log(`\n${[fmt(head), ...rows.map(fmt)].join('\n')}`);
+    return 0;
+  }
+  const limit = flag(p, 'limit') ? Number(flag(p, 'limit')) : 20;
+  const { rows, total } = listHistory({ text: p.positional.join(' '), model: flag(p, 'model'), state: flag(p, 'state'), group: flag(p, 'group'), sinceMs: since, limit });
+  if (has(p, 'json')) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
+  if (!rows.length) return console.log(total ? 'nothing on this page' : 'no matching runs'), 0;
+  const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
+  const head = ['RUN', 'WHEN', 'STATE', 'WORKER', 'TIME', 'TASK'];
+  const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i]!.length)));
+  const fmt = (r: string[]) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]!))).join('  ');
+  console.log([fmt(head), ...body.map(fmt)].join('\n'));
+  if (total > rows.length) console.log(`\n${rows.length} of ${total} · --limit N for more · pitroom show <run> for one`);
+  return 0;
+}
+
 export function cmdShow(p: Parsed): number {
   const meta = freshMeta(resolveRun(p.positional[0]));
   const dump = (name: string) => {
-    const f = runFile(meta.id, name);
-    process.stdout.write(fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : `(no ${name})\n`);
+    // plain, compressed after the run, or (for a cleaned run) from the history
+    const text = readRunFile(meta.id, name) ?? (name === 'changes.patch' ? archivedRun(meta.id)?.patch : undefined);
+    process.stdout.write(text ?? `(no ${name}${name === 'events.jsonl' ? ': the raw stream was removed, the history keeps the steps' : ''})\n`);
   };
   if (has(p, 'patch')) dump('changes.patch');
   else if (has(p, 'events')) dump('events.jsonl');
@@ -416,9 +457,10 @@ export function cmdClean(p: Parsed): number {
   for (const id of old) {
     const m: RunMeta = readMeta(id);
     if (m.mode === 'isolate' && !m.discarded && !m.applied) discardRun(m);
+    recordRun(m); // the history keeps what the directory held
     fs.rmSync(runDir(id), { recursive: true, force: true });
   }
-  console.log(`removed ${old.length} run(s); the savings ledger is kept`);
+  console.log(`removed ${old.length} run(s); the history and the savings ledger are kept`);
   return 0;
 }
 

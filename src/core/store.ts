@@ -92,16 +92,37 @@ export function newRunId(now = new Date()): string {
   return `${stamp}-${crypto.randomBytes(2).toString('hex')}`;
 }
 
+/** Hooks the history module registers at start-up (store.ts must not import it: it imports this). */
+let onFinished: ((m: RunMeta) => void) | undefined;
+let archive: { meta(id: string): RunMeta | undefined; id(ref: string): string | undefined } | undefined;
+export function useArchive(hooks: { onFinished: (m: RunMeta) => void; meta: (id: string) => RunMeta | undefined; id: (ref: string) => string | undefined }): void {
+  onFinished = hooks.onFinished;
+  archive = { meta: hooks.meta, id: hooks.id };
+}
+
 export function writeMeta(meta: RunMeta): void {
   fs.mkdirSync(runDir(meta.id), { recursive: true });
   const file = runFile(meta.id, 'meta.json');
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(meta, null, 2));
   fs.renameSync(tmp, file);
+  if (TERMINAL.includes(meta.state)) {
+    try {
+      onFinished?.(meta);
+    } catch {
+      // the history is a convenience; a run never fails because of it
+    }
+  }
 }
 
 export function readMeta(id: string): RunMeta {
-  return upgrade(JSON.parse(fs.readFileSync(runFile(id, 'meta.json'), 'utf8')));
+  const file = runFile(id, 'meta.json');
+  if (!fs.existsSync(file)) {
+    // A run whose directory `pitroom clean` removed is still in the history.
+    const kept = archive?.meta(id);
+    if (kept) return upgrade(kept);
+  }
+  return upgrade(JSON.parse(fs.readFileSync(file, 'utf8')));
 }
 
 /** Records written before workers were pluggable (≤0.2) had `model`/`fallbackModels` and no `worker`. */
@@ -127,12 +148,19 @@ export function listRunIds(): string[] {
 /** Resolves "latest"/"last", a full id, or a unique suffix/prefix of an id. */
 export function resolveRun(ref: string | undefined): string {
   const ids = listRunIds();
-  if (!ids.length) throw new UserError('no runs yet');
-  if (!ref || ref === 'latest' || ref === 'last') return ids[ids.length - 1]!;
+  if (!ref || ref === 'latest' || ref === 'last') {
+    if (!ids.length) throw new UserError('no runs yet');
+    return ids[ids.length - 1]!;
+  }
   if (ids.includes(ref)) return ref;
   const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
   if (hits.length === 1) return hits[0]!;
-  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(', ')}` : `unknown run "${ref}"`);
+  if (!hits.length) {
+    // not on disk any more (`pitroom clean`): the history may still have it
+    const kept = archive?.id(ref);
+    if (kept) return kept;
+  }
+  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(', ')}` : ids.length ? `unknown run "${ref}"` : 'no runs yet');
 }
 
 export function isAlive(pid: number | undefined): boolean {

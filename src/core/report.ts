@@ -1,5 +1,6 @@
 // The text the primary agent reads. Everything here costs the primary tokens,
 // so it is compact and ends with exact next commands.
+import { archivedRun } from './history.js';
 import fs from 'node:fs';
 import { planName } from './plan.js';
 import { getBackend } from '../backends/index.js';
@@ -25,7 +26,7 @@ export function duration(meta: RunMeta): string {
 
 export function readSummary(meta: RunMeta): string {
   const f = runFile(meta.id, 'summary.md');
-  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim() : '';
+  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8').trim() : (archivedRun(meta.id)?.answer ?? '');
 }
 
 export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLines = 400): string {

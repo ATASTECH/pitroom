@@ -4,7 +4,11 @@ import * as cmd from './cli/commands.js';
 import { doctor } from './core/doctor.js';
 import { UserError } from './core/errors.js';
 import { VERSION, execute } from './core/run.js';
-import { readMeta } from './core/store.js';
+import { archivedId, archivedRun, recordRun } from './core/history.js';
+import { readMeta, useArchive } from './core/store.js';
+
+// Finished runs go to the history; a run whose directory was cleaned is still found there.
+useArchive({ onFinished: recordRun, meta: (id) => archivedRun(id)?.meta, id: archivedId });
 
 const HELP = `pitroom ${VERSION} — a free pit crew for your expensive coding agent.
 Delegates bounded tasks to a worker agent CLI (${backendIds().join(', ')}), using the
@@ -24,6 +28,9 @@ Usage
                                         block until all (or any) are done, then print reports
   pitroom watch [run… | -g NAME] [--json | --brief] [--interval 2]
                                         --brief: one card line per start and end (made for Claude Code's Monitor tool)
+  pitroom history [TEXT] [--model M] [--state S] [--since 30d] [--limit N] [--json]
+                                        every finished run, searchable (SQLite); "history stats" per worker and model,
+                                        "history import" takes in runs from before the history existed
   pitroom dash [--detach] [--port N] [--open] [--stop]
                                         a live page of the runs on 127.0.0.1 (read-only): open it in any browser
                                         or an agent app's browser pane; --detach runs it in the background
@@ -93,6 +100,7 @@ const COMMANDS: Record<string, Command> = {
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,
   dash: cmd.cmdDash,
+  history: cmd.cmdHistory,
   show: cmd.cmdShow,
   ls: cmd.cmdLs,
   list: cmd.cmdLs,

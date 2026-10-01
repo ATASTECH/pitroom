@@ -5,6 +5,7 @@
 // there, and it never passes through the primary agent's context. By default the
 // reviewer runs on another backend than the implementer: a second model, not the
 // same one grading itself.
+import { archivedRun, readRunFile } from './history.js';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -76,7 +77,7 @@ function diffOf(m: RunMeta, from = m.baseTree): string {
   if (from !== m.baseTree) {
     throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
   }
-  return fs.readFileSync(runFile(m.id, 'changes.patch'), 'utf8');
+  return readRunFile(m.id, 'changes.patch') ?? archivedRun(m.id)?.patch ?? '';
 }
 
 export function runReview(id: string): ReviewJob {
