@@ -11,7 +11,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node18',
+  target: 'node22',
   banner: { js: '#!/usr/bin/env node' },
   define: { __VERSION__: JSON.stringify(version) },
   legalComments: 'none',
@@ -24,7 +24,7 @@ await build({
   bundle: true,
   platform: 'node',
   format: 'esm',
-  target: 'node18',
+  target: 'node22',
   define: { __VERSION__: JSON.stringify(version) },
   legalComments: 'none',
 });

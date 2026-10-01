@@ -3,7 +3,7 @@
 ## A new version
 
 1. `npm run bump -- patch` (or `minor`, `major`, `X.Y.Z`; add `--dry-run` to look first). It moves the version in `package.json`, `package-lock.json`, both plugin manifests and adds a heading to `CHANGELOG.md`; replace its `TODO` with the release notes. A test fails while a file disagrees or the `TODO` is still there. The docs carry no version by hand.
-2. `npm test` on Node 18 and a current Node; CI repeats it on Ubuntu and macOS.
+2. `npm test` on Node 22 and a current Node; CI repeats it on Ubuntu and macOS.
 3. Commit, push `main`, wait for CI.
 4. `npm publish --access public` (needs your npm login and one-time password). `prepublishOnly` runs typecheck and tests first.
 5. Tag the published commit and create the release: `gh release create vX.Y.Z --target <full sha> --notes-file …`.

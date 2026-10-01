@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Node.js 22.13 or newer
+- Pitroom now needs Node.js 22.13+ (`engines`, the launcher, the CI matrix of 22 and 24, the build target). It is the first release line with a built-in SQLite (`node:sqlite`) that needs no flag, which the run history uses.
+
 ### Seeing Pitroom in the Claude Code and Codex apps
 - `pitroom dash` serves a live, read-only page of every run on `127.0.0.1` (state, worker and model, time, steps, tokens, savings, result; click a run for its report). `--detach` starts it in the background and prints the address (a running one is reused), `--stop` ends it, `--open` opens a browser, and it closes itself after four idle hours. The host must be `localhost`, `127.0.0.1` or `[::1]`, and only GET is answered.
 - `pitroom watch --brief` prints one card line when a run starts, when it falls back and when it ends, then a total: made for Claude Code's Monitor tool and for a Codex command block.

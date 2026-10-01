@@ -209,7 +209,7 @@ To repeat it on your own repository: `pitroom crew -d <repo> -g bench "<question
 
 ## Quick start
 
-You need Node.js 18+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
+You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
 
 ### 1. Install: pick your agent
 

@@ -19,11 +19,12 @@ try {
   process.exit(0); // broken install: stay silent rather than break the session
 }
 const body = skill.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
-// Fallback when `pitroom` is not on PATH: the installed launcher (it picks a Node 18+),
+// Fallback when `pitroom` is not on PATH: the installed launcher (it picks a Node 22.13+),
 // else this Node if it is new enough, else plain `node`.
 const cli = path.join(root, 'dist', 'pitroom.mjs');
 const launcher = path.join(os.homedir(), '.local', 'bin', 'pitroom');
-const nodeOk = Number(process.versions.node.split('.')[0]) >= 18;
+const [major, minor] = process.versions.node.split('.').map(Number);
+const nodeOk = major > 22 || (major === 22 && minor >= 13);
 const fallback = fs.existsSync(launcher) ? `"${launcher}"` : `"${nodeOk ? process.execPath : 'node'}" "${cli}"`;
 const command = fs.existsSync(cli) || fs.existsSync(launcher) ? `\`pitroom\`, or if that is not on PATH: \`${fallback}\`` : '`pitroom`';
 

@@ -148,7 +148,7 @@ test('install links every skill and a working launcher; uninstall removes only t
   }
   const launcher = path.join(home, '.local', 'bin', 'pitroom');
   const v = spawnSync(launcher, ['--version'], { encoding: 'utf8', env: { ...env, PATH: '/usr/bin:/bin' } });
-  assert.equal(v.stdout.trim(), version, 'launcher finds a Node 18+ even when none is on PATH');
+  assert.equal(v.stdout.trim(), version, 'launcher finds a Node 22.13+ even when none is on PATH');
 
   const u = run('uninstall');
   assert.equal(u.status, 0, u.stderr);

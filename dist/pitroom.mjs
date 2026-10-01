@@ -1916,11 +1916,11 @@ function launcherScript(bundle) {
   return `#!/bin/sh
 ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)
 cli=${q(bundle)}
-ok() { [ -n "$1" ] && [ -x "$1" ] && "$1" -e 'process.exit(+process.versions.node.split(".")[0] >= 18 ? 0 : 1)' 2>/dev/null; }
+ok() { [ -n "$1" ] && [ -x "$1" ] && "$1" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)' 2>/dev/null; }
 for n in "\${PITROOM_NODE:-}" ${q(process.execPath)} "$(command -v node 2>/dev/null)" "$HOME"/.nvm/versions/node/*/bin/node /opt/homebrew/bin/node /usr/local/bin/node; do
   if ok "$n"; then exec "$n" "$cli" "$@"; fi
 done
-echo "pitroom: needs Node.js 18 or newer (set PITROOM_NODE to its path)" >&2
+echo "pitroom: needs Node.js 22.13 or newer (set PITROOM_NODE to its path)" >&2
 exit 127
 `;
 }
@@ -1944,7 +1944,7 @@ function placeLauncher(bundle, root, force) {
     fs12.rmSync(dest, { force: true });
   }
   fs12.writeFileSync(dest, launcherScript(bundle), { mode: 493 });
-  return `\u2714 ${dest} \u2192 launcher for ${bundle} (Node 18+)`;
+  return `\u2714 ${dest} \u2192 launcher for ${bundle} (Node 22.13+)`;
 }
 function linksInto(link, dir) {
   const st = fs12.lstatSync(link, { throwIfNoEntry: false });

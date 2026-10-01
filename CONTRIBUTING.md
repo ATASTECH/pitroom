@@ -13,7 +13,7 @@ npm run typecheck
 npm test          # builds dist/ first, then runs every test
 ```
 
-The tests are end-to-end against the built CLI with fake worker CLIs, plus adapter contract tests on recorded real streams. Run them on Node 18 and on a current Node; CI repeats them on Ubuntu and macOS.
+The tests are end-to-end against the built CLI with fake worker CLIs, plus adapter contract tests on recorded real streams. Run them on Node 22.13 and on a current Node; CI repeats them on Ubuntu and macOS.
 
 ## Where things live
 

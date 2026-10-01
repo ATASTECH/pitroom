@@ -38,18 +38,18 @@ const LAUNCHER_MARK = '# pitroom launcher';
  * A tiny sh launcher instead of a symlink: agents' shells often put an old Node
  * first on PATH (nvm lists every version), and `#!/usr/bin/env node` would pick
  * it. The launcher tries PITROOM_NODE, the Node that ran `pitroom install`, the
- * PATH's node, then nvm installs, and uses the first that is Node 18+.
+ * PATH's node, then nvm installs, and uses the first that is Node 22.13+ (the first with a built-in SQLite that needs no flag).
  */
 function launcherScript(bundle: string): string {
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   return `#!/bin/sh
 ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)
 cli=${q(bundle)}
-ok() { [ -n "$1" ] && [ -x "$1" ] && "$1" -e 'process.exit(+process.versions.node.split(".")[0] >= 18 ? 0 : 1)' 2>/dev/null; }
+ok() { [ -n "$1" ] && [ -x "$1" ] && "$1" -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=13)?0:1)' 2>/dev/null; }
 for n in "\${PITROOM_NODE:-}" ${q(process.execPath)} "$(command -v node 2>/dev/null)" "$HOME"/.nvm/versions/node/*/bin/node /opt/homebrew/bin/node /usr/local/bin/node; do
   if ok "$n"; then exec "$n" "$cli" "$@"; fi
 done
-echo "pitroom: needs Node.js 18 or newer (set PITROOM_NODE to its path)" >&2
+echo "pitroom: needs Node.js 22.13 or newer (set PITROOM_NODE to its path)" >&2
 exit 127
 `;
 }
@@ -75,7 +75,7 @@ function placeLauncher(bundle: string, root: string, force: boolean): string {
     fs.rmSync(dest, { force: true });
   }
   fs.writeFileSync(dest, launcherScript(bundle), { mode: 0o755 });
-  return `✔ ${dest} → launcher for ${bundle} (Node 18+)`;
+  return `✔ ${dest} → launcher for ${bundle} (Node 22.13+)`;
 }
 
 /** A symlink whose target lies inside `dir` (works for broken links too). */
