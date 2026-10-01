@@ -20,6 +20,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 <br />
 
 **[Quick start](#quick-start)** ·
+[Dashboard](#dashboard) ·
 [Benchmarks](#benchmarks) ·
 [Workflow](#workflow) ·
 [Skills](#skills) ·
@@ -106,7 +107,8 @@ In isolate mode nothing reaches your tree until you apply it.
 - **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
 - **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
 - **Works with any agent.** Fourteen [Agent Skills](https://agentskills.io): the superpowers development workflow run by workers, plus delegation (`using-pitroom`, `pitroom-research`, `-crew`, `-implement`), a CLI, and a Claude Code / Codex plugin whose session-start hook loads the workflow. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
-- **Small.** About 4,400 lines of TypeScript, one ~135 KB bundled file, zero runtime dependencies.
+- **A live dashboard and a searchable history.** `pitroom dash` opens a local page of every run (the task, what the worker did step by step, its result and diff) with history and statistics, for the agent apps that show neither hooks nor a status line; `pitroom history` searches everything Pitroom ever ran. See [Dashboard](#dashboard).
+- **Small.** About 6,000 lines of TypeScript, a ~190 KB CLI bundle (plus the ~0.7 MB of dashboard files it serves), zero runtime dependencies.
 
 ### How it stays safe
 
@@ -137,6 +139,28 @@ FILES CHANGED: none
 Every run prints a receipt, and `pitroom savings` adds them up (a bigger measurement follows in [Benchmarks](#benchmarks)):
 
 <p align="center"><img src="docs/card.svg" width="520" alt="Pitroom savings card"></p>
+
+---
+
+## Dashboard
+
+`pitroom dash --detach` prints the address of a live page on `127.0.0.1` (read-only, this machine only). It is for the places where hook messages and status lines do not reach, such as the Claude Code and Codex apps: open it in a browser or in the app's own browser pane. The skills tell your agent to start it and give you the address when it runs workers in the background.
+
+The screenshots below show sample data (an imaginary `shop-api` project), not a real one.
+
+**Live.** What is running now, and the latest runs. Running cards show a timer and the worker's last words; finished ones show the result and, for reviews, the findings.
+
+<p align="center"><img src="docs/dash-live.png" width="100%" alt="The Live tab: two running workers with timers and progress bars, then finished runs with approved and needs-fixes badges, step counts, tokens and savings"></p>
+
+**Click a card and it grows into a panel** with the task, what the worker did step by step (files read, searches, commands, edits, with times, failed ones marked), its result, the files and diff it changed, and the details (model, tokens, cost, fallbacks, reference check).
+
+<p align="center"><img src="docs/dash-card.png" width="100%" alt="An expanded run card: the task, a ten-step activity list, the result, five changed files and the details"></p>
+
+**History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
+
+<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and a table of runs"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model"></p>
+
+The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 
 ---
 

@@ -52,3 +52,5 @@ Maintainers: see [docs/releasing.md](docs/releasing.md).
 ## The dashboard
 
 `pitroom dash` serves a React app from `ui/` ([shadcn/ui](https://ui.shadcn.com) on Base UI, with [Shadix UI](https://shadix-ui.vercel.app)'s expandable card and [beUI](https://beui.dev)'s agent activity; animations by [Motion](https://motion.dev)). `npm run build` bundles it into `dist/ui` (esbuild for the script, the Tailwind CLI for the styles); those files are committed like the rest of `dist/`. The React toolchain is a dev dependency only: the CLI has no runtime dependencies. Add a shadcn component with `npx shadcn@latest add <name>` (the config is `components.json`), then check that it imports `cn` from `@/lib/utils`, and run `npm run typecheck`. The server only answers GET and the page loads nothing from outside, so keep it that way: no CDN scripts, fonts or images.
+
+The screenshots in `docs/dash-*.png` come from `node scripts/demo-dash.mjs` (it builds an invented sample history, serves the dashboard on it and photographs it with Chrome; run `npm run build` first).
