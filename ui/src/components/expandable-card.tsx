@@ -266,9 +266,9 @@ const ExpandableCardExpandContainer: React.FC<
                             className={cn("pointer-events-auto", className)}
                         >
                             {children}
+                            {/* inside the card, so it sits in the card's corner whatever the card's size */}
+                            <ExpandableCardCloseButton />
                         </ExpandableCardBody>
-
-                        <ExpandableCardCloseButton />
                     </div>
                 </>
             )}

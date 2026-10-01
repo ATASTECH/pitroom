@@ -48,7 +48,7 @@ export function StatsPage() {
               <Tooltip key={d.day}>
                 <TooltipTrigger render={<div className="group flex h-full max-w-14 flex-1 flex-col justify-end" />}>
                   <div className="flex w-full flex-col justify-end overflow-hidden rounded-t-md transition-opacity group-hover:opacity-80 origin-bottom animate-in slide-in-from-bottom-4 fill-mode-both" style={{ height: `${(d.runs / max) * 100}%`, animationDelay: `${i * 18}ms` }}>
-                    <div className="bg-destructive/70" style={{ height: `${((d.runs - d.ok) / d.runs) * 100}%` }} />
+                    <div className="bg-destructive/70" style={{ height: `${d.runs ? ((d.runs - d.ok) / d.runs) * 100 : 0}%` }} />
                     <div className="flex-1 bg-success/80" />
                   </div>
                 </TooltipTrigger>

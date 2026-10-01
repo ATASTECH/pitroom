@@ -1497,7 +1497,6 @@ text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sa
 .pill{font-size:11px;font-weight:600;letter-spacing:.1em;fill:#a1a1aa}
 .lab{font-size:11px;font-weight:500;letter-spacing:.09em;fill:#a1a1aa}
 .big{font-size:60px;font-weight:700;letter-spacing:-.03em;fill:#3ddc97}
-.of{font-size:14px;fill:#a1a1aa}
 .val{font-size:26px;font-weight:650;letter-spacing:-.02em}
 .foot{font-size:11.5px;fill:#71717a}
 </style>

@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- The expanded run card keeps its header in place and scrolls the rest (a shadcn `ScrollArea`), and its close button sits in the card's corner.
+- The Live filter and the Stats period use the same sliding-pill tabs as the page tabs; the history timestamp tooltip is the themed one and keyboard-focusable; scrollbars are thin and in the theme's colours.
+- A review's card shows a short count of its findings instead of the raw verdict line, and its result starts at the findings.
+- `pitroom savings --card` draws the card in the dashboard's look.
+
 ## 0.6.6
 
 ### Node.js 22.13 or newer

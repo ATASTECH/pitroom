@@ -12,6 +12,7 @@ import {
 import { TextShimmer } from '@/components/motion/text-shimmer';
 import { RunDetailView } from '@/components/run-detail';
 import { StateIcon } from '@/components/state-icon';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { clock, tokens, usd } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -71,11 +72,14 @@ export function RunCard({ run, index }: { run: DashRun; index: number }) {
         <ExpandableCardBody className={cn('rounded-xl border pb-0 shadow-none transition-colors duration-300 hover:border-foreground/25', run.state === 'running' && 'border-info/30')}>
           <Header run={run} />
         </ExpandableCardBody>
-        <ExpandableCardExpandContainer className="max-h-[88vh] w-full overflow-y-auto border pb-0 shadow-2xl">
-          <Header run={run} expanded />
-          <ExpandableCardContent className="px-4 pb-5 pt-0 sm:pl-[3.4rem]">
-            <div className="border-t pt-4"><RunDetailView id={run.id} live={active} /></div>
-          </ExpandableCardContent>
+        <ExpandableCardExpandContainer className="max-h-[88vh] w-full border pb-0 shadow-2xl">
+          <div className="shrink-0"><Header run={run} expanded /></div>
+          {/* the header stays put; everything below it scrolls */}
+          <ScrollArea className="max-h-[calc(88vh-6.5rem)] border-t">
+            <ExpandableCardContent className="px-4 pb-5 pt-4 sm:pl-[3.4rem]">
+              <RunDetailView id={run.id} live={active} />
+            </ExpandableCardContent>
+          </ScrollArea>
         </ExpandableCardExpandContainer>
       </ExpandableCard>
     </div>

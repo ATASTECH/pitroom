@@ -10,6 +10,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+if (!fs.existsSync(process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome')) {
+  console.error('Chrome was not found: set CHROME=/path/to/chrome');
+  process.exit(1);
+}
 const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-demo-'));
 const CHROME = process.env.CHROME ?? '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const VERSION = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
@@ -116,6 +120,15 @@ function addRun(o) {
 const now = Date.now();
 const sleeper = spawn('sleep', ['1200'], { detached: true, stdio: 'ignore' });
 sleeper.unref();
+let chrome;
+let serving = false;
+// Runs on every way out, a failure included: nothing is left running and the sample home is removed.
+process.on('exit', () => {
+  try { chrome?.kill(); } catch { /* gone */ }
+  if (serving) try { execFileSync(process.execPath, [path.join(root, 'dist', 'pitroom.mjs'), 'dash', '--stop'], { env: { ...process.env, PITROOM_HOME: HOME }, stdio: 'ignore' }); } catch { /* not running */ }
+  try { process.kill(sleeper.pid); } catch { /* gone */ }
+  fs.rmSync(HOME, { recursive: true, force: true });
+});
 
 // ~21 days of history for the statistics
 for (let day = 21; day >= 1; day--) {
@@ -155,9 +168,10 @@ const cli = path.join(root, 'dist', 'pitroom.mjs');
 execFileSync(process.execPath, [cli, 'history', 'import'], { env, stdio: 'ignore' });
 execFileSync(process.execPath, [cli, 'savings', '--since', '30d', '--card', path.join(root, 'docs', 'card.svg')], { env, stdio: 'ignore' });
 const url = execFileSync(process.execPath, [cli, 'dash', '--detach', '--port', '0'], { env, encoding: 'utf8' }).trim().split('\n')[0];
+serving = true;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=9455', `--user-data-dir=${fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'))}`, 'about:blank'], { stdio: 'ignore' });
+chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=9455', `--user-data-dir=${fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'))}`, 'about:blank'], { stdio: 'ignore' });
 let tab;
 for (let i = 0; i < 60 && !tab; i++) { try { tab = (await (await fetch('http://127.0.0.1:9455/json')).json()).find((t) => t.type === 'page'); } catch { await sleep(200); } }
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
@@ -187,8 +201,5 @@ await shot('dash-card.png', { height: 1240, click: "[...document.querySelectorAl
 await shot('dash-history.png', { hash: '#history', height: 940 });
 await shot('dash-stats.png', { hash: '#stats', height: 980 });
 
-ws.close(); chrome.kill();
-execFileSync(process.execPath, [cli, 'dash', '--stop'], { env, stdio: 'ignore' });
-try { process.kill(sleeper.pid); } catch { /* gone */ }
-fs.rmSync(HOME, { recursive: true, force: true });
+ws.close();
 process.exit(0);
