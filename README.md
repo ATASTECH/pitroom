@@ -183,6 +183,20 @@ Four free models matched `gpt-6-sol` on these questions. Every model found every
 
 Only workers that ran are in the table. Models that could not answer at all (a provider error, or the shared daily quota of OpenRouter's free tier) are left out, and so are the two `gpt-oss-20b` runs that ended in a provider error; a timeout is kept.
 
+**Does a review find a planted bug?** A bug was changed into real code (an inverted check, a swapped `&&`/`||`, a flipped `return`) in React, Django, Kubernetes and Pitroom itself, committed as a bare "tidy", and `pitroom review` was asked to review the commit. 29 packages (14 with the bug alone, 15 with the bug and three comment-only edits around it). A review counts as a find when a Critical or Important finding names the changed file and either cites a line within 5 or names the changed identifier or its function; "exact line" is the strict version (within 3).
+
+| Worker and model | Bug found | Exact line | Reviews | Mean time | Slowest |
+|---|---|---|---|---|---|
+| OpenCode `space-bunny-free` | 100% | 100% | 29 of 29 | 2 min 19 s | 5 min 46 s |
+| OpenCode `nemotron-3-ultra-free` | 97% | 79% | 29 of 29 | 1 min 45 s | 3 min 29 s |
+| OpenCode `longcat-2.5-preview-free` | 83% | 83% | 29 of 29 | 2 min 53 s | 8 min (1 timed out) |
+| Codex `gpt-6-sol` | 100% | 100% | 9 of 29 | 38 s | 52 s |
+| OpenCode `muse-spark-1.3-contributor-free` | 100% | 57% | 14 of 29 | 48 s | 2 min 0 s |
+| OpenCode `big-pickle` | 100% | 92% | 13 of 29 | 2 min 28 s | 5 min 27 s |
+| OpenCode `mimo-v2.6-flash-free` | 100% | 100% | 10 of 29 | 4 min 6 s | 7 min 40 s |
+
+Almost every model found almost every bug, so this test separates them on speed and precision, not on whether they can review: `muse-spark` described the right bug but often quoted a wrong line number (57% exact), and `gpt-6-sol` and `muse-spark` were the fastest by a wide margin. Only three models finished all 29: the other four are scored on the reviews that ran before a provider limit (the free tier's usage limit, and the Codex plan's, which `gpt-6-sol` reached), and the rest are left out, not counted as misses, so their rows rest on 9 to 14 reviews. Every change is only 2 to 5 lines, which is easy; there is no false-alarm rate (the comment-only "clean" packages turned out to contain comments that were really wrong, so they cannot show one); and React, Django and Kubernetes may be in a model's training data. The harness and every raw review are in [`benchmarks/review-bugs`](benchmarks/review-bugs).
+
 **What this does not show**
 - One run per question and model: there is no variance here. The questions are bounded lookups that `grep` can answer, so they do not show how a model handles design questions or large edits, and four free models and `gpt-6-sol` all scoring 100% says the test is easy at the top, not that they are equal.
 - An open-ended task ("find up to five spelling mistakes in `docs/`") did not finish: it was stopped after 19 minutes and 57 tool calls. Give workers bounded tasks.
