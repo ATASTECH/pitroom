@@ -12,7 +12,7 @@
 - The dashboard serves `/api/history` and `/api/stats`.
 
 ### A new dashboard
-- `pitroom dash` is now a React app built from [shadcn/ui](https://ui.shadcn.com) components on [Base UI](https://base-ui.com) and [Agent Elements](https://agent-elements.21st.dev) tool rows, with tabs: **Live** (running and recent runs, animated cards that expand into the task, the worker's steps, the result, the diff and the details), **History** (full-text search and filters over the SQLite history, a table, a side panel per run) and **Stats** (success rate, time, tokens and savings per worker and model, runs per day). Light and dark themes.
+- `pitroom dash` is now a React app built from [shadcn/ui](https://ui.shadcn.com) components on [Base UI](https://base-ui.com), with [Shadix UI](https://shadix-ui.vercel.app)'s expandable card and [beUI](https://beui.dev)'s agent activity stream, and tabs: **Live** (running and recent runs as cards that grow, with a shared-layout animation, into a panel with the task, the worker's steps, the result, the diff and the details), **History** (full-text search and filters over the SQLite history, a table, a side panel per run) and **Stats** (success rate, time, tokens and savings per worker and model, runs per day). Light and dark themes.
 - It is built once into `dist/ui` (esbuild and the Tailwind CLI, from `ui/`) and served as two static files; the CLI still has no runtime dependencies. The page's Content-Security-Policy allows only its own files and one hashed inline script.
 
 ### Seeing Pitroom in the Claude Code and Codex apps

@@ -1,6 +1,5 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "./components/agent-elements/agent-ui.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -31,18 +30,6 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-info: var(--info);
-  --color-an-background: var(--an-background);
-  --color-an-foreground-muted: var(--an-foreground-muted);
-  --radius-an-tool-border-radius: var(--an-tool-border-radius);
-}
-
-/* Agent Elements follow the shadcn tokens, so the two look like one system. */
-:root, .dark {
-  --an-background: var(--card);
-  --an-foreground: var(--foreground);
-  --an-foreground-muted: var(--muted-foreground);
-  --an-border-color: var(--border);
-  --an-tool-border-radius: 10px;
 }
 
 @keyframes indeterminate {

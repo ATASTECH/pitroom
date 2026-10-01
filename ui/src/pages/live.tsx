@@ -93,7 +93,7 @@ export function LivePage({ focus }: { focus?: string }) {
             {!data.runs.length && <code className="rounded-lg border bg-card px-3 py-1.5 text-sm text-foreground">pitroom run "your task"</code>}
           </div>
         )}
-        {shown.map((r, i) => <RunCard key={r.id} run={r} index={i} defaultOpen={focus === r.id} />)}
+        {shown.map((r, i) => <RunCard key={r.id} run={r} index={i} />)}
         {data && data.runs.length >= limit && <div className="flex justify-center pt-1"><Button variant="outline" onClick={() => setLimit((l) => l + 40)}>Show older runs</Button></div>}
       </div>
     </div>

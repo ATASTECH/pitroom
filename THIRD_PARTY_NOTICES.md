@@ -23,10 +23,11 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | [React](https://github.com/facebook/react) and react-dom | MIT | Meta Platforms, Inc. and affiliates |
 | [Base UI](https://github.com/mui/base-ui) | MIT | Material-UI SAS (2019) |
 | [shadcn/ui](https://github.com/shadcn-ui/ui) components (`ui/src/components/ui`) | MIT | shadcn |
-| [Agent Elements](https://github.com/21st-dev/agent-elements) (`ui/src/components/agent-elements`) | MIT | 21st.dev (2026) |
+| [Shadix UI](https://github.com/apix-js/shadix-ui) expandable card (`ui/src/components/expandable-card.tsx`) | MIT | gihanrangana (2025) |
+| [beUI](https://github.com/starc007/ui-components) agent activity (`ui/src/components/agents`, `motion`, `lib`) | MIT | Saurabh Chauhan (2026) |
+| [Motion](https://github.com/motiondivision/motion) (with framer-motion) | MIT | Motion B.V. (2024), Framer B.V. (2018) |
 | [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Tailwind Labs, Inc. |
 | [tw-animate-css](https://github.com/Wombosvideo/tw-animate-css) | MIT | Wombosvideo (2025) |
-| [Tabler Icons](https://github.com/tabler/tabler-icons) | MIT | Paweł Kuna (2020-2026) |
 | [clsx](https://github.com/lukeed/clsx) | MIT | Luke Edwards |
 | [tailwind-merge](https://github.com/dcastil/tailwind-merge) | MIT | Dany Castillo (2021) |
 | [Lucide](https://github.com/lucide-icons/lucide) | ISC | Lucide Icons and Contributors (2026) |

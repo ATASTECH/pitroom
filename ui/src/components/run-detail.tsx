@@ -2,11 +2,12 @@ import { Check, Copy } from 'lucide-react';
 import { useState } from 'react';
 import { type RunDetail, api } from '@/api';
 import { Pill } from '@/components/badges';
-import { WorkerActivity } from '@/components/worker-activity';
+import { AgentActivity } from '@/components/agents/agent-activity';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePoll } from '@/hooks/use-poll';
 import { tokens, usd } from '@/lib/format';
+import { traceItems } from '@/lib/steps';
 import { cn } from '@/lib/utils';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
@@ -58,7 +59,7 @@ function Body({ d }: { d: RunDetail }) {
     <div className="space-y-5">
       <Section title="Task"><Block>{d.task}</Block></Section>
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
-        {d.steps.length ? <WorkerActivity steps={d.steps} running={running} /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
+        {d.steps.length ? <AgentActivity items={traceItems(d.steps)} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={260} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
       </Section>
       {d.answer && <Section title="Result"><Block>{d.answer}</Block></Section>}
       {d.changes.length > 0 && (
