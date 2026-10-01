@@ -219,13 +219,16 @@ const HEADERS = {
 /** The bundled dashboard files (dist/ui), next to the CLI bundle. */
 const ASSETS: Record<string, string> = { '/assets/app.js': 'text/javascript; charset=utf-8', '/assets/app.css': 'text/css; charset=utf-8' };
 const assetsDir = () => fileURLToPath(new URL('./ui/', import.meta.url));
-const assetCache = new Map<string, Buffer>();
+/** Re-read when the file changed: a dashboard left running must not keep serving the files of an older build. */
+const assetCache = new Map<string, { mtimeMs: number; data: Buffer }>();
 function readAsset(route: string): Buffer | undefined {
-  const hit = assetCache.get(route);
-  if (hit) return hit;
   try {
-    const data = fs.readFileSync(path.join(assetsDir(), path.basename(route)));
-    assetCache.set(route, data);
+    const file = path.join(assetsDir(), path.basename(route));
+    const { mtimeMs } = fs.statSync(file);
+    const hit = assetCache.get(route);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.data;
+    const data = fs.readFileSync(file);
+    assetCache.set(route, { mtimeMs, data });
     return data;
   } catch {
     return undefined;

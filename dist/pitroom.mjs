@@ -2959,11 +2959,13 @@ var ASSETS = { "/assets/app.js": "text/javascript; charset=utf-8", "/assets/app.
 var assetsDir = () => fileURLToPath2(new URL("./ui/", import.meta.url));
 var assetCache = /* @__PURE__ */ new Map();
 function readAsset(route) {
-  const hit = assetCache.get(route);
-  if (hit) return hit;
   try {
-    const data = fs18.readFileSync(path15.join(assetsDir(), path15.basename(route)));
-    assetCache.set(route, data);
+    const file = path15.join(assetsDir(), path15.basename(route));
+    const { mtimeMs } = fs18.statSync(file);
+    const hit = assetCache.get(route);
+    if (hit && hit.mtimeMs === mtimeMs) return hit.data;
+    const data = fs18.readFileSync(file);
+    assetCache.set(route, { mtimeMs, data });
     return data;
   } catch {
     return void 0;
