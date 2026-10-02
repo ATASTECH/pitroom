@@ -118,9 +118,10 @@ test('plugin manifests are valid and agree on the version', () => {
   assert.ok(fs.existsSync(path.join(root, codex.skills)));
 });
 
-test('the Codex manifest meets the public directory limits (no hooks, short listing text)', () => {
+// The manifest declares hooks (see the test above), which OpenAI's directory rejects: Pitroom is not submitted there
+// (docs/releasing.md). The listing text still keeps to the directory's limits, in case that ever changes.
+test('the Codex manifest keeps its listing text within the public directory limits', () => {
   const codex = json('.codex-plugin/plugin.json');
-  assert.equal('hooks' in codex, false, 'the directory rejects packages with lifecycle hooks');
   const ui = codex.interface;
   assert.ok(ui.displayName.length <= 30 && ui.shortDescription.length <= 30, 'display name and subtitle: 30 characters');
   assert.ok(ui.longDescription.length <= 4000 && ui.developerName.length <= 80);
