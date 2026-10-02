@@ -1473,6 +1473,7 @@ function planInit(opts = {}) {
     opencode2 = { defaultModel: defaultModel3, models: models.length, free: free.slice(0, 6) };
     if (opts.model) {
       if (models.length && !models.includes(opts.model)) throw new UserError(`"${opts.model}" is not in \`opencode models\``);
+      if (!models.length) notes.push(`could not check "${opts.model}": \`opencode models\` listed nothing`);
       config.models = { opencode: opts.model };
     } else if (!defaultModel3) {
       blocked = `OpenCode has no default model: choose one with --model <id>${free.length ? ` (free models you have: ${free.slice(0, 4).join(", ")})` : ""}`;
@@ -1491,10 +1492,12 @@ function planInit(opts = {}) {
   const tiers = Object.fromEntries(TIER_ORDER.filter(([, id]) => workers.find((w) => w.id === id)?.found));
   if (Object.keys(tiers).length > 1) config.tiers = tiers;
   if (!workers.some((w) => w.found)) blocked = "no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI or Claude Code first";
+  else if (!blocked && !Object.keys(config).length) notes.push("nothing to propose: the default model and the single worker need no config");
   return { path: file, exists: fs8.existsSync(file), workers, opencode: opencode2, config, blocked, notes };
 }
 function writeInit(plan, force) {
   if (plan.blocked) throw new UserError(plan.blocked);
+  if (!Object.keys(plan.config).length) throw new UserError("nothing to write: the proposal is empty");
   if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path7.basename(plan.path)}.bak)`);
   fs8.mkdirSync(path7.dirname(plan.path), { recursive: true });
   if (plan.exists) fs8.copyFileSync(plan.path, `${plan.path}.bak`);
@@ -4372,7 +4375,7 @@ function cmdHistory(p) {
     if (has(p, "json")) return console.log(JSON.stringify(s, null, 2)), 0;
     const t = s.totals;
     console.log(`${t.runs} runs \xB7 ${t.ok} ok \xB7 ${t.failed} not ok \xB7 ${secs(t.seconds)} of worker time \xB7 ${(t.tokens / 1e6).toFixed(1)}M tokens \xB7 ~${usd(t.saved)} saved`);
-    const rows2 = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ""}`, String(w.runs), `${Math.round(100 * w.ok / w.runs)}%`, secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1e3)}k` : "-", `~${usd(w.saved)}`]);
+    const rows2 = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ""}`, String(w.runs), w.runs ? `${Math.round(100 * w.ok / w.runs)}%` : "-", secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1e3)}k` : "-", `~${usd(w.saved)}`]);
     const head2 = ["WORKER", "RUNS", "OK", "AVG TIME", "AVG TOKENS", "SAVED"];
     const widths2 = head2.map((h, i) => Math.max(h.length, ...rows2.map((r) => r[i].length)));
     const fmt2 = (r) => r.map((c, i) => i === 0 ? c.padEnd(widths2[i]) : c.padStart(widths2[i])).join("  ");

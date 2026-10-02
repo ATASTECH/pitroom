@@ -58,6 +58,7 @@ test('stats: saved is the ledger\'s figure, the same one `pitroom savings` and t
   assert.ok(stats.totals.saved >= 2.5);
   const worker = stats.byWorker.find((w) => w.model === 'mock/good-model');
   assert.ok(Math.abs(worker.saved - sum) < 1e-9, 'the per-worker figure comes from the same ledger');
+  assert.doesNotMatch(s.run(['history', 'stats']).stdout, /NaN/, 'a worker the history lacks a run for prints a dash, not NaN');
   const fromStats = /~\$(\d+(?:\.\d+)?) sav/.exec(s.run(['history', 'stats']).stdout)[1];
   const fromSavings = /est\. saved\s+\$(\d+(?:\.\d+)?)/.exec(s.run(['savings', '--since', '7d']).stdout)[1];
   assert.equal(fromStats, fromSavings, 'the two commands print the same figure');

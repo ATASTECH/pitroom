@@ -51,6 +51,7 @@ export function planInit(opts: { model?: string; fallback?: string[] } = {}): In
 
     if (opts.model) {
       if (models.length && !models.includes(opts.model)) throw new UserError(`"${opts.model}" is not in \`opencode models\``);
+      if (!models.length) notes.push(`could not check "${opts.model}": \`opencode models\` listed nothing`);
       config.models = { opencode: opts.model };
     } else if (!defaultModel) {
       blocked = `OpenCode has no default model: choose one with --model <id>${free.length ? ` (free models you have: ${free.slice(0, 4).join(', ')})` : ''}`;
@@ -73,6 +74,7 @@ export function planInit(opts: { model?: string; fallback?: string[] } = {}): In
   const tiers = Object.fromEntries(TIER_ORDER.filter(([, id]) => workers.find((w) => w.id === id)?.found));
   if (Object.keys(tiers).length > 1) config.tiers = tiers;
   if (!workers.some((w) => w.found)) blocked = 'no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI or Claude Code first';
+  else if (!blocked && !Object.keys(config).length) notes.push('nothing to propose: the default model and the single worker need no config');
 
   return { path: file, exists: fs.existsSync(file), workers, opencode, config, blocked, notes };
 }
@@ -80,6 +82,7 @@ export function planInit(opts: { model?: string; fallback?: string[] } = {}): In
 /** Writes the proposal. An existing file is only replaced with `force`, and kept next to it as `.bak`. */
 export function writeInit(plan: InitPlan, force: boolean): string {
   if (plan.blocked) throw new UserError(plan.blocked);
+  if (!Object.keys(plan.config).length) throw new UserError('nothing to write: the proposal is empty');
   if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path.basename(plan.path)}.bak)`);
   fs.mkdirSync(path.dirname(plan.path), { recursive: true });
   if (plan.exists) fs.copyFileSync(plan.path, `${plan.path}.bak`);

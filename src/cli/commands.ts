@@ -227,7 +227,7 @@ export function cmdHistory(p: Parsed): number {
     if (has(p, 'json')) return console.log(JSON.stringify(s, null, 2)), 0;
     const t = s.totals;
     console.log(`${t.runs} runs · ${t.ok} ok · ${t.failed} not ok · ${secs(t.seconds)} of worker time · ${(t.tokens / 1e6).toFixed(1)}M tokens · ~${usd(t.saved)} saved`);
-    const rows = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ''}`, String(w.runs), `${Math.round((100 * w.ok) / w.runs)}%`, secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1000)}k` : '-', `~${usd(w.saved)}`]);
+    const rows = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ''}`, String(w.runs), (w.runs ? `${Math.round((100 * w.ok) / w.runs)}%` : '-'), secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1000)}k` : '-', `~${usd(w.saved)}`]);
     const head = ['WORKER', 'RUNS', 'OK', 'AVG TIME', 'AVG TOKENS', 'SAVED'];
     const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
     const fmt = (r: string[]) => r.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join('  ');

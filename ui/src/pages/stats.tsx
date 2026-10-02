@@ -66,12 +66,13 @@ export function StatsPage() {
             <TableHeader><TableRow className="hover:bg-transparent"><TableHead>Worker</TableHead><TableHead className="text-right">Runs</TableHead><TableHead className="w-44">Success</TableHead><TableHead className="hidden text-right sm:table-cell">Avg time</TableHead><TableHead className="hidden text-right md:table-cell">Avg tokens</TableHead><TableHead className="text-right">Saved</TableHead></TableRow></TableHeader>
             <TableBody>
               {data.byWorker.map((w) => {
-                const pct = Math.round((100 * w.ok) / w.runs);
+                // a worker the ledger names but the history files under another model has no runs of its own here
+                const pct = w.runs ? Math.round((100 * w.ok) / w.runs) : undefined;
                 return (
                   <TableRow key={`${w.backend}:${w.model}`}>
                     <TableCell><WorkerBadge backend={w.backend} model={w.model} /></TableCell>
                     <TableCell className="text-right tabular-nums">{w.runs}</TableCell>
-                    <TableCell><div className="flex items-center gap-2"><Progress value={pct} className="flex-1" /><span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span></div></TableCell>
+                    <TableCell>{pct === undefined ? <span className="text-muted-foreground">-</span> : <div className="flex items-center gap-2"><Progress value={pct} className="flex-1" /><span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span></div>}</TableCell>
                     <TableCell className="hidden text-right tabular-nums sm:table-cell">{w.avgSeconds != null ? clock(w.avgSeconds) : '-'}</TableCell>
                     <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">{w.avgTokens ? tokens(w.avgTokens) : '-'}</TableCell>
                     <TableCell className="text-right tabular-nums text-success">{w.saved ? usd(w.saved) : '-'}</TableCell>
