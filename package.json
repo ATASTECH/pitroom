@@ -13,10 +13,11 @@
     "url": "https://github.com/ATASTECH/pitroom/issues"
   },
   "bin": {
-    "pitroom": "dist/pitroom.mjs"
+    "pitroom": "bin/pitroom.cjs"
   },
   "files": [
     "dist",
+    "bin",
     "skills",
     "hooks",
     ".claude-plugin",

@@ -4,8 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { execFileSync } from 'node:child_process';
-import { sandbox, scratchDir } from './helpers.mjs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { root, sandbox, scratchDir } from './helpers.mjs';
 
 test('read mode returns the answer, a receipt, and touches nothing', () => {
   const s = sandbox();
@@ -283,6 +283,24 @@ test('init proposes a starter config from your own models and writes it only wit
   // with no default model OpenCode has, the user has to choose
   const blocked = JSON.parse(s.run(['init', '--json'], { ...env, MOCK_DEFAULT_MODEL: '' }).stdout);
   assert.match(blocked.blocked ?? '', /no default model/);
+});
+
+test('the pitroom command finds a new enough Node when the shell runs an old one', () => {
+  const launcher = path.join(root, 'bin', 'pitroom.cjs');
+  const run = (args, env) => spawnSync(process.execPath, [launcher, ...args], { encoding: 'utf8', env: { ...process.env, ...env } });
+  const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  // on a good Node it just runs the CLI: same output, same exit code
+  assert.equal(run(['--version']).stdout.trim(), version);
+  assert.equal(run(['show', 'no-such-run']).status, 2);
+  // an old Node (pretended) re-runs the CLI with the one it finds...
+  const found = run(['--version'], { PITROOM_TEST_NODE_VERSION: '14.21.3', PITROOM_NODE_SEARCH: process.execPath });
+  assert.equal(found.status, 0, found.stderr);
+  assert.equal(found.stdout.trim(), version);
+  // ...and without one it says what to do instead of crashing with a syntax error
+  const none = run(['--version'], { PITROOM_TEST_NODE_VERSION: '14.21.3', PITROOM_NODE_SEARCH: '' });
+  assert.equal(none.status, 1);
+  assert.match(none.stderr, /needs Node\.js 22\.13 or newer, but this shell runs Node\.js v14\.21\.3/);
+  assert.match(none.stderr, /nvm install 24/);
 });
 
 test('fails over to fallback models on model errors and records the attempt', () => {
