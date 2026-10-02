@@ -11,7 +11,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 <br />
 
 [![Release](https://img.shields.io/github/v/release/ATASTECH/pitroom?label=release)](https://github.com/ATASTECH/pitroom/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/ATASTECH/pitroom/total?label=downloads)](https://github.com/ATASTECH/pitroom/releases)
+[![Downloads](https://img.shields.io/npm/dm/pitroom?label=npm%20downloads)](https://www.npmjs.com/package/pitroom)
 [![npm](https://img.shields.io/npm/v/pitroom?label=npm)](https://www.npmjs.com/package/pitroom)
 [![Stars](https://img.shields.io/github/stars/ATASTECH/pitroom?style=flat&label=stars)](https://github.com/ATASTECH/pitroom/stargazers)
 [![CI](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml/badge.svg)](https://github.com/ATASTECH/pitroom/actions/workflows/ci.yml)
