@@ -127,6 +127,7 @@ test('timeout kills the worker (exit 4)', () => {
   const r = s.run(['run', '-t', '1', 'slow'], { MOCK_ACTIONS: 'sleep:20;answer:late' });
   assert.equal(r.status, 4);
   assert.match(r.stdout, /timeout/);
+  assert.match(r.stdout, /hint: the worker hit its time limit \(1s\)\. What it did is kept\..*-t 1h/, 'a timeout says what to do');
 });
 
 test('refuses recursive delegation and untracked --write', () => {

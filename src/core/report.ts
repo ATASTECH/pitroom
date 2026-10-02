@@ -49,6 +49,12 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
   for (const a of meta.attempts ?? []) out.push(`fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
+  if (meta.state === 'timeout') {
+    const limit = meta.timeoutSec >= 60 ? `${Math.round(meta.timeoutSec / 60)}m` : `${meta.timeoutSec}s`;
+    out.push(
+      `hint: the worker hit its time limit (${limit}). What it did is kept. Most runs finish in minutes, so first check it was not going in circles; for a genuinely long job raise the limit with -t 1h (or PITROOM_TIMEOUT, or "timeout" in the config)${meta.sessionId ? `, or carry on: pitroom run --continue ${meta.id} "…"` : ''}`,
+    );
+  }
 
   if (finalText) {
     const lines = finalText.split('\n');
