@@ -19,6 +19,7 @@ import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from 
 import { buildPrompt } from './prompt.js';
 import { estimateTokens, record, savedUsd } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
+import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
 import { type RunMeta, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
 import { describeTarget, sameTarget } from './target.js';
@@ -117,6 +118,13 @@ export function prepareRun(o: RunOptions): RunMeta {
   }
   const files = o.files.map((f) => path.resolve(f));
   for (const f of files) if (!fs.existsSync(f)) throw new UserError(`file not found: ${f}`);
+
+  // Said once per run, on the report and when it starts in the background.
+  if (!parent && !process.env.PITROOM_NO_SECRET_WARNING) {
+    const secrets = mode === 'isolate' && root ? findSecretFilesInTree(root, dir) : findSecretFiles(dir);
+    const note = secretWarning(secrets, mode);
+    if (note) warnings.push(note);
+  }
 
   const meta: RunMeta = {
     id: newRunId(),

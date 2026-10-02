@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.10
+
+### Verified answers
+- A reference written as a bare file name or a partial path (`ipc.ts:218`, `src/main/ipc.ts:218`) is now looked up in the project, so it no longer counts as "file not found" just because the worker left out the directory. If several files match, one that holds up is enough.
+- A call written like a reference (`Schema.parse:432`, `orchestrator.start:638`) is not a file reference and is no longer counted. On a real run this turned "7/18 verified" into "13/13"; the references that really did not match are still reported.
+
+### Safety
+- A run warns when the directory its worker runs in holds `.env` files, private keys (`*.pem`, `id_rsa`…) or `credentials.json`: the worker is told not to read them, but nothing stops it. The warning is on the report and when a run starts with `--bg`. For `-i` it names only the files the isolated copy would contain (a git-ignored `.env` is not copied). `PITROOM_NO_SECRET_WARNING=1` silences it.
+
+### Smaller
+- OpenCode with no pinned model no longer warns about `--effort` on every run: there is nothing to attach the level to, so it is left out quietly.
+- A detached dashboard stops after an hour without a request (it was four hours).
+- Every run card shows its worker's logo, and its animated mascot while it runs; the skills tell the agent to open the dashboard in the app's own browser pane (not with `--open`, which launches the system browser).
+
 ## 0.6.9
 
 ### Dashboard

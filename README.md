@@ -82,7 +82,7 @@ One group can mix them, and a fallback chain can cross them ([how adapters work]
 
 ### Verified answers
 
-Every `path:line` a worker cites is checked on disk.
+Every `path:line` a worker cites is checked on disk. A cite without its directory (`ipc.ts:218`, `src/main/ipc.ts:218`) is found in the project, and a call such as `Schema.parse:432` is not mistaken for a file.
 
 Your agent trusts what checks out and skips re-reading it.
 
@@ -476,7 +476,7 @@ Two settings make every delegation visible, whether or not the agent mentions it
 
 The Claude Code and Codex **apps** show neither hook messages nor a status line. For them there are two things that need no setup:
 
-- `pitroom dash --detach` prints the address of a live dashboard with three tabs: **Live** (every running and recent run as an animated card; click one for the task, what the worker did step by step, its result, the diff and the details), **History** (search and filter everything Pitroom ever ran; every run opens as the same card) and **Stats** (success rate, time, tokens and savings per worker and model). It is read-only, listens on `127.0.0.1` only and stops itself after four idle hours (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
+- `pitroom dash --detach` prints the address of a live dashboard with three tabs: **Live** (every running and recent run as an animated card; click one for the task, what the worker did step by step, its result, the diff and the details), **History** (search and filter everything Pitroom ever ran; every run opens as the same card) and **Stats** (success rate, time, tokens and savings per worker and model). It is read-only, listens on `127.0.0.1` only and stops itself after an hour without a request (`pitroom dash --stop` ends it sooner). Open it in a browser or in the app's own browser pane. The skills tell the agent to start it and give you the address when it runs workers in the background.
 - `pitroom watch -g NAME --brief` prints one card line when a worker starts and one when it ends. In Claude Code, the agent runs it through the Monitor tool and the lines appear in the app; in Codex the command's output block fills as it goes.
 
 ---
@@ -546,6 +546,7 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 | `PITROOM_PRIMARY` | `sonnet` | Pricing preset for the savings estimate: `sonnet`, `opus`, `haiku`, `gpt-5` |
 | `PITROOM_PRICE` | | Custom primary price, USD per 1M tokens: `"in,out[,cachedIn]"` |
 | `PITROOM_HOME` | `~/.local/state/pitroom` | Where run records and the ledger live |
+| `PITROOM_NO_SECRET_WARNING` | | Set to `1` to stop the warning about `.env` files and private keys in the worker's directory |
 | `PITROOM_<WORKER>_BIN` | on PATH | Path to a worker CLI, e.g. `PITROOM_OPENCODE_BIN` |
 
 </details>
@@ -580,6 +581,8 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 **How is "saved" computed?** It assumes your primary agent would have processed about the same tokens the worker did, priced at your primary's list prices (`PITROOM_PRIMARY` / `PITROOM_PRICE`), minus the worker's cost and the cost of reading the report. It is an estimate and is labelled as one.
 
 **Can the worker break my repo?** It can't touch git history, refs or your index (permission profile + git guard), can't run bulk deletes, and write-mode edits are revertible with one command. The guard is not an OS sandbox: git called by absolute path from inside a script, or non-git tools, are outside its reach, which is why `--isolate` exists: nothing reaches your tree until you apply it.
+
+**Can the worker read my `.env`?** In the directory it runs in, yes: its prompt says not to, and nothing stops it, and a free model may be hosted by a third party. Pitroom warns when it sees `.env` files, private keys or `credentials.json` there (`PITROOM_NO_SECRET_WARNING=1` silences it). An isolated copy (`-i`) leaves out git-ignored files, so a git-ignored `.env` is not in it; a clean checkout is the safest place for a first try.
 
 **What if the worker fails?** Pitroom exits non-zero with the real cause (for example a default model that no longer exists) and your agent simply continues on its own. `pitroom doctor` diagnoses setup problems.
 

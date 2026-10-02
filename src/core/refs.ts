@@ -18,6 +18,18 @@ export interface RefCheck {
   invalid: { ref: string; reason: string }[];
 }
 
+/**
+ * Extensions a bare `name.ext:12` can have as a file. Without a directory part, anything else
+ * (`Schema.parse:432`, `orchestrator.start:638`) is a method call that only looks like a file name.
+ */
+const FILE_EXTENSIONS = new Set(
+  ('ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat ' +
+    'yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj ' +
+    'vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc').split(' '),
+);
+const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', '.nuxt', 'target', 'vendor', '.venv', 'venv', '__pycache__', 'coverage', '.turbo', '.cache']);
+const MAX_INDEXED = 60_000;
+
 const EXTENSIONLESS = 'Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE';
 // Not preceded by a word char, "/" or ":" (rules out URLs like https://host:8080).
 const REF = new RegExp(
@@ -92,23 +104,41 @@ export function verifyRefs(refs: Ref[], dirs: string[]): RefCheck {
     return lineCache.get(file)!;
   };
 
+  // A worker often writes `ipc.ts:218` or `src/main/ipc.ts:218` for `apps/desktop/src/main/ipc.ts`: when the
+  // path does not resolve as written, any file of the project that ends with it is a candidate.
+  let index: Map<string, string[]> | undefined;
+  const byName = () => (index ??= indexFiles(roots));
+  const candidates = (ref: Ref): string[] => {
+    const direct = resolve(ref.file, roots);
+    if (direct) return [direct];
+    if (path.isAbsolute(ref.file)) return [];
+    const wanted = ref.file.replace(/^(\.{1,2}\/)+/, '');
+    return (byName().get(path.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path.basename(f) === wanted).slice(0, 20);
+  };
+  // Why a candidate does not hold up, or undefined when it does.
+  const check = (file: string, ref: Ref): string | undefined => {
+    const lines = load(file);
+    if (!lines) return undefined; // too large to check lines; existence is enough
+    if (ref.end > lines.length) return `file has ${lines.length} lines`;
+    if (ref.symbol && !mentions(lines, ref) && !enclosedBy(lines, ref)) return `\`${ref.symbol}\` not near line ${ref.start}`;
+    return undefined;
+  };
+
+  let total = 0;
   for (const ref of refs) {
-    const file = resolve(ref.file, roots);
-    if (!file) {
+    const files = candidates(ref);
+    if (!files.length) {
+      // `Schema.parse:432` is a method, not a file: not a reference at all.
+      if (!ref.file.includes('/') && !isFileName(ref.file)) continue;
+      total++;
       invalid.push({ ref: ref.text, reason: path.isAbsolute(ref.file) && !inside(ref.file, roots) ? 'outside the project' : 'file not found' });
       continue;
     }
-    const lines = load(file);
-    if (!lines) continue; // too large to check lines; existence is enough
-    if (ref.end > lines.length) {
-      invalid.push({ ref: ref.text, reason: `file has ${lines.length} lines` });
-      continue;
-    }
-    if (ref.symbol && !mentions(lines, ref) && !enclosedBy(lines, ref)) {
-      invalid.push({ ref: ref.text, reason: `\`${ref.symbol}\` not near line ${ref.start}` });
-    }
+    total++;
+    const reasons = files.map((f) => check(f, ref));
+    if (!reasons.some((r) => r === undefined)) invalid.push({ ref: ref.text, reason: files.length > 1 ? `${reasons[0]} (${files.length} files match)` : reasons[0]! });
   }
-  return { total: refs.length, valid: refs.length - invalid.length, invalid };
+  return { total, valid: total - invalid.length, invalid };
 }
 
 /** The symbol appears within a few lines of the referenced range. */
@@ -124,6 +154,38 @@ function enclosedBy(lines: string[], ref: Ref): boolean {
     `\\b(function|def|fn|func|class|interface|struct|impl|type|const|let|var)\\s+\\*?${name}\\b|^\\s*(export\\s+)?(default\\s+)?(async\\s+)?(static\\s+)?${name}\\s*[(:=]`,
   );
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
+}
+
+const isFileName = (name: string) => {
+  const base = path.basename(name);
+  return !base.includes('.') || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split('.').pop()!.toLowerCase());
+};
+
+/** Basename → absolute paths of the project's files (heavy and generated directories skipped, capped). */
+function indexFiles(roots: string[]): Map<string, string[]> {
+  const index = new Map<string, string[]>();
+  let count = 0;
+  const walk = (dir: string) => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (count >= MAX_INDEXED) return;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(path.join(dir, e.name));
+      } else if (e.isFile()) {
+        count++;
+        const list = index.get(e.name);
+        if (list) list.push(path.join(dir, e.name));
+        else index.set(e.name, [path.join(dir, e.name)]);
+      }
+    }
+  };
+  for (const r of roots) walk(r);
+  return index;
 }
 
 function resolve(ref: string, roots: string[]): string | undefined {

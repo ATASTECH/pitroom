@@ -1040,6 +1040,11 @@ var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default m
 // src/core/refs.ts
 import fs5 from "node:fs";
 import path5 from "node:path";
+var FILE_EXTENSIONS = new Set(
+  "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
+);
+var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
+var MAX_INDEXED = 6e4;
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
   String.raw`(?<![\w/:.-])(\.{0,2}/?(?:[\w@.+-]+/)*(?:[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}|${EXTENSIONLESS})):(\d+)(?:[-–](\d+))?`,
@@ -1097,23 +1102,36 @@ function verifyRefs(refs, dirs) {
     }
     return lineCache.get(file);
   };
+  let index;
+  const byName = () => index ??= indexFiles(roots);
+  const candidates = (ref) => {
+    const direct = resolve(ref.file, roots);
+    if (direct) return [direct];
+    if (path5.isAbsolute(ref.file)) return [];
+    const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
+    return (byName().get(path5.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path5.basename(f) === wanted).slice(0, 20);
+  };
+  const check = (file, ref) => {
+    const lines = load(file);
+    if (!lines) return void 0;
+    if (ref.end > lines.length) return `file has ${lines.length} lines`;
+    if (ref.symbol && !mentions(lines, ref) && !enclosedBy(lines, ref)) return `\`${ref.symbol}\` not near line ${ref.start}`;
+    return void 0;
+  };
+  let total = 0;
   for (const ref of refs) {
-    const file = resolve(ref.file, roots);
-    if (!file) {
+    const files = candidates(ref);
+    if (!files.length) {
+      if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
+      total++;
       invalid.push({ ref: ref.text, reason: path5.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
-    const lines = load(file);
-    if (!lines) continue;
-    if (ref.end > lines.length) {
-      invalid.push({ ref: ref.text, reason: `file has ${lines.length} lines` });
-      continue;
-    }
-    if (ref.symbol && !mentions(lines, ref) && !enclosedBy(lines, ref)) {
-      invalid.push({ ref: ref.text, reason: `\`${ref.symbol}\` not near line ${ref.start}` });
-    }
+    total++;
+    const reasons = files.map((f) => check(f, ref));
+    if (!reasons.some((r) => r === void 0)) invalid.push({ ref: ref.text, reason: files.length > 1 ? `${reasons[0]} (${files.length} files match)` : reasons[0] });
   }
-  return { total: refs.length, valid: refs.length - invalid.length, invalid };
+  return { total, valid: total - invalid.length, invalid };
 }
 function mentions(lines, ref) {
   const near = lines.slice(Math.max(0, ref.start - 1 - WINDOW), ref.end + WINDOW).join("\n");
@@ -1125,6 +1143,35 @@ function enclosedBy(lines, ref) {
     `\\b(function|def|fn|func|class|interface|struct|impl|type|const|let|var)\\s+\\*?${name}\\b|^\\s*(export\\s+)?(default\\s+)?(async\\s+)?(static\\s+)?${name}\\s*[(:=]`
   );
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
+}
+var isFileName = (name) => {
+  const base = path5.basename(name);
+  return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
+};
+function indexFiles(roots) {
+  const index = /* @__PURE__ */ new Map();
+  let count = 0;
+  const walk = (dir) => {
+    let entries;
+    try {
+      entries = fs5.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      if (count >= MAX_INDEXED) return;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(path5.join(dir, e.name));
+      } else if (e.isFile()) {
+        count++;
+        const list = index.get(e.name);
+        if (list) list.push(path5.join(dir, e.name));
+        else index.set(e.name, [path5.join(dir, e.name)]);
+      }
+    }
+  };
+  for (const r of roots) walk(r);
+  return index;
 }
 function resolve(ref, roots) {
   const candidates = path5.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path5.join(r, ref));

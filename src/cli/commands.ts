@@ -29,7 +29,8 @@ async function launch(p: Parsed, meta: RunMeta): Promise<number> {
       has(p, 'json')
         ? JSON.stringify(meta, null, 2)
         : `pitroom started ${meta.mode} run ${meta.id} in background${meta.group ? ` (group ${meta.group})` : ''}\n` +
-            `   wait:   pitroom wait ${meta.id}\n   status: pitroom status ${meta.id}`,
+            `   wait:   pitroom wait ${meta.id}\n   status: pitroom status ${meta.id}` +
+            meta.warnings.map((w) => `\nwarning: ${w}`).join(''),
     );
     return 0;
   }

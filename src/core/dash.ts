@@ -384,7 +384,7 @@ export async function dashCommand(o: DashOptions): Promise<number> {
     return 0;
   }
   if (o.detach) {
-    const child = spawn(process.execPath, [process.argv[1]!, 'dash', '--serve', ...(o.port !== undefined ? ['--port', String(o.port)] : []), '--idle', '4h'], {
+    const child = spawn(process.execPath, [process.argv[1]!, 'dash', '--serve', ...(o.port !== undefined ? ['--port', String(o.port)] : []), '--idle', '1h'], {
       detached: true,
       stdio: 'ignore',
       env: process.env,

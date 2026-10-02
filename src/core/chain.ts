@@ -42,9 +42,9 @@ export function resolveChain(flags: { worker?: string; model?: string; tier?: st
   if (flags.effort) {
     // "model#level": Codex and Claude Code read the level themselves, OpenCode takes it as a variant.
     const base = (worker.model ?? '').split('#')[0]!;
-    if (worker.backend === 'opencode' && !base) {
-      warnings.push('--effort needs a model for OpenCode (provider/model#variant): set one in the config or pass -m; ignored');
-    } else {
+    // OpenCode takes a level only as a variant of a pinned model; with none there is nothing to attach it to, so
+    // it is left out without a warning (agents pass --effort by habit; Codex and Claude Code read it themselves).
+    if (!(worker.backend === 'opencode' && !base)) {
       worker = { ...worker, model: `${base}#${flags.effort}` };
     }
   }

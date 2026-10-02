@@ -200,6 +200,60 @@ test('file references in the answer are verified against disk', () => {
   assert.match(r.stdout, /`nothere` not near line 2/);
 });
 
+test('references written as a bare file name or a partial path are found; method calls are not references', () => {
+  const s = sandbox();
+  const dir = path.join(s.repo, 'apps', 'desktop', 'src', 'main');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'ipc.ts'), Array.from({ length: 10 }, (_, i) => `// line ${i + 1}`).join('\n') + '\n');
+  const answer = [
+    '- registration at ipc.ts:2 and src/main/ipc.ts:3',
+    // a method call that looks like name.ext:line is not a file reference at all
+    '- `AssistantEventSchema.parse:432-436` and orchestrator.start:638-640 are calls',
+    '- ipc.ts:99 is past the end, missing/file.ts:3 does not exist',
+  ].join('\\n');
+  const r = s.run(['run', 'where is ipc?'], { MOCK_ACTIONS: `answer:${answer}` });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /refs: 2\/4 verified/);
+  assert.match(r.stdout, /ipc\.ts:99 \(file has 10 lines\)/);
+  assert.match(r.stdout, /missing\/file\.ts:3 \(file not found\)/);
+  assert.doesNotMatch(/── refs:.*/.exec(r.stdout)[0], /Schema\.parse|orchestrator\.start/);
+});
+
+test('secret-looking files in the worker directory are called out', () => {
+  const s = sandbox();
+  fs.mkdirSync(path.join(s.repo, 'apps', 'brain'), { recursive: true });
+  fs.writeFileSync(path.join(s.repo, 'apps', 'brain', '.env'), 'PLACEHOLDER=1\n');
+  fs.writeFileSync(path.join(s.repo, '.env.example'), 'PLACEHOLDER=\n');
+  const r = s.run(['run', 'look around'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /warning: secret-looking files sit in the directory the worker runs in \(apps\/brain\/\.env\)/);
+  assert.doesNotMatch(r.stdout, /\.env\.example/);
+  // it also shows when a run starts in the background, and can be silenced
+  const bg = s.run(['run', '--bg', 'look around again'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  assert.match(bg.stdout, /warning: secret-looking files/);
+  const quiet = s.run(['run', 'look around'], { MOCK_ACTIONS: 'answer:SUMMARY: ok', PITROOM_NO_SECRET_WARNING: '1' });
+  assert.doesNotMatch(quiet.stdout, /secret-looking/);
+});
+
+test('an isolated copy only warns about secret files it would contain', () => {
+  const s = sandbox();
+  fs.writeFileSync(path.join(s.repo, '.env'), 'PLACEHOLDER=1\n');
+  // untracked but not ignored: the copy would hold it
+  const open = s.run(['run', '-i', 'x'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  assert.match(open.stdout, /would be copied into the isolated copy \(\.env\)/);
+  // git-ignored: the copy leaves it out
+  fs.appendFileSync(path.join(s.repo, '.gitignore'), '.env\n');
+  const ignored = s.run(['run', '-i', 'x'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  assert.doesNotMatch(ignored.stdout, /secret-looking/);
+});
+
+test('--effort without a pinned OpenCode model is left out without a warning', () => {
+  const s = sandbox();
+  const r = s.run(['run', '--effort', 'high', 'x'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  assert.equal(r.status, 0, r.stderr);
+  assert.doesNotMatch(r.stdout + r.stderr, /--effort needs a model/);
+});
+
 test('fails over to fallback models on model errors and records the attempt', () => {
   const s = sandbox();
   const r = s.run(['run', 'x'], { MOCK_FAIL_MODELS: 'default,mock/dead', PITROOM_FALLBACK: 'mock/dead,mock/alive' });
