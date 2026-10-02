@@ -1,0 +1,29 @@
+# Publishes to npm when a GitHub release is published, with provenance (the npm page shows where and how it
+# was built). Uses npm trusted publishing (OIDC): no npm token is stored anywhere. One-time setup is in
+# docs/releasing.md. The manual `npm publish` still works if this is not set up.
+name: release
+on:
+  release:
+    types: [published]
+permissions:
+  contents: read
+  id-token: write # trusted publishing and provenance
+jobs:
+  publish:
+    if: ${{ !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.release.tag_name }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: The tag is the version in package.json
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: test "v$(node -p "require('./package.json').version")" = "$TAG"
+      - run: npm install -g npm@latest # trusted publishing needs npm 11.5.1 or newer
+      - run: npm install --no-audit --no-fund
+      - run: npm publish --provenance --access public # prepublishOnly runs typecheck and tests first

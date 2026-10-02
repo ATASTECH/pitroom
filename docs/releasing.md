@@ -5,8 +5,16 @@
 1. `npm run bump -- patch` (or `minor`, `major`, `X.Y.Z`; add `--dry-run` to look first). It moves the version in `package.json`, `package-lock.json`, both plugin manifests and adds a heading to `CHANGELOG.md`; replace its `TODO` with the release notes. A test fails while a file disagrees or the `TODO` is still there. The docs carry no version by hand.
 2. `npm test` on Node 22 and a current Node; CI repeats it on Ubuntu and macOS.
 3. Commit, push `main`, wait for CI.
-4. `npm publish --access public` (needs your npm login and one-time password). `prepublishOnly` runs typecheck and tests first.
-5. Tag the published commit and create the release: `gh release create vX.Y.Z --target <full sha> --notes-file …`.
+4. Create the release: `gh release create vX.Y.Z --target <full sha> --notes-file …`. The `release` workflow then publishes to npm from CI with provenance (see below), after a check that the tag equals the version in `package.json` and a run of typecheck and tests.
+   Without the CI setup, publish by hand instead: `npm publish --access public` (needs your npm login and one-time password; `prepublishOnly` runs typecheck and tests first), then create the release. A hand publish has no provenance.
+
+## Publishing from CI (provenance)
+
+`.github/workflows/release.yml` publishes with npm trusted publishing: GitHub proves to npm which repository and workflow is publishing, so no npm token is stored, and the npm page shows a signed "built and published from GitHub Actions" provenance link.
+
+One-time setup, on npmjs.com: the `pitroom` package → Settings → Trusted publisher → GitHub Actions, with organization `ATASTECH`, repository `pitroom`, workflow filename `release.yml`. Leave the environment empty. Afterwards the package may be set to require two-factor authentication and disallow tokens.
+
+The workflow file must exist at the commit the release tag points to, so tag a commit that already contains it. Pre-releases are skipped.
 
 The Claude Code and Codex marketplace (`.claude-plugin/marketplace.json`) installs the npm package with no version pin, so users receive a release as soon as it is on npm. Publish to npm before you tell anyone to update.
 
