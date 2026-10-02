@@ -57,7 +57,7 @@ Follow the group live without polling:
 - `pitroom watch -g NAME --json`: one JSON line per change (`queued`, `started`, `progress`, `fallback`, `done`/`failed`, then `all-done`). Run it through your host's background or monitor facility so each line reaches you as it happens; it exits by itself when the group is done.
 - No such facility: `pitroom wait -g NAME --timeout 540`, and call it again while it exits with 75.
 - `pitroom status -g NAME`: one table snapshot.
-- Tell the user how to see it live: `pitroom dash --detach` prints the address of a read-only page on 127.0.0.1 with every run (open it in a browser or the app's browser pane), or `pitroom watch -g NAME` in a terminal.
+- Tell the user how to see it live: `pitroom dash --detach` prints the address of a read-only page on 127.0.0.1 with every run. Open it in the app's own built-in browser or preview pane when you have one (not with `--open`, which launches the system browser), and otherwise give the user the address; or `pitroom watch -g NAME` in a terminal.
 
 While workers run, do the parts you kept for yourself.
 
