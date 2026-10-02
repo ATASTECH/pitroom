@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { configPath, effective, loadConfig } from '../core/config.js';
+import { formatInit, planInit, writeInit } from '../core/init.js';
 import { DeletionRefused, UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
@@ -369,6 +370,15 @@ export function cmdModels(p: Parsed): number {
   const backend = p.positional[0];
   const table = modelTable({ backend, all: has(p, 'all') });
   console.log(has(p, 'json') ? JSON.stringify(table, null, 2) : formatModels(table));
+  return 0;
+}
+
+/** A starter config from what is installed. Proposes, and writes only with --yes. */
+export function cmdInit(p: Parsed): number {
+  const fallback = flag(p, 'fallback');
+  const plan = planInit({ model: flag(p, 'model'), fallback: fallback === undefined ? undefined : fallback.split(',').map((s) => s.trim()).filter(Boolean) });
+  const written = has(p, 'yes') ? writeInit(plan, has(p, 'force')) : undefined;
+  console.log(has(p, 'json') ? JSON.stringify({ ...plan, written }, null, 2) : formatInit(plan, written));
   return 0;
 }
 

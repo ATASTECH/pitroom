@@ -9,6 +9,7 @@ import path from 'node:path';
 import zlib from 'node:zlib';
 import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
+import { type LedgerEntry, readLedger, totals } from './receipt.js';
 import { type RunMeta, TERMINAL, home, listRunIds, readMeta, runFile } from './store.js';
 import { kind } from './ui.js';
 
@@ -304,6 +305,27 @@ export interface Stats {
   byDay: { day: string; runs: number; ok: number; saved: number }[];
 }
 
+/**
+ * One row per worker and model. Counts and times come from the history; the saved figure from the ledger, which
+ * also names a worker the history files under another model (a run that stopped before its model was known),
+ * so the rows always add up to the total.
+ */
+function workerRows(rows: any[], ledger: LedgerEntry[]): Stats['byWorker'] {
+  const out = rows.map((r) => ({ backend: r.backend as string, model: (r.model ?? undefined) as string | undefined, runs: r.runs as number, ok: (r.ok ?? 0) as number, avgSeconds: r.avg_s as number | null, avgTokens: r.avg_t as number | null, saved: 0 }));
+  const key = (backend?: string, model?: string) => `${backend ?? ''}\0${model ?? ''}`;
+  const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
+  for (const e of ledger) {
+    let row = index.get(key(e.backend, e.model));
+    if (!row) {
+      row = { backend: e.backend ?? 'unknown', model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0 };
+      index.set(key(e.backend, e.model), row);
+      out.push(row);
+    }
+    row.saved += e.saved;
+  }
+  return out;
+}
+
 export function historyStats(sinceMs?: number): Stats {
   const empty: Stats = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
@@ -313,10 +335,15 @@ export function historyStats(sinceMs?: number): Stats {
     const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ?").get(since);
     const w = db.prepare("SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY backend, model ORDER BY runs DESC LIMIT 40").all(since);
     const d = db.prepare("SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY day ORDER BY day DESC LIMIT 60").all(since);
+    // Savings come from the ledger, the same figures the Live page, `pitroom savings` and the status line add up,
+    // so one number is never calculated two ways. The database only supplies counts and times.
+    const ledger = readLedger(sinceMs);
+    const byDay = new Map<string, number>();
+    for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
     return {
-      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: t.saved },
-      byWorker: w.map((r: any) => ({ backend: r.backend, model: r.model ?? undefined, runs: r.runs, ok: r.ok ?? 0, avgSeconds: r.avg_s, avgTokens: r.avg_t, saved: r.saved })),
-      byDay: d.reverse().map((r: any) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: r.saved })),
+      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
+      byWorker: workerRows(w, ledger),
+      byDay: d.reverse().map((r: any) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: byDay.get(r.day) ?? 0 })),
     };
   } catch {
     return empty;

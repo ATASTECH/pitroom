@@ -34,7 +34,7 @@ if (cmd === '--version') {
   process.exit(0);
 }
 if (cmd === 'models') {
-  console.log('mock/good-model\nmock/other');
+  console.log((process.env.MOCK_MODELS ?? 'mock/good-model,mock/other').split(',').join('\n'));
   process.exit(0);
 }
 if (cmd === 'debug') {

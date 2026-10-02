@@ -177,10 +177,15 @@ export function isAlive(pid: number | undefined): boolean {
 export function freshMeta(id: string): RunMeta {
   const meta = readMeta(id);
   if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
-    meta.state = 'failed';
-    meta.error ??= 'worker process exited unexpectedly';
-    meta.endedAt ??= new Date().toISOString();
-    writeMeta(meta);
+    // The process may have just finished and written its own final record: read again so that record
+    // (with its usage and savings) is never overwritten by this stale copy.
+    const latest = readMeta(id);
+    if (TERMINAL.includes(latest.state)) return latest;
+    latest.state = 'failed';
+    latest.error ??= 'worker process exited unexpectedly';
+    latest.endedAt ??= new Date().toISOString();
+    writeMeta(latest);
+    return latest;
   }
   return meta;
 }

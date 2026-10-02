@@ -365,9 +365,15 @@ const ExpandableCardCloseButton: React.FC<IExpandableCardCloseButtonProps> = ({
 }) => {
     const { setIsOpen, uniqueId } = useExpandableCardContext();
 
-    const handleClose = useCallback(() => {
-        setIsOpen(false);
-    }, [setIsOpen]);
+    // The button sits inside the open card, and a click on the card opens it: stop the click here, or the card closes
+    // and then opens again.
+    const handleClose = useCallback(
+        (e: React.MouseEvent) => {
+            e.stopPropagation();
+            setIsOpen(false);
+        },
+        [setIsOpen],
+    );
 
     return (
         <MotionButton

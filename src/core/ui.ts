@@ -68,7 +68,7 @@ const MODEL_MAX = 24;
 
 /**
  * A card-sized worker name: `opencode (muse-spark)` for opencode/muse-spark-1.3-contributor-free,
- * just `opencode` when the worker's own default model runs. The provider prefix, a "-free" tier
+ * just `opencode` when no model is known yet (a finished run knows the one the CLI reported: see ranTarget). The provider prefix, a "-free" tier
  * suffix and a trailing dotted version are dropped; parentheses keep it apart from the card's " · ".
  */
 export function workerName(t: Target): string {
@@ -77,6 +77,12 @@ export function workerName(t: Target): string {
     .replace(/-(contributor-)?free$/, '')
     .replace(/-\d+\.\d+$/, '');
   return `${t.backend} (${model.length > MODEL_MAX ? `${model.slice(0, MODEL_MAX - 1)}…` : model})`;
+}
+
+/** The worker as it ran: the model the CLI reported when the target named none (the default model that was used). */
+export function ranTarget(m: RunMeta): Target {
+  const t = m.ran ?? m.worker;
+  return t.model || !m.resolvedModel ? t : { ...t, model: m.resolvedModel };
 }
 
 export function what(m: RunMeta): string {
@@ -103,7 +109,7 @@ export const startedCard = (m: RunMeta): string => `🏁 Pitroom ▶ ${kind(m)} 
 export function endedCard(m: RunMeta): string {
   const v = m.verdict;
   const bits = [
-    `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${workerName(m.ran ?? m.worker)}`,
+    `🏁 Pitroom ${ICON[m.state] ?? '•'} ${kind(m)} ${m.state} on ${workerName(ranTarget(m))}`,
     what(m),
     elapsed(m),
     v && `SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()}`,

@@ -254,6 +254,37 @@ test('--effort without a pinned OpenCode model is left out without a warning', (
   assert.doesNotMatch(r.stdout + r.stderr, /--effort needs a model/);
 });
 
+test('init proposes a starter config from your own models and writes it only with --yes', () => {
+  const s = sandbox();
+  const env = { MOCK_MODELS: 'mock/good-model,mock/a-free,mock/b-free,mock/c-free', PITROOM_CONFIG: path.join(s.base, 'init.json') };
+  // a proposal: the default model stays the worker's own choice, the fallback comes from the free models
+  const plan = JSON.parse(s.run(['init', '--json'], env).stdout);
+  assert.equal(plan.exists, false);
+  assert.equal(plan.written, undefined);
+  assert.equal(plan.blocked, undefined);
+  assert.deepEqual(plan.config.fallback, ['opencode:mock/a-free', 'opencode:mock/b-free']);
+  assert.equal(plan.config.models, undefined, 'no model is chosen for the user');
+  assert.ok(!fs.existsSync(env.PITROOM_CONFIG), 'nothing is written without --yes');
+  const text = s.run(['init'], env);
+  assert.match(text.stdout, /nothing written yet: pass --yes/);
+  // --yes writes; a second time needs --force, and the old file is kept
+  assert.equal(s.run(['init', '--yes'], env).status, 0);
+  assert.deepEqual(JSON.parse(fs.readFileSync(env.PITROOM_CONFIG, 'utf8')).fallback, ['opencode:mock/a-free', 'opencode:mock/b-free']);
+  const again = s.run(['init', '--yes'], env);
+  assert.equal(again.status, 2);
+  assert.match(again.stderr + again.stdout, /already exists: pass --force/);
+  assert.equal(s.run(['init', '--yes', '--force', '--model', 'mock/a-free', '--fallback', 'mock/c-free'], env).status, 0);
+  assert.ok(fs.existsSync(`${env.PITROOM_CONFIG}.bak`));
+  const written = JSON.parse(fs.readFileSync(env.PITROOM_CONFIG, 'utf8'));
+  assert.deepEqual(written.models, { opencode: 'mock/a-free' });
+  assert.deepEqual(written.fallback, ['opencode:mock/c-free']);
+  // a model that OpenCode does not have is refused
+  assert.notEqual(s.run(['init', '--model', 'nope/none'], env).status, 0);
+  // with no default model OpenCode has, the user has to choose
+  const blocked = JSON.parse(s.run(['init', '--json'], { ...env, MOCK_DEFAULT_MODEL: '' }).stdout);
+  assert.match(blocked.blocked ?? '', /no default model/);
+});
+
 test('fails over to fallback models on model errors and records the attempt', () => {
   const s = sandbox();
   const r = s.run(['run', 'x'], { MOCK_FAIL_MODELS: 'default,mock/dead', PITROOM_FALLBACK: 'mock/dead,mock/alive' });
@@ -546,7 +577,7 @@ test('hook-card: one card per phase after a Bash pitroom command, silence otherw
   // Worker names stay short: no provider prefix, "-free" suffix or trailing version; none for the default model.
   const named = s.run(['run', '-W', 'opencode:opencode/muse-spark-1.3-contributor-free', 'x']);
   assert.match(JSON.parse(hook('pitroom run x', named.stdout).stdout).systemMessage, /done on opencode \(muse-spark\) · /);
-  assert.match(card, /done on opencode · /, 'the default model is not spelled out');
+  assert.match(card, /done on opencode \(good-model\) · /, 'a finished run names the model it really ran, also when that was the default');
   const briefRun = s.run(['run', 'You are implementing Task 3 of the plan docs/pitroom/plans/2026-09-30-widgets.md (in your copy).']);
   assert.match(JSON.parse(hook('pitroom run x', briefRun.stdout).stdout).systemMessage, / · Task 3 · 2026-09-30-widgets · /);
 });

@@ -17,7 +17,7 @@ const VALUE_FLAGS: Record<string, string> = {
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
-  '--plan': 'plan', '--step': 'step',
+  '--plan': 'plan', '--step': 'step', '--fallback': 'fallback',
 };
 
 const BOOL_FLAGS: Record<string, string> = {

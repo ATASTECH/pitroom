@@ -50,6 +50,9 @@ Usage
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
+  pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
+                                        propose a starter config from the worker CLIs and models you have;
+                                        writes it only with --yes (models are suggested, never chosen for you)
   pitroom install [--copy] [--force]    link the skills into ~/.agents/skills + ~/.claude/skills,
                                         and the CLI into ~/.local/bin
   pitroom uninstall                     remove what install linked
@@ -114,6 +117,7 @@ const COMMANDS: Record<string, Command> = {
   'hook-card': cmd.cmdHookCard,
   doctor: (p) => doctor(has(p, 'probe')),
   config: cmd.cmdConfig,
+  init: cmd.cmdInit,
   install: cmd.cmdInstall,
   uninstall: cmd.cmdUninstall,
   clean: cmd.cmdClean,

@@ -1,5 +1,5 @@
 import { Check, Copy } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type RunDetail, api } from '@/api';
 import { Pill } from '@/components/badges';
 import { AgentActivity } from '@/components/agents/agent-activity';
@@ -56,11 +56,27 @@ function Body({ d }: { d: RunDetail }) {
   const [report, setReport] = useState(false);
   const [copied, setCopied] = useState(false);
   const running = d.state === 'running' || d.state === 'queued';
+  const activity = useRef<HTMLDivElement>(null);
+  const follow = useRef(true);
+  const stepCount = d.steps.length;
+  // The step list scrolls by hand, also while the worker runs. New steps scroll into view only while you are at
+  // the bottom: scroll up to read and it stays where you left it.
+  useEffect(() => {
+    const list = activity.current?.querySelector<HTMLElement>('[role="list"]')?.parentElement;
+    if (!list) return;
+    const onScroll = () => { follow.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40; };
+    list.addEventListener('scroll', onScroll, { passive: true });
+    return () => list.removeEventListener('scroll', onScroll);
+  }, [stepCount > 0]);
+  useEffect(() => {
+    const list = activity.current?.querySelector<HTMLElement>('[role="list"]')?.parentElement;
+    if (running && list && follow.current) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
+  }, [stepCount, running]);
   return (
     <div className="space-y-5">
       {!/^Review of /.test(d.task) && <Section title="Task"><Block>{d.task}</Block></Section>}
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
-        {d.steps.length ? <AgentActivity items={traceItems(d.steps)} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={260} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
+        {d.steps.length ? <div ref={activity}><AgentActivity items={traceItems(d.steps)} status="complete" defaultOpen collapseOnComplete={false} maxHeight={260} activeLabel="Working…" /></div> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
       </Section>
       {d.answer && <Section title="Result"><Block>{d.answer}</Block></Section>}
       {d.changes.length > 0 && (

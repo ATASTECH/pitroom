@@ -46,6 +46,23 @@ test('history: a finished run is recorded, searchable, and its raw files are com
   assert.match(stats.stdout, /opencode/);
 });
 
+test('stats: saved is the ledger\'s figure, the same one `pitroom savings` and the Live page add up', opts, () => {
+  const s = sandbox();
+  assert.equal(s.run(['run', 'list the files']).status, 0);
+  // a ledger entry whose run has no history row, as after a stop that raced with a crash report
+  const ledger = path.join(s.base, 'home', 'ledger.jsonl');
+  fs.appendFileSync(ledger, `${JSON.stringify({ id: '20260101-000000-abcd', at: new Date().toISOString(), mode: 'read', state: 'stopped', backend: 'opencode', model: 'mock/good-model', tokens: 1000, returned: 10, workerCost: 0, saved: 2.5, price: 'Claude Sonnet' })}\n`);
+  const sum = fs.readFileSync(ledger, 'utf8').split('\n').filter(Boolean).reduce((a, l) => a + JSON.parse(l).saved, 0);
+  const stats = JSON.parse(s.run(['history', 'stats', '--json']).stdout);
+  assert.ok(Math.abs(stats.totals.saved - sum) < 1e-9, `stats ${stats.totals.saved} equals the ledger ${sum}`);
+  assert.ok(stats.totals.saved >= 2.5);
+  const worker = stats.byWorker.find((w) => w.model === 'mock/good-model');
+  assert.ok(Math.abs(worker.saved - sum) < 1e-9, 'the per-worker figure comes from the same ledger');
+  const fromStats = /~\$(\d+(?:\.\d+)?) sav/.exec(s.run(['history', 'stats']).stdout)[1];
+  const fromSavings = /est\. saved\s+\$(\d+(?:\.\d+)?)/.exec(s.run(['savings', '--since', '7d']).stdout)[1];
+  assert.equal(fromStats, fromSavings, 'the two commands print the same figure');
+});
+
 test('history: a failed run keeps its stderr, compressed', opts, () => {
   const s = sandbox();
   const r = s.run(['run', '--no-fallback', 'x'], { MOCK_FAIL_MODELS: 'default' });

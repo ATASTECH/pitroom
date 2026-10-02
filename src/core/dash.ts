@@ -18,7 +18,7 @@ import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
 import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds, runFile } from './store.js';
 import { describeTarget } from './target.js';
-import { elapsed, kind, what, workerName } from './ui.js';
+import { elapsed, kind, what, workerName, ranTarget } from './ui.js';
 
 export const DEFAULT_PORT = 7878;
 const WEEK_MS = 7 * 24 * 3600 * 1000;
@@ -73,7 +73,8 @@ function toRun(m: RunMeta): DashRun {
     id: m.id,
     state: m.state,
     kind: kind(m),
-    worker: workerName(m.ran ?? m.worker),
+    // the model that really ran, once the CLI has said which; until then just the worker, never a guess
+    worker: workerName(ranTarget(m)),
     task: what(m),
     group: m.group,
     startedAt: m.startedAt,
