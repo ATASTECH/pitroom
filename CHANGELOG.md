@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.7.0
+
+### Codex
+- The Codex plugin registers hooks (`hooks/codex-hooks.json`, named in `.codex-plugin/plugin.json`): Pitroom is introduced at session start, so the agent knows it even when Codex drops skill descriptions because many skills are installed, and a job card follows each `pitroom` command. Codex asks you to trust the plugin's hooks once. The hooks go through `pitroom` on PATH (`pitroom hook-start` is new) and stay silent when it is missing. Checked against Codex 0.159.
+
+### CLI
+- `pitroom init` proposes a starter config from the worker CLIs and OpenCode models you have: a fallback chain from your free models, tiers when more than one CLI is installed. It never picks your model, and writes only with `--yes` (`--force` to replace a file, which is kept as `.bak`).
+- `pitroom doctor` groups its checks (Setup, Worker chain, one section per worker CLI, Skills and agents), ends with one verdict line and a Next list of the commands the findings point to, and warns when the first `node` on PATH is too old. Colour only on a terminal (`NO_COLOR` and `FORCE_COLOR` are honoured); `ls`, `status`, `history` and run reports colour the state too.
+- The `pitroom` command is now a small launcher that finds a Node 22.13+ (`PITROOM_NODE`, nvm, Homebrew, `/usr/local`) when the shell's own `node` is old, instead of crashing with a syntax error; without one it says how to fix it.
+- A timed-out run's report says what to do: raise the limit with `-t` (or `PITROOM_TIMEOUT`) for a long job, or `--continue`.
+
+### One figure for savings
+- The Stats tab (and `pitroom history stats`) takes its saved figures, total, per worker and per day, from the ledger, the same ones the Live tab, `pitroom savings` and the status line add up. They used to be calculated twice and could differ.
+- A run that finished while another process was marking it as crashed no longer loses its usage and savings.
+
+### Dashboard
+- Cards name the model the worker really ran (what the CLI reported), not just `opencode`; terminal cards do too.
+- The close button closes the card (its click used to bubble into the card's open handler and re-open it). The step list scrolls by hand while a worker runs and follows new steps only while you are at the bottom.
+- A `#run-id` link opens that run as the same expandable card the lists use, pinned above the page, and clears the link when closed; `/api/run/:id` carries the card. A page opened in a background tab fetched nothing until shown: fixed.
+- The state icons explain themselves on hover and focus (a clock is a timeout).
+- No `NaN%` for a worker the history has no run for.
+
 ## 0.6.10
 
 ### Verified answers
