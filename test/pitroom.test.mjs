@@ -160,6 +160,29 @@ test('savings ledger, badge and card', () => {
   assert.match(fs.readFileSync(card, 'utf8'), /^<svg/);
 });
 
+test('doctor groups its checks, sums them up and says what to run next', () => {
+  const s = sandbox();
+  const out = s.run(['doctor']).stdout;
+  assert.match(out, /^Pitroom doctor v\d/m);
+  for (const section of ['Setup', 'Worker chain', 'OpenCode', 'Skills and agents']) assert.match(out, new RegExp(`^${section}$`, 'm'), section);
+  assert.match(out, /^✔ \d+ ok +! \d+ warnings? +✘ 0 problems$/m, 'one verdict line');
+  assert.doesNotMatch(out, /\x1b\[/, 'no colour codes when the output is not a terminal');
+  assert.match(out, /^Next$/m);
+  assert.match(out, /pitroom init +propose a starter config/, 'no fallback workers points to init');
+});
+
+test('doctor warns when the first node on PATH is too old for Pitroom', () => {
+  const s = sandbox();
+  const bin = path.join(s.base, 'oldnode');
+  fs.mkdirSync(bin);
+  // answers the version query like an old Node, and is the real one for everything else (the mock worker needs it)
+  fs.writeFileSync(path.join(bin, 'node'), `#!/bin/sh\nif [ "$1" = "-p" ]; then echo 14.21.3; else exec "${process.execPath}" "$@"; fi\n`, { mode: 0o755 });
+  const out = s.run(['doctor'], { PATH: `${bin}${path.delimiter}${process.env.PATH}` }).stdout;
+  assert.match(out, /! the first `node` on PATH is v14\.21\.3 \(.*oldnode\/node\), older than the 22\.13 Pitroom needs/);
+  assert.match(out, /nvm alias default 24 +a current Node first in every new shell/);
+  assert.doesNotMatch(s.run(['doctor']).stdout, /first `node` on PATH/, 'a current Node first is fine');
+});
+
 test('doctor flags a default model that OpenCode cannot resolve', () => {
   const s = sandbox();
   const bad = s.run(['doctor'], { MOCK_DEFAULT_MODEL: 'gone/model' });

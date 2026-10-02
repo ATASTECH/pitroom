@@ -13,9 +13,39 @@ import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { VERSION } from './run.js';
 import { home } from './store.js';
+import { bold, cyan, dim, green, red, wrapText, yellow } from './style.js';
 import { describeTarget } from './target.js';
 
-const MARK: Record<DoctorCheck['level'], string> = { ok: '✔', warn: '!', fail: '✘' };
+const MARK: Record<DoctorCheck['level'], () => string> = { ok: () => green('✔'), warn: () => yellow('!'), fail: () => red('✘') };
+
+type Row = DoctorCheck & { section: string };
+
+/** Commands the findings point to, shown once under "Next". */
+const NEXT: { when: RegExp; command: string; why: string }[] = [
+  { when: /no default model|no fallback workers/, command: 'pitroom init', why: 'propose a starter config (fallback models from your catalogue)' },
+  { when: /pitroom install|no Pitroom skills|launcher on PATH/, command: 'pitroom install', why: 'link the skills and the pitroom command' },
+  { when: /first `node` on PATH/, command: 'nvm alias default 24', why: 'a current Node first in every new shell' },
+  { when: /not logged in/, command: 'claude auth login', why: 'sign in the Claude Code worker (Codex: codex login)' },
+];
+
+/** The first `node` a shell would run, and its version (agent apps start such shells). */
+function firstNodeOnPath(): { path: string; version: string } | undefined {
+  for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+    const file = path.join(dir, process.platform === 'win32' ? 'node.exe' : 'node');
+    try {
+      if (!fs.statSync(file).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const r = spawnSync(file, ['-p', 'process.versions.node'], { encoding: 'utf8', timeout: 5000 });
+    return r.status === 0 ? { path: file, version: r.stdout.trim() } : { path: file, version: '' };
+  }
+  return undefined;
+}
+const tooOld = (v: string) => {
+  const [a = 0, b = 0] = v.split('.').map(Number);
+  return a < 22 || (a === 22 && b < 13);
+};
 
 const READ_ONLY_HOW: Record<string, string> = {
   'permission-rules': 'per-run permission rules',
@@ -25,10 +55,17 @@ const READ_ONLY_HOW: Record<string, string> = {
 };
 
 export function doctor(probe: boolean): number {
-  const checks: DoctorCheck[] = [];
-  const add = (level: DoctorCheck['level'], message: string) => checks.push({ level, message });
+  const checks: Row[] = [];
+  let current = 'Setup';
+  const section = (name: string) => void (current = name);
+  const add = (level: DoctorCheck['level'], message: string) => checks.push({ level, message, section: current });
+  const addAll = (list: DoctorCheck[]) => list.forEach((c) => add(c.level, c.message));
 
   add('ok', `pitroom ${VERSION} · node ${process.versions.node} · state in ${home()}`);
+  const onPath = firstNodeOnPath();
+  if (onPath && onPath.version && tooOld(onPath.version) && path.resolve(onPath.path) !== path.resolve(process.execPath)) {
+    add('warn', `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
+  }
   add(gitAvailable() ? 'ok' : 'warn', gitAvailable() ? 'git available' : 'git not found: --write/--isolate tracking disabled');
   const cfg = loadConfig();
   add(cfg.warnings.length ? 'warn' : 'ok', `config: ${configPath()}${fs.existsSync(configPath()) ? '' : ' (not present, defaults in use)'}`);
@@ -39,6 +76,7 @@ export function doctor(probe: boolean): number {
   }
 
   // The worker chain, grouped per backend so each backend checks its own models once.
+  section('Worker chain');
   const chain: Target[] = [];
   try {
     const resolved = resolveChain();
@@ -82,15 +120,39 @@ export function doctor(probe: boolean): number {
       add('fail', (e as Error).message);
       continue;
     }
-    checks.push(...backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
+    section(backend.name);
+    addAll(backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
     add('ok', `${backend.name}: read-only runs enforced by ${READ_ONLY_HOW[backend.capabilities.readOnly]}`);
   }
 
-  checks.push(...skillChecks());
+  section('Skills and agents');
+  addAll(skillChecks());
 
-  if (probe && chain[0]) checks.push(liveProbe(chain[0]));
-  for (const c of checks) console.log(`${MARK[c.level]} ${c.message}`);
+  if (probe && chain[0]) {
+    section('Live probe');
+    const p = liveProbe(chain[0]);
+    add(p.level, p.message);
+  }
+  print(checks);
   return checks.some((c) => c.level === 'fail') ? 1 : 0;
+}
+
+/** Sections, the checks under them, a one-line verdict and the commands the findings point to. */
+function print(checks: Row[]): void {
+  console.log(`${bold('Pitroom doctor')} ${dim(`v${VERSION}`)}`);
+  for (const name of [...new Set(checks.map((c) => c.section))]) {
+    console.log(`\n${bold(name)}`);
+    for (const c of checks.filter((x) => x.section === name)) console.log(`  ${MARK[c.level]()} ${wrapText(c.message, 4)}`);
+  }
+  const count = (level: DoctorCheck['level']) => checks.filter((c) => c.level === level).length;
+  const [ok, warn, fail] = [count('ok'), count('warn'), count('fail')];
+  console.log(`\n${green(`✔ ${ok} ok`)}   ${warn ? yellow(`! ${warn} warning${warn === 1 ? '' : 's'}`) : dim('! 0 warnings')}   ${fail ? red(`✘ ${fail} problem${fail === 1 ? '' : 's'}`) : dim('✘ 0 problems')}`);
+  const next = NEXT.filter((n) => checks.some((c) => c.level !== 'ok' && n.when.test(c.message)));
+  if (next.length) {
+    console.log(`\n${bold('Next')}`);
+    const width = Math.max(...next.map((n) => n.command.length));
+    for (const n of next) console.log(`  ${cyan(n.command.padEnd(width))}  ${dim(n.why)}`);
+  }
 }
 
 /** One real, read-only round trip through the preferred worker. */

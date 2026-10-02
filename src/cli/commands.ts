@@ -22,6 +22,7 @@ import {
   type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
 import { type Parsed, exitCodeFor, flag, has, parseDuration, planStep, readTask, runOptions } from './args.js';
+import { dim, stateColour } from '../core/style.js';
 
 /** Runs a prepared run in the foreground, or starts it in the background with --bg. */
 async function launch(p: Parsed, meta: RunMeta): Promise<number> {
@@ -240,8 +241,12 @@ export function cmdHistory(p: Parsed): number {
   const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
   const head = ['RUN', 'WHEN', 'STATE', 'WORKER', 'TIME', 'TASK'];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]!))).join('  ');
-  console.log([fmt(head), ...body.map(fmt)].join('\n'));
+  const fmt = (r: string[], header = false) =>
+    r.map((c, i) => {
+      const cell = i === r.length - 1 ? c : c.padEnd(widths[i]!);
+      return header ? dim(cell) : i === 2 ? stateColour(r[2]!, cell) : cell;
+    }).join('  ');
+  console.log([fmt(head, true), ...body.map((r) => fmt(r))].join('\n'));
   if (total > rows.length) console.log(`\n${rows.length} of ${total} · --limit N for more · pitroom show <run> for one`);
   return 0;
 }

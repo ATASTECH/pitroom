@@ -117,6 +117,7 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
 export interface RunDetail {
   id: string;
   state: string;
+  card: DashRun;
   /** What the agent asked the worker to do. */
   task: string;
   /** What the worker did, in order; `t` is seconds since the run started when the stream has timestamps. */
@@ -183,6 +184,7 @@ export function runDetail(id: string): RunDetail | undefined {
   return {
     id,
     state: m.state,
+    card: toRun(m),
     task: (m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : m.task).slice(0, TASK_MAX),
     steps,
     answer,

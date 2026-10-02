@@ -70,6 +70,11 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
     assert.ok(Array.isArray(detail.steps), 'what the worker did, step by step');
     assert.ok(detail.answer, 'the worker\'s answer');
     assert.equal(detail.info.worker, 'opencode');
+    assert.equal(detail.card.id, id, 'the detail carries the card the #run-id link pins');
+    assert.equal(detail.card.state, 'done');
+    assert.match(detail.card.kind, /research/);
+    assert.match(detail.card.worker, /opencode/);
+    assert.equal(detail.card.task, 'list the files');
 
     assert.equal((await get(`${url}api/run/not-a-run`)).status, 404);
     assert.equal((await get(`${url}api/run/..%2F..%2Fetc`)).status, 404);

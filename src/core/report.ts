@@ -6,6 +6,7 @@ import { planName } from './plan.js';
 import { getBackend } from '../backends/index.js';
 import { compact, primaryPrice, usd } from './receipt.js';
 import { type RunMeta, isActive, runFile } from './store.js';
+import { bold, dim, stateColour } from './style.js';
 
 const ICON: Record<RunMeta['state'], string> = {
   queued: '⋯',
@@ -31,7 +32,7 @@ export function readSummary(meta: RunMeta): string {
 
 export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLines = 400): string {
   const out: string[] = [];
-  out.push(`pitroom ${ICON[meta.state]} ${meta.state} · ${meta.mode} · ${duration(meta)} · run ${meta.id}`);
+  out.push(`${bold('pitroom')} ${stateColour(meta.state, `${ICON[meta.state]} ${meta.state}`)} · ${meta.mode} · ${duration(meta)} · run ${dim(meta.id)}`);
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(' · '));

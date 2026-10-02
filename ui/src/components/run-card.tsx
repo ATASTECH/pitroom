@@ -70,11 +70,11 @@ function Header({ run, expanded, when }: { run: DashRun; expanded?: boolean; whe
 
 /** A run as an expandable card (Shadix UI): click it and it grows into a focused panel with everything about the run. */
 /** `when` adds how long ago it started (the History list, where the order is by time rather than by activity). */
-export function RunCard({ run, index, when }: { run: DashRun; index: number; when?: boolean }) {
+export function RunCard({ run, index, when, defaultOpen, onClose }: { run: DashRun; index: number; when?: boolean; defaultOpen?: boolean; onClose?: () => void }) {
   const active = run.state === 'running' || run.state === 'queued';
   return (
     <div className="animate-in fade-in slide-in-from-bottom-2 fill-mode-both" style={{ animationDelay: `${Math.min(index, 8) * 45}ms`, animationDuration: '500ms' }}>
-      <ExpandableCard>
+      <ExpandableCard defaultOpen={defaultOpen} onClose={onClose}>
         <ExpandableCardBody className={cn('rounded-xl border pb-0 shadow-none transition-colors duration-300 hover:border-foreground/25', run.state === 'running' && 'border-info/30')}>
           <Header run={run} when={when} />
         </ExpandableCardBody>

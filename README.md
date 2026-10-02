@@ -442,7 +442,7 @@ pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
 pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
 pitroom models [worker] [--all] [--json]      models, effort levels, your costs, your usage
 pitroom statusline [--then CMD] · pitroom hook-card
-pitroom doctor [--probe] · pitroom config · pitroom install [--copy] [--force] · pitroom uninstall
+pitroom doctor [--probe] · pitroom config · pitroom init [--model ID] [--fallback A,B] [--yes] [--force] · pitroom install [--copy] [--force] · pitroom uninstall
 ```
 
 Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4` timeout · `5` read-only violation · `6` verify failed · `75` still running.
@@ -551,7 +551,7 @@ Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a work
 
 </details>
 
-Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins. `tiers` names workers for `--tier` and for plan tasks' `**Worker:**` lines:
+Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `pitroom config` shows every effective value and where it came from. `pitroom init` proposes a starter config from the worker CLIs and OpenCode models you have (a fallback chain of your free models, tiers when more than one CLI is installed) and writes it only with `--yes`; it never picks your model for you. `models` gives each worker a default model for targets that name none (`-W codex`, a `"codex"` fallback); a model in the target or `-m` still wins. `tiers` names workers for `--tier` and for plan tasks' `**Worker:**` lines:
 
 ```json
 {

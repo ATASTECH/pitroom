@@ -6,6 +6,7 @@ import path from 'node:path';
 import { backendIds, getBackend } from '../backends/index.js';
 import { type PitroomConfig, configPath } from './config.js';
 import { UserError } from './errors.js';
+import { bold, dim, green, yellow } from './style.js';
 
 export interface InitPlan {
   path: string;
@@ -87,16 +88,16 @@ export function writeInit(plan: InitPlan, force: boolean): string {
 }
 
 export function formatInit(plan: InitPlan, written?: string): string {
-  const out: string[] = ['pitroom init: worker CLIs on this machine'];
-  for (const w of plan.workers) out.push(`  ${w.found ? '✔' : '·'} ${w.name.padEnd(12)} ${w.found ? w.binary : 'not found'}`);
+  const out: string[] = [bold('pitroom init') + dim(': worker CLIs on this machine')];
+  for (const w of plan.workers) out.push(`  ${w.found ? green('✔') : dim('·')} ${w.name.padEnd(12)} ${w.found ? w.binary : dim('not found')}`);
   if (plan.opencode) {
     const o = plan.opencode;
     out.push(`  OpenCode: ${o.models} models, default ${o.defaultModel ?? 'none'}${o.free.length ? `, free: ${o.free.slice(0, 3).join(', ')}${o.free.length > 3 ? ', …' : ''}` : ''}`);
   }
   out.push('', `config file: ${plan.path}${plan.exists ? ' (exists)' : ' (not present)'}`, JSON.stringify(plan.config, null, 2));
   for (const n of plan.notes) out.push(`  note: ${n}`);
-  if (written) out.push('', `✔ written to ${written}`, '  next: pitroom doctor, then pitroom install');
-  else if (plan.blocked) out.push('', `! ${plan.blocked}`);
+  if (written) out.push('', green(`✔ written to ${written}`), dim('  next: pitroom doctor, then pitroom install'));
+  else if (plan.blocked) out.push('', yellow(`! ${plan.blocked}`));
   else out.push('', `nothing written yet: pass --yes to write it${plan.exists ? ' (with --force, since the file exists)' : ''}`);
   return out.join('\n');
 }

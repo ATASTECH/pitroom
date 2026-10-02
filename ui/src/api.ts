@@ -38,6 +38,7 @@ export interface Step {
 export interface RunDetail {
   id: string;
   state: RunState;
+  card?: DashRun;
   task: string;
   steps: Step[];
   answer: string;

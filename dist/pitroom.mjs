@@ -1402,6 +1402,49 @@ import { fileURLToPath as fileURLToPath3 } from "node:url";
 // src/core/init.ts
 import fs8 from "node:fs";
 import path7 from "node:path";
+
+// src/core/style.ts
+var enabled = () => {
+  if (process.env.NO_COLOR) return false;
+  if (process.env.FORCE_COLOR && process.env.FORCE_COLOR !== "0") return true;
+  return !!process.stdout.isTTY && process.env.TERM !== "dumb";
+};
+var wrap = (open, close) => (text) => enabled() ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+var bold = wrap(1, 22);
+var dim = wrap(2, 22);
+var red = wrap(31, 39);
+var green = wrap(32, 39);
+var yellow = wrap(33, 39);
+var blue = wrap(34, 39);
+var cyan = wrap(36, 39);
+function stateColour(state, text = state) {
+  if (state === "done") return green(text);
+  if (state === "running") return blue(text);
+  if (state === "queued") return yellow(text);
+  if (state === "failed") return red(text);
+  if (state === "timeout") return yellow(text);
+  return dim(text);
+}
+function wrapText(text, indent) {
+  const columns = process.stdout.isTTY ? process.stdout.columns : void 0;
+  if (!columns || text.length + indent <= columns) return text;
+  const width = Math.max(40, Math.min(columns, 110) - indent);
+  const lines = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.join(`
+${" ".repeat(indent)}`);
+}
+
+// src/core/init.ts
 var FREE = /-free$/;
 var TIER_ORDER = [["cheap", "opencode"], ["standard", "codex"], ["capable", "claude"]];
 var isFound = (binary4) => path7.isAbsolute(binary4) && fs8.existsSync(binary4);
@@ -1460,16 +1503,16 @@ function writeInit(plan, force) {
   return plan.path;
 }
 function formatInit(plan, written) {
-  const out = ["pitroom init: worker CLIs on this machine"];
-  for (const w of plan.workers) out.push(`  ${w.found ? "\u2714" : "\xB7"} ${w.name.padEnd(12)} ${w.found ? w.binary : "not found"}`);
+  const out = [bold("pitroom init") + dim(": worker CLIs on this machine")];
+  for (const w of plan.workers) out.push(`  ${w.found ? green("\u2714") : dim("\xB7")} ${w.name.padEnd(12)} ${w.found ? w.binary : dim("not found")}`);
   if (plan.opencode) {
     const o = plan.opencode;
     out.push(`  OpenCode: ${o.models} models, default ${o.defaultModel ?? "none"}${o.free.length ? `, free: ${o.free.slice(0, 3).join(", ")}${o.free.length > 3 ? ", \u2026" : ""}` : ""}`);
   }
   out.push("", `config file: ${plan.path}${plan.exists ? " (exists)" : " (not present)"}`, JSON.stringify(plan.config, null, 2));
   for (const n of plan.notes) out.push(`  note: ${n}`);
-  if (written) out.push("", `\u2714 written to ${written}`, "  next: pitroom doctor, then pitroom install");
-  else if (plan.blocked) out.push("", `! ${plan.blocked}`);
+  if (written) out.push("", green(`\u2714 written to ${written}`), dim("  next: pitroom doctor, then pitroom install"));
+  else if (plan.blocked) out.push("", yellow(`! ${plan.blocked}`));
   else out.push("", `nothing written yet: pass --yes to write it${plan.exists ? " (with --force, since the file exists)" : ""}`);
   return out.join("\n");
 }
@@ -2111,7 +2154,7 @@ function readSummary(meta) {
 }
 function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   const out = [];
-  out.push(`pitroom ${ICON2[meta.state]} ${meta.state} \xB7 ${meta.mode} \xB7 ${duration(meta)} \xB7 run ${meta.id}`);
+  out.push(`${bold("pitroom")} ${stateColour(meta.state, `${ICON2[meta.state]} ${meta.state}`)} \xB7 ${meta.mode} \xB7 ${duration(meta)} \xB7 run ${dim(meta.id)}`);
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(" \xB7 "));
@@ -2238,8 +2281,11 @@ function table(metas) {
   });
   const head = ["RUN", "STATE", "MODE", "TIME", "STEPS", "WORKER", "NOW / RESULT"];
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i].length)));
-  const fmt = (r) => r.map((c, i) => i === r.length - 1 ? c : c.padEnd(widths[i])).join("  ");
-  return [fmt(head), ...rows.map(fmt)].join("\n");
+  const fmt = (r, header = false) => r.map((c, i) => {
+    const cell2 = i === r.length - 1 ? c : c.padEnd(widths[i]);
+    return header ? dim(cell2) : i === 1 ? stateColour(r[1], cell2) : cell2;
+  }).join("  ");
+  return [fmt(head, true), ...rows.map((r) => fmt(r))].join("\n");
 }
 var sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function waitMany(ids, opts) {
@@ -3020,6 +3066,7 @@ function runDetail(id) {
   return {
     id,
     state: m.state,
+    card: toRun(m),
     task: (m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, "$1")}` : m.task).slice(0, TASK_MAX),
     steps,
     answer,
@@ -4340,8 +4387,11 @@ ${[fmt2(head2), ...rows2.map(fmt2)].join("\n")}`);
   const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
   const head = ["RUN", "WHEN", "STATE", "WORKER", "TIME", "TASK"];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
-  const fmt = (r) => r.map((c, i) => i === r.length - 1 ? c : c.padEnd(widths[i])).join("  ");
-  console.log([fmt(head), ...body.map(fmt)].join("\n"));
+  const fmt = (r, header = false) => r.map((c, i) => {
+    const cell2 = i === r.length - 1 ? c : c.padEnd(widths[i]);
+    return header ? dim(cell2) : i === 2 ? stateColour(r[2], cell2) : cell2;
+  }).join("  ");
+  console.log([fmt(head, true), ...body.map((r) => fmt(r))].join("\n"));
   if (total > rows.length) console.log(`
 ${rows.length} of ${total} \xB7 --limit N for more \xB7 pitroom show <run> for one`);
   return 0;
@@ -4553,7 +4603,30 @@ import { spawnSync as spawnSync7 } from "node:child_process";
 import fs27 from "node:fs";
 import os9 from "node:os";
 import path23 from "node:path";
-var MARK = { ok: "\u2714", warn: "!", fail: "\u2718" };
+var MARK = { ok: () => green("\u2714"), warn: () => yellow("!"), fail: () => red("\u2718") };
+var NEXT = [
+  { when: /no default model|no fallback workers/, command: "pitroom init", why: "propose a starter config (fallback models from your catalogue)" },
+  { when: /pitroom install|no Pitroom skills|launcher on PATH/, command: "pitroom install", why: "link the skills and the pitroom command" },
+  { when: /first `node` on PATH/, command: "nvm alias default 24", why: "a current Node first in every new shell" },
+  { when: /not logged in/, command: "claude auth login", why: "sign in the Claude Code worker (Codex: codex login)" }
+];
+function firstNodeOnPath() {
+  for (const dir of (process.env.PATH ?? "").split(path23.delimiter).filter(Boolean)) {
+    const file = path23.join(dir, process.platform === "win32" ? "node.exe" : "node");
+    try {
+      if (!fs27.statSync(file).isFile()) continue;
+    } catch {
+      continue;
+    }
+    const r = spawnSync7(file, ["-p", "process.versions.node"], { encoding: "utf8", timeout: 5e3 });
+    return r.status === 0 ? { path: file, version: r.stdout.trim() } : { path: file, version: "" };
+  }
+  return void 0;
+}
+var tooOld = (v) => {
+  const [a = 0, b = 0] = v.split(".").map(Number);
+  return a < 22 || a === 22 && b < 13;
+};
 var READ_ONLY_HOW = {
   "permission-rules": "per-run permission rules",
   "os-sandbox": "an OS sandbox",
@@ -4562,8 +4635,15 @@ var READ_ONLY_HOW = {
 };
 function doctor4(probe) {
   const checks = [];
-  const add = (level, message) => checks.push({ level, message });
+  let current = "Setup";
+  const section2 = (name) => void (current = name);
+  const add = (level, message) => checks.push({ level, message, section: current });
+  const addAll = (list2) => list2.forEach((c) => add(c.level, c.message));
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
+  const onPath = firstNodeOnPath();
+  if (onPath && onPath.version && tooOld(onPath.version) && path23.resolve(onPath.path) !== path23.resolve(process.execPath)) {
+    add("warn", `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
+  }
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
   add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs27.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
@@ -4572,6 +4652,7 @@ function doctor4(probe) {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
     add(guarded ? "ok" : "warn", guarded ? "git guard shim ready" : "git guard unavailable (git not on PATH)");
   }
+  section2("Worker chain");
   const chain = [];
   try {
     const resolved = resolveChain();
@@ -4612,13 +4693,38 @@ function doctor4(probe) {
       add("fail", e.message);
       continue;
     }
-    checks.push(...backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
+    section2(backend.name);
+    addAll(backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
     add("ok", `${backend.name}: read-only runs enforced by ${READ_ONLY_HOW[backend.capabilities.readOnly]}`);
   }
-  checks.push(...skillChecks());
-  if (probe && chain[0]) checks.push(liveProbe(chain[0]));
-  for (const c of checks) console.log(`${MARK[c.level]} ${c.message}`);
+  section2("Skills and agents");
+  addAll(skillChecks());
+  if (probe && chain[0]) {
+    section2("Live probe");
+    const p = liveProbe(chain[0]);
+    add(p.level, p.message);
+  }
+  print(checks);
   return checks.some((c) => c.level === "fail") ? 1 : 0;
+}
+function print(checks) {
+  console.log(`${bold("Pitroom doctor")} ${dim(`v${VERSION2}`)}`);
+  for (const name of [...new Set(checks.map((c) => c.section))]) {
+    console.log(`
+${bold(name)}`);
+    for (const c of checks.filter((x) => x.section === name)) console.log(`  ${MARK[c.level]()} ${wrapText(c.message, 4)}`);
+  }
+  const count = (level) => checks.filter((c) => c.level === level).length;
+  const [ok, warn, fail] = [count("ok"), count("warn"), count("fail")];
+  console.log(`
+${green(`\u2714 ${ok} ok`)}   ${warn ? yellow(`! ${warn} warning${warn === 1 ? "" : "s"}`) : dim("! 0 warnings")}   ${fail ? red(`\u2718 ${fail} problem${fail === 1 ? "" : "s"}`) : dim("\u2718 0 problems")}`);
+  const next = NEXT.filter((n) => checks.some((c) => c.level !== "ok" && n.when.test(c.message)));
+  if (next.length) {
+    console.log(`
+${bold("Next")}`);
+    const width = Math.max(...next.map((n) => n.command.length));
+    for (const n of next) console.log(`  ${cyan(n.command.padEnd(width))}  ${dim(n.why)}`);
+  }
 }
 function liveProbe(target) {
   let backend;
@@ -4697,8 +4803,8 @@ function superpowersActive() {
   for (const key of claudePlugins()) {
     if (key.startsWith("superpowers@") && claudePluginEnabled(key)) found.push(`Claude Code plugin ${key}`);
   }
-  for (const [key, enabled] of codexPlugins()) {
-    if (key.startsWith("superpowers@") && enabled) found.push(`Codex plugin ${key}`);
+  for (const [key, enabled2] of codexPlugins()) {
+    if (key.startsWith("superpowers@") && enabled2) found.push(`Codex plugin ${key}`);
   }
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);

@@ -1,9 +1,8 @@
 import { Moon, Sun } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { api } from '@/api';
-import { RunDetailView } from '@/components/run-detail';
+import { api, type DashRun } from '@/api';
+import { RunCard } from '@/components/run-card';
 import { Button } from '@/components/ui/button';
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { usePoll } from '@/hooks/use-poll';
@@ -62,13 +61,33 @@ function PageFade() {
 }
 
 export function App() {
-  const hash = location.hash.slice(1);
-  const [tab, setTab] = useState<Tab>(hash === 'history' || hash === 'stats' ? hash : 'live');
-  const [open, setOpen] = useState<string | null>(null);
+  const [hash, setHash] = useState(() => location.hash.slice(1));
+  const [tab, setTab] = useState<Tab>(() => { const h = location.hash.slice(1); return h === 'history' || h === 'stats' ? h : 'live'; });
+  const [pinned, setPinned] = useState<DashRun | null>(null);
   const focus = RUN_ID.test(hash) ? hash : undefined;
   const { data, error } = usePoll(() => api.state(1), 4000, []);
   useEffect(() => { document.title = `${data?.running ? `(${data.running}) ` : ''}Pitroom`; }, [data?.running]);
-  useEffect(() => { if (focus) setOpen(focus); }, [focus]);
+  useEffect(() => {
+    const onHash = () => setHash(location.hash.slice(1));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  useEffect(() => {
+    if (!focus) { setPinned(null); return; }
+    let cancelled = false;
+    api.run(focus).then((detail) => {
+      if (cancelled) return;
+      if (detail.card) setPinned(detail.card);
+      else { history.replaceState(null, '', location.pathname + location.search); setHash(''); setPinned(null); }
+    }).catch(() => {
+      if (cancelled) return;
+      history.replaceState(null, '', location.pathname + location.search);
+      setHash('');
+      setPinned(null);
+    });
+    return () => { cancelled = true; };
+  }, [focus]);
+  const closePinned = () => { history.replaceState(null, '', location.pathname + location.search); setHash(''); setPinned(null); };
 
   return (
     <TooltipProvider delay={150}>
@@ -85,6 +104,7 @@ export function App() {
           <Tabs value={tab} onValueChange={(v) => setTab(v as Tab)}>
             <TabsList className="mb-5"><TabsTrigger value="live">Live</TabsTrigger><TabsTrigger value="history">History</TabsTrigger><TabsTrigger value="stats">Stats</TabsTrigger></TabsList>
           </Tabs>
+          {pinned && <div className="mb-5"><RunCard run={pinned} index={0} defaultOpen onClose={closePinned} /></div>}
           <div key={tab} className="animate-in fade-in slide-in-from-bottom-1 duration-300">
             {tab === 'live' && <LivePage focus={focus} />}
             {tab === 'history' && <HistoryPage />}
@@ -93,13 +113,6 @@ export function App() {
           <footer className="mt-10 text-center text-xs text-muted-foreground/70">Read-only · this machine only · stops itself when left idle (<code className="font-mono">pitroom dash --stop</code> ends it now)</footer>
         </main>
         <PageFade />
-        {/* only for a #run-id link; the lists open runs as cards */}
-        <Sheet open={!!open} onOpenChange={(o) => !o && setOpen(null)}>
-          <SheetContent side="right" className="w-full overflow-y-auto sm:max-w-2xl">
-            <SheetHeader><SheetTitle>Run</SheetTitle><SheetDescription className="font-mono text-xs">{open}</SheetDescription></SheetHeader>
-            <div className="px-4 pb-6">{open && <RunDetailView id={open} />}</div>
-          </SheetContent>
-        </Sheet>
       </div>
     </TooltipProvider>
   );

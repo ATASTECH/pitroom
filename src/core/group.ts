@@ -6,6 +6,7 @@ import { type RunMeta, TERMINAL, freshMeta, isActive, listRunIds, readMeta } fro
 import { duration, live, readSummary } from './report.js';
 import { describeTarget } from './target.js';
 import { endedCard, startedCard } from './ui.js';
+import { dim, stateColour } from './style.js';
 
 export function groupIds(group: string): string[] {
   return listRunIds().filter((id) => {
@@ -41,8 +42,13 @@ export function table(metas: RunMeta[]): string {
   });
   const head = ['RUN', 'STATE', 'MODE', 'TIME', 'STEPS', 'WORKER', 'NOW / RESULT'];
   const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
-  const fmt = (r: string[]) => r.map((c, i) => (i === r.length - 1 ? c : c.padEnd(widths[i]!))).join('  ');
-  return [fmt(head), ...rows.map(fmt)].join('\n');
+  // padded first, coloured after: colour codes would throw the padding off
+  const fmt = (r: string[], header = false) =>
+    r.map((c, i) => {
+      const cell = i === r.length - 1 ? c : c.padEnd(widths[i]!);
+      return header ? dim(cell) : i === 1 ? stateColour(r[1]!, cell) : cell;
+    }).join('  ');
+  return [fmt(head, true), ...rows.map((r) => fmt(r))].join('\n');
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));

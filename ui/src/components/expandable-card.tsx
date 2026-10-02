@@ -51,16 +51,32 @@ const MotionButton = motion.create(Button);
 interface IExpandableCardProviderProps {
     children: React.ReactNode;
     transition?: Transition;
+    defaultOpen?: boolean;
+    onClose?: () => void;
 }
 
 export const ExpandableCardProvider: React.FC<IExpandableCardProviderProps> = ({
     children,
     transition,
+    defaultOpen,
+    onClose,
 }) => {
-    const [isOpen, setIsOpen] = useState(false);
+    const [isOpen, setIsOpen] = useState(!!defaultOpen);
     const uniqueId = useId();
 
     const triggerRef = useRef<HTMLElement | null>(null);
+
+    // Calls onClose when the card goes from open to closed, never on the initial render.
+    const onCloseRef = useRef(onClose);
+    onCloseRef.current = onClose;
+    const first = useRef(true);
+    useEffect(() => {
+        if (first.current) {
+            first.current = false;
+            return;
+        }
+        if (!isOpen) onCloseRef.current?.();
+    }, [isOpen]);
 
     const contextValue = useMemo(
         () => ({
@@ -82,15 +98,19 @@ export const ExpandableCardProvider: React.FC<IExpandableCardProviderProps> = ({
 interface IExpandableCardProps {
     children: React.ReactNode;
     transition?: Transition;
+    defaultOpen?: boolean;
+    onClose?: () => void;
 }
 
 const ExpandableCard: React.FC<IExpandableCardProps> = ({
     children,
     transition,
+    defaultOpen,
+    onClose,
 }) => {
     const childArray = React.Children.toArray(children);
     return (
-        <ExpandableCardProvider>
+        <ExpandableCardProvider defaultOpen={defaultOpen} onClose={onClose}>
             <MotionConfig transition={transition}>
                 {childArray.map((child) => child)}
             </MotionConfig>
