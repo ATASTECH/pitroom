@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { CLI, root } from './helpers.mjs';
+import { CLI, root, scratchDir } from './helpers.mjs';
 
 const skillsDir = path.join(root, 'skills');
 const skills = fs.readdirSync(skillsDir).filter((d) => fs.existsSync(path.join(skillsDir, d, 'SKILL.md')));
@@ -130,7 +130,7 @@ test('the Codex listing has an icon, a privacy policy and no other assistants in
 });
 
 test('install links every skill and a working launcher; uninstall removes only those', () => {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-home-'));
+  const home = scratchDir('pitroom-home-');
   fs.mkdirSync(path.join(home, '.claude'));
   const agents = path.join(home, '.agents', 'skills');
   fs.mkdirSync(agents, { recursive: true });

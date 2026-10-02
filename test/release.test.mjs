@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { root } from './helpers.mjs';
+import { root, scratchDir } from './helpers.mjs';
 
 const SCRIPT = path.join(root, 'scripts', 'bump-version.mjs');
 const json = (dir, name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
@@ -13,7 +13,7 @@ const FILES = ['package.json', 'package-lock.json', '.claude-plugin/plugin.json'
 
 /** A throwaway copy of the files the script touches. */
 function copy() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-bump-'));
+  const dir = scratchDir('pitroom-bump-');
   for (const name of FILES) {
     fs.mkdirSync(path.dirname(path.join(dir, name)), { recursive: true });
     fs.copyFileSync(path.join(root, name), path.join(dir, name));

@@ -13,8 +13,21 @@ export const CLI = path.join(root, 'dist', 'pitroom.mjs');
 const MOCK = path.join(root, 'test', 'fixtures', 'opencode', 'mock', 'opencode.mjs');
 fs.chmodSync(MOCK, 0o755);
 
+// Every temp directory a test makes is removed when that test file's process exits (set PITROOM_TEST_KEEP=1
+// to look at them): they used to pile up in the temp folder, thousands of them after a few weeks.
+const made = [];
+process.on('exit', () => {
+  if (process.env.PITROOM_TEST_KEEP) return;
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+});
+export function scratchDir(prefix) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  made.push(dir);
+  return dir;
+}
+
 export function sandbox() {
-  const base = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-test-'));
+  const base = scratchDir('pitroom-test-');
   const repo = path.join(base, 'repo');
   fs.mkdirSync(repo);
   const git = (...a) => execFileSync('git', a, { cwd: repo, encoding: 'utf8' });

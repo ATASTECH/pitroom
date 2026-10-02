@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { execFileSync } from 'node:child_process';
-import { sandbox } from './helpers.mjs';
+import { sandbox, scratchDir } from './helpers.mjs';
 
 test('read mode returns the answer, a receipt, and touches nothing', () => {
   const s = sandbox();
@@ -132,7 +132,7 @@ test('timeout kills the worker (exit 4)', () => {
 test('refuses recursive delegation and untracked --write', () => {
   const s = sandbox();
   assert.equal(s.run(['run', 'x'], { PITROOM_ACTIVE: '1' }).status, 3);
-  const plain = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-plain-'));
+  const plain = scratchDir('pitroom-plain-');
   assert.equal(s.run(['run', '--write', '-d', plain, 'x']).status, 3);
   assert.equal(s.run(['run', '--isolate', '-d', plain, 'x']).status, 3);
 });
@@ -354,7 +354,7 @@ test('a fallback equal to the failed OpenCode default is skipped, not retried', 
 
 test('git guard layer 2 holds through login shells, absolute paths and pushes', () => {
   const s = sandbox();
-  const remote = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-remote-'));
+  const remote = scratchDir('pitroom-remote-');
   s.git('init', '-q', '--bare', remote);
   s.git('remote', 'add', 'origin', remote);
   const head = s.git('rev-parse', 'HEAD');

@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { brief, loadPlan, parsePlan, planName, planTask } from '../dist/lib.mjs';
+import { scratchDir } from './helpers.mjs';
 
 const PLAN = `# Widget Implementation Plan
 
@@ -100,7 +101,7 @@ test('plan: a Worker line inside a fence is an example, not the task tier', () =
 });
 
 test('loadPlan: the real path, a missing file and a plan without tasks', () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-plan-'));
+  const dir = scratchDir('pitroom-plan-');
   try {
     const file = path.join(dir, 'plan.md');
     fs.writeFileSync(file, PLAN);
