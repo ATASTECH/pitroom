@@ -2,6 +2,7 @@
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { configPath, effective, loadConfig } from '../core/config.js';
 import { formatInit, planInit, writeInit } from '../core/init.js';
 import { DeletionRefused, UserError } from '../core/errors.js';
@@ -371,6 +372,13 @@ export function cmdModels(p: Parsed): number {
   const table = modelTable({ backend, all: has(p, 'all') });
   console.log(has(p, 'json') ? JSON.stringify(table, null, 2) : formatModels(table));
   return 0;
+}
+
+/** SessionStart hook for hosts without a plugin root (Codex): runs the plugin's own session-start script. */
+export function cmdHookStart(): number {
+  const script = path.join(path.dirname(path.dirname(fileURLToPath(import.meta.url))), 'hooks', 'session-start.mjs');
+  if (fs.existsSync(script)) spawnSync(process.execPath, [script], { stdio: ['ignore', 'inherit', 'ignore'], env: process.env });
+  return 0; // never block or clutter the host's session
 }
 
 /** A starter config from what is installed. Proposes, and writes only with --yes. */

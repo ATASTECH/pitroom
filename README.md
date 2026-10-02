@@ -270,7 +270,7 @@ pitroom install
 | Path | You get |
 |---|---|
 | Claude Code plugin | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. |
-| Codex plugin | The 14 skills. Codex has no session-start hook, so Pitroom is not introduced on its own: the skills load when a task matches, or name one. `pitroom` itself comes from npm. |
+| Codex plugin | The 14 skills, a session-start hook that introduces Pitroom (so it is known even when Codex drops skill descriptions because many are installed), and a card after each `pitroom` command. Codex asks you to trust the plugin's hooks once. The hooks call `pitroom`, which comes from npm (`npm i -g pitroom`). |
 | npm + `pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
 
 Pick one path, not several: `doctor` warns if the skills load twice. The plugins alone do not put `pitroom` on your PATH, so install it from npm too if you want to run it yourself (`watch`, `models`, `savings`, the status line).

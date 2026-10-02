@@ -81,6 +81,26 @@ test('session-start hook injects using-pitroom (and nothing inside a worker)', (
   assert.equal(inWorker.stdout, '');
 });
 
+test('the Codex plugin registers hooks: Pitroom is introduced at session start and cards follow pitroom commands', () => {
+  const manifest = json('.codex-plugin/plugin.json');
+  assert.equal(manifest.hooks, './hooks/codex-hooks.json');
+  const hooks = json('hooks/codex-hooks.json').hooks;
+  const start = hooks.SessionStart[0];
+  const card = hooks.PostToolUse[0];
+  assert.equal(card.matcher, 'Bash');
+  // they go through `pitroom` on PATH (Codex does not give a plugin root) and stay silent when it is missing
+  assert.match(start.hooks[0].command, /command -v pitroom .*pitroom hook-start \|\| true/);
+  assert.match(card.hooks[0].command, /command -v pitroom .*pitroom hook-card \|\| true/);
+  // hook-start emits the SessionStart JSON Codex reads, and nothing inside a worker
+  const env = { ...process.env, PITROOM_ACTIVE: '', CURSOR_PLUGIN_ROOT: '' };
+  const out = spawnSync(process.execPath, [CLI, 'hook-start'], { encoding: 'utf8', env, input: '{"hook_event_name":"SessionStart","source":"startup"}' });
+  assert.equal(out.status, 0, out.stderr);
+  const body = JSON.parse(out.stdout).hookSpecificOutput;
+  assert.equal(body.hookEventName, 'SessionStart');
+  assert.match(body.additionalContext, /<pitroom>[\s\S]*using-pitroom|You have Pitroom/);
+  assert.equal(spawnSync(process.execPath, [CLI, 'hook-start'], { encoding: 'utf8', env: { ...env, PITROOM_ACTIVE: '1' } }).stdout, '');
+});
+
 test('plugin manifests are valid and agree on the version', () => {
   const hooks = json('hooks/hooks.json');
   const cmd = hooks.hooks.SessionStart[0].hooks[0].command;

@@ -1397,6 +1397,7 @@ function effortFlag(p) {
 import { spawnSync as spawnSync6 } from "node:child_process";
 import fs26 from "node:fs";
 import path22 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/core/init.ts
 import fs8 from "node:fs";
@@ -4452,6 +4453,11 @@ function cmdModels(p) {
   console.log(has(p, "json") ? JSON.stringify(table2, null, 2) : formatModels(table2));
   return 0;
 }
+function cmdHookStart() {
+  const script = path22.join(path22.dirname(path22.dirname(fileURLToPath3(import.meta.url))), "hooks", "session-start.mjs");
+  if (fs26.existsSync(script)) spawnSync6(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
+  return 0;
+}
 function cmdInit(p) {
   const fallback = flag(p, "fallback");
   const plan = planInit({ model: flag(p, "model"), fallback: fallback === void 0 ? void 0 : fallback.split(",").map((s) => s.trim()).filter(Boolean) });
@@ -4800,6 +4806,7 @@ Usage
                                         models each worker offers, with effort levels, your costs and usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
+  pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
@@ -4864,6 +4871,7 @@ var COMMANDS = {
   models: cmdModels,
   statusline: cmdStatusline,
   "hook-card": cmdHookCard,
+  "hook-start": cmdHookStart,
   doctor: (p) => doctor4(has(p, "probe")),
   config: cmdConfig,
   init: cmdInit,

@@ -19,6 +19,7 @@
     "workflow"
   ],
   "skills": "./skills/",
+  "hooks": "./hooks/codex-hooks.json",
   "interface": {
     "displayName": "Pitroom",
     "shortDescription": "Cheap workers for your agent",

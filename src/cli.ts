@@ -48,6 +48,7 @@ Usage
                                         models each worker offers, with effort levels, your costs and usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
+  pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
@@ -115,6 +116,7 @@ const COMMANDS: Record<string, Command> = {
   models: cmd.cmdModels,
   statusline: cmd.cmdStatusline,
   'hook-card': cmd.cmdHookCard,
+  'hook-start': cmd.cmdHookStart,
   doctor: (p) => doctor(has(p, 'probe')),
   config: cmd.cmdConfig,
   init: cmd.cmdInit,
