@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.9
+
+### Dashboard
+- Every run card shows which worker ran it: its logo under the state icon, and while the worker is running its animated pixel mascot (Claude Code, Codex and OpenCode; the characters are from [CodeIsland](https://github.com/wxtsky/CodeIsland), MIT, credited in `THIRD_PARTY_NOTICES.md`).
+
+### README
+- A short screen recording of the dashboard at the top, and screenshots with the new cards. `scripts/demo-dash.mjs` records it too when `ffmpeg` is installed.
+
 ## 0.6.8
 
 ### Dashboard

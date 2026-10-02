@@ -37,6 +37,12 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 
 **Your agent decides · Cheap workers do the typing · A second model reviews**
 
+<br />
+
+<img src="docs/dash-demo.gif" alt="The Pitroom dashboard: running workers with their animated mascots, a finished run opening into its task, steps, result and diff, then the History and Stats tabs (sample data)" width="82%" />
+
+<sub>`pitroom dash`, with sample data</sub>
+
 </div>
 
 ---
@@ -148,7 +154,7 @@ Every run prints a receipt, and `pitroom savings` adds them up (`--card` writes 
 
 The screenshots below show sample data (an imaginary `shop-api` project), not a real one.
 
-**Live.** What is running now, and the latest runs. Running cards show a timer and the worker's last words; finished ones show the result and, for reviews, the findings.
+**Live.** What is running now, and the latest runs. Running cards show a timer, the worker's last words and its animated pixel mascot (a finished card shows the worker's logo); finished ones show the result and, for reviews, the findings.
 
 <p align="center"><img src="docs/dash-live.png" width="100%" alt="The Live tab: four running workers with timers and progress bars, then finished runs with approved and needs-fixes badges, step counts, tokens and savings"></p>
 

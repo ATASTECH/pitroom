@@ -121,6 +121,7 @@ const now = Date.now();
 const sleeper = spawn('sleep', ['1200'], { detached: true, stdio: 'ignore' });
 sleeper.unref();
 let chrome;
+const PROFILE = fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'));
 let serving = false;
 // Runs on every way out, a failure included: nothing is left running and the sample home is removed.
 process.on('exit', () => {
@@ -128,6 +129,7 @@ process.on('exit', () => {
   if (serving) try { execFileSync(process.execPath, [path.join(root, 'dist', 'pitroom.mjs'), 'dash', '--stop'], { env: { ...process.env, PITROOM_HOME: HOME }, stdio: 'ignore' }); } catch { /* not running */ }
   try { process.kill(sleeper.pid); } catch { /* gone */ }
   fs.rmSync(HOME, { recursive: true, force: true });
+  fs.rmSync(PROFILE, { recursive: true, force: true });
 });
 
 // ~21 days of history for the statistics
@@ -174,7 +176,7 @@ const url = execFileSync(process.execPath, [cli, 'dash', '--detach', '--port', '
 serving = true;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=9455', `--user-data-dir=${fs.mkdtempSync(path.join(os.tmpdir(), 'chr-'))}`, 'about:blank'], { stdio: 'ignore' });
+chrome = spawn(CHROME, ['--headless=new', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=9455', `--user-data-dir=${PROFILE}`, 'about:blank'], { stdio: 'ignore' });
 let tab;
 for (let i = 0; i < 60 && !tab; i++) { try { tab = (await (await fetch('http://127.0.0.1:9455/json')).json()).find((t) => t.type === 'page'); } catch { await sleep(200); } }
 const ws = new WebSocket(tab.webSocketDebuggerUrl);
@@ -204,6 +206,40 @@ await shot('dash-live.png', { height: 1020 });
 await shot('dash-card.png', { height: 1240, click: "[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()", wait: 3000 });
 await shot('dash-history.png', { hash: '#history', height: 940 });
 await shot('dash-stats.png', { hash: '#stats', height: 980 });
+
+// ── a short screen recording for the README (needs ffmpeg; skipped without it) ────────────────────────────
+const ffmpeg = process.env.FFMPEG ?? 'ffmpeg';
+let hasFfmpeg = true;
+try { execFileSync(ffmpeg, ['-version'], { stdio: 'ignore' }); } catch { hasFfmpeg = false; }
+if (hasFfmpeg) {
+  const frames = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-frames-'));
+  let f = 0;
+  const grab = async (count = 1) => {
+    for (let i = 0; i < count; i++) {
+      const data = (await send('Page.captureScreenshot', { format: 'png' })).data;
+      fs.writeFileSync(path.join(frames, `f${String(f++).padStart(4, '0')}.png`), Buffer.from(data, 'base64'));
+    }
+  };
+  const click = (text) => evaluate(`[...document.querySelectorAll('[role=tab]')].find((e) => e.textContent === ${JSON.stringify(text)})?.click()`);
+  await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 820, deviceScaleFactor: 1, mobile: false });
+  await send('Page.navigate', { url: 'about:blank' });
+  await send('Page.navigate', { url });
+  await sleep(2200);
+  await grab(22);                                        // the Live tab: spinners, mascots, timers
+  await evaluate("[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()");
+  await grab(20);                                        // the card opens
+  for (let i = 0; i < 12; i++) { await evaluate("document.querySelector('[data-slot=\"scroll-area-viewport\"]')?.scrollBy({ top: 70 })"); await grab(1); }
+  await grab(6);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await grab(10);
+  await click('History'); await sleep(500); await grab(12);
+  await click('Stats'); await sleep(500); await grab(14);
+  const out = path.join(root, 'docs', 'dash-demo.gif');
+  execFileSync(ffmpeg, ['-y', '-loglevel', 'error', '-framerate', '9', '-i', path.join(frames, 'f%04d.png'), '-vf', 'scale=900:-1:flags=lanczos,split[a][b];[a]palettegen=max_colors=96:stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=5:diff_mode=rectangle', '-loop', '0', out]);
+  fs.rmSync(frames, { recursive: true, force: true });
+  console.log(`docs/dash-demo.gif (${f} frames, ${(fs.statSync(out).size / 1e6).toFixed(1)} MB)`);
+}
 
 ws.close();
 process.exit(0);
