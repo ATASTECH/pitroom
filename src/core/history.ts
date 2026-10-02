@@ -200,6 +200,7 @@ export interface ArchivedRun {
   meta: RunMeta;
   answer: string;
   patch?: string;
+  patchTruncated?: boolean;
   steps: (Step & { t?: number })[];
 }
 
@@ -215,7 +216,7 @@ export function archivedRun(id: string): ArchivedRun | undefined {
       kind: s.kind, name: s.name ?? undefined, text: s.text, ok: s.ok === null ? undefined : !!s.ok, at: s.at ?? undefined,
       t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1000)) : undefined,
     }));
-    return { meta: JSON.parse(r.meta_json), answer: r.answer ?? '', patch: r.patch ?? undefined, steps };
+    return { meta: JSON.parse(r.meta_json), answer: r.answer ?? '', patch: r.patch ?? undefined, patchTruncated: r.patch?.length >= PATCH_MAX, steps };
   } catch {
     return undefined;
   }

@@ -34,6 +34,11 @@ if (cmd === '--version') {
   process.exit(0);
 }
 if (cmd === 'models') {
+  // MOCK_MODELS_COLD: the first call prints nothing, as real OpenCode does while its service starts
+  if (process.env.MOCK_MODELS_COLD && process.env.MOCK_LOG) {
+    const marker = `${process.env.MOCK_LOG}.cold`;
+    if (!fs.existsSync(marker)) { fs.writeFileSync(marker, ''); process.exit(0); }
+  }
   console.log((process.env.MOCK_MODELS ?? 'mock/good-model,mock/other').split(',').join('\n'));
   process.exit(0);
 }

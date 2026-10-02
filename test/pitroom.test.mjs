@@ -302,6 +302,10 @@ test('init proposes a starter config from your own models and writes it only wit
   const written = JSON.parse(fs.readFileSync(env.PITROOM_CONFIG, 'utf8'));
   assert.deepEqual(written.models, { opencode: 'mock/a-free' });
   assert.deepEqual(written.fallback, ['opencode:mock/c-free']);
+  // OpenCode's first `models` call can come back empty while its service starts: init asks again
+  const cold = JSON.parse(s.run(['init', '--json'], { ...env, MOCK_MODELS_COLD: '1' }).stdout);
+  assert.equal(cold.opencode.models, 4);
+  assert.deepEqual(cold.config.fallback, ['opencode:mock/a-free', 'opencode:mock/b-free']);
   // a model that OpenCode does not have is refused
   assert.notEqual(s.run(['init', '--model', 'nope/none'], env).status, 0);
   // with no default model OpenCode has, the user has to choose

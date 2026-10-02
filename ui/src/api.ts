@@ -1,4 +1,6 @@
 // Types and fetchers for the dashboard's read-only JSON API (see src/core/dash.ts).
+import type { FileDiffData } from '../../src/core/file-diff';
+export type { FileDiffData, FileDiffLine } from '../../src/core/file-diff';
 export type RunState = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
 
 export interface DashRun {
@@ -44,6 +46,7 @@ export interface RunDetail {
   answer: string;
   changes: { status: string; path: string }[];
   patch?: string;
+  fileDiffs?: FileDiffData[];
   info: Record<string, string | number | undefined>;
   attempts: { target: string; error: string }[];
   warnings: string[];

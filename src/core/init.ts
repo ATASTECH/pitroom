@@ -40,7 +40,8 @@ export function planInit(opts: { model?: string; fallback?: string[] } = {}): In
     const b = getBackend('opencode');
     let models: string[] = [];
     try {
-      models = b.listModels?.() ?? [];
+      // catalog() asks twice: the first `opencode models` can come back empty while OpenCode's service starts
+      models = b.catalog ? b.catalog().models.map((m) => m.id) : (b.listModels?.() ?? []);
     } catch {
       notes.push('could not list OpenCode models (is it logged in?)');
     }

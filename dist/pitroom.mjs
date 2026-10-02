@@ -1463,7 +1463,7 @@ function planInit(opts = {}) {
     const b = getBackend("opencode");
     let models = [];
     try {
-      models = b.listModels?.() ?? [];
+      models = b.catalog ? b.catalog().models.map((m) => m.id) : b.listModels?.() ?? [];
     } catch {
       notes.push("could not list OpenCode models (is it logged in?)");
     }

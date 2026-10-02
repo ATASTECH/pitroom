@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
+import { fileDiffs, type FileDiffData } from './file-diff.js';
 import { MISSING, PAGE, THEME_SCRIPT } from './dash-page.js';
 import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
@@ -125,6 +126,7 @@ export interface RunDetail {
   answer: string;
   changes: { status: string; path: string }[];
   patch?: string;
+  fileDiffs: FileDiffData[];
   info: Record<string, string | number | undefined>;
   attempts: { target: string; error: string }[];
   warnings: string[];
@@ -178,7 +180,8 @@ export function runDetail(id: string): RunDetail | undefined {
   // The worker's closing words are the result, shown below; do not show them twice.
   const lastSay = steps.at(-1);
   if (lastSay?.kind === 'say' && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
-  const patch = kept?.patch ?? readFile(id, 'changes.patch');
+  const fullPatch = readRunFile(id, 'changes.patch');
+  const patch = fullPatch ?? kept?.patch ?? '';
   const patchLines = patch.split('\n');
   const u = m.usage;
   return {
@@ -189,6 +192,7 @@ export function runDetail(id: string): RunDetail | undefined {
     steps,
     answer,
     changes: m.changes ?? [],
+    fileDiffs: fileDiffs(patch, m.changes ?? [], fullPatch === undefined && kept?.patchTruncated),
     patch: patch ? `${patchLines.slice(0, PATCH_LINES).join('\n')}${patchLines.length > PATCH_LINES ? `\n… ${patchLines.length - PATCH_LINES} more lines (pitroom show ${id} --patch)` : ''}` : undefined,
     info: {
       worker: (m.ran ?? m.worker).backend, // the model has its own line
