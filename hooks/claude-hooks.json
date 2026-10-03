@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/pitroom.mjs\" hook-card",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -18,5 +18,6 @@
     "subagents",
     "tokens",
     "workers"
-  ]
+  ],
+  "hooks": "./hooks/claude-hooks.json"
 }

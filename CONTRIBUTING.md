@@ -23,7 +23,7 @@ The tests are end-to-end against the built CLI with fake worker CLIs, plus adapt
 | `src/backends/<worker>` | one adapter per worker CLI ([how adapters work](docs/backends.md)) |
 | `src/vcs` | the git snapshot, isolation and git guard |
 | `skills/` | the `pitroom-*` agent skills and `using-pitroom` |
-| `.claude-plugin`, `.codex-plugin`, `hooks` | plugin manifests and the session-start hook |
+| `.claude-plugin`, `.codex-plugin`, `gemini-extension.json`, `hooks` | plugin and extension manifests and the hooks |
 | `test/` | `*.test.mjs` (Node's test runner) and `fixtures/` |
 
 ## Changes

@@ -774,6 +774,8 @@ function doctor3({ models, hasFallback }) {
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
+  } else if (type === "gemini-api-key" || type === "vertex-ai") {
+    checks.push({ level: "ok", message: `Gemini CLI: ${type === "vertex-ai" ? "Vertex AI" : "an API key"} is selected (kept by Gemini CLI)` });
   } else if (signedIn && type === "oauth-personal") {
     checks.push({
       level: "warn",

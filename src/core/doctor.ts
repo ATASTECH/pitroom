@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getBackend } from '../backends/index.js';
+import { allBackends, getBackend } from '../backends/index.js';
 import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
@@ -133,6 +133,22 @@ export function doctor(probe: boolean): number {
     add('ok', `${backend.name}: read-only runs enforced by ${READ_ONLY_HOW[backend.capabilities.readOnly]}`);
   }
 
+  // Worker CLIs that are installed but not in the config: say so, so a new worker is not invisible (a problem with
+  // one is not a problem with this setup, so nothing here counts as a warning).
+  const unused = allBackends().filter((b) => !byBackend.has(b.id));
+  for (const backend of unused) {
+    let found: DoctorCheck[];
+    try {
+      found = backend.doctor({ models: [], hasFallback: true });
+    } catch {
+      continue;
+    }
+    if (!found.length || found[0]!.level === 'fail') continue; // not installed
+    section(`${backend.name} (installed, not in your config)`);
+    for (const c of found) add('ok', c.message);
+    add('ok', `use it with -W ${backend.id}[:model], or name it in "fallback" or "tiers" in the config`);
+  }
+
   section('Skills and agents');
   addAll(skillChecks());
 
@@ -212,6 +228,14 @@ function skillChecks(): DoctorCheck[] {
     else if (names.length) checks.push({ level: 'warn', message: `skills in ${base}: only ${names.join(', ')} of ${all.length}; run \`pitroom install\`` });
     else if (!viaPlugin) checks.push({ level: 'warn', message: `no Pitroom skills in ${base}; run \`pitroom install\`` });
   }
+  if (geminiExtensionInstalled()) {
+    const linked = installedSkills().some((i) => i.base.includes(`${path.sep}.agents${path.sep}`) && i.names.length);
+    checks.push(
+      linked
+        ? { level: 'warn', message: 'Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`' }
+        : { level: 'ok', message: 'Gemini CLI extension installed (skills + context)' },
+    );
+  }
   if (viaPlugin) {
     const linked = installedSkills().some((i) => i.base.includes(`${path.sep}.claude${path.sep}`) && i.names.length);
     checks.push(
@@ -232,6 +256,12 @@ function skillChecks(): DoctorCheck[] {
     checks.push({ level: 'warn', message: 'no `pitroom` launcher on PATH: run `pitroom install`' });
   }
   return checks;
+}
+
+/** Is Pitroom installed as a Gemini CLI extension (`gemini extensions install …`)? */
+function geminiExtensionInstalled(): boolean {
+  const home = process.env.GEMINI_CLI_HOME ?? os.homedir();
+  return fs.existsSync(path.join(home, '.gemini', 'extensions', 'pitroom'));
 }
 
 function pluginInstalled(): boolean {

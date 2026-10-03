@@ -874,6 +874,8 @@ function doctor3({ models, hasFallback }) {
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
+  } else if (type === "gemini-api-key" || type === "vertex-ai") {
+    checks.push({ level: "ok", message: `Gemini CLI: ${type === "vertex-ai" ? "Vertex AI" : "an API key"} is selected (kept by Gemini CLI)` });
   } else if (signedIn && type === "oauth-personal") {
     checks.push({
       level: "warn",
@@ -5289,6 +5291,19 @@ function doctor5(probe) {
     addAll(backend.doctor({ models: [...new Set(models)], hasFallback: chain.length > 1 }));
     add("ok", `${backend.name}: read-only runs enforced by ${READ_ONLY_HOW[backend.capabilities.readOnly]}`);
   }
+  const unused = allBackends().filter((b) => !byBackend.has(b.id));
+  for (const backend of unused) {
+    let found;
+    try {
+      found = backend.doctor({ models: [], hasFallback: true });
+    } catch {
+      continue;
+    }
+    if (!found.length || found[0].level === "fail") continue;
+    section2(`${backend.name} (installed, not in your config)`);
+    for (const c of found) add("ok", c.message);
+    add("ok", `use it with -W ${backend.id}[:model], or name it in "fallback" or "tiers" in the config`);
+  }
   section2("Skills and agents");
   addAll(skillChecks());
   if (probe && chain[0]) {
@@ -5364,6 +5379,12 @@ function skillChecks() {
     else if (names.length) checks.push({ level: "warn", message: `skills in ${base2}: only ${names.join(", ")} of ${all.length}; run \`pitroom install\`` });
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
+  if (geminiExtensionInstalled()) {
+    const linked = installedSkills().some((i) => i.base.includes(`${path24.sep}.agents${path24.sep}`) && i.names.length);
+    checks.push(
+      linked ? { level: "warn", message: "Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`" } : { level: "ok", message: "Gemini CLI extension installed (skills + context)" }
+    );
+  }
   if (viaPlugin) {
     const linked = installedSkills().some((i) => i.base.includes(`${path24.sep}.claude${path24.sep}`) && i.names.length);
     checks.push(
@@ -5380,6 +5401,10 @@ function skillChecks() {
     checks.push({ level: "warn", message: "no `pitroom` launcher on PATH: run `pitroom install`" });
   }
   return checks;
+}
+function geminiExtensionInstalled() {
+  const home2 = process.env.GEMINI_CLI_HOME ?? os10.homedir();
+  return fs28.existsSync(path24.join(home2, ".gemini", "extensions", "pitroom"));
 }
 function pluginInstalled() {
   try {

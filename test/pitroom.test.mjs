@@ -528,6 +528,36 @@ test('doctor checks a Gemini CLI worker: version, sign-in and a model hint', () 
   assert.match(out, /Gemini CLI: read-only runs enforced by the CLI's read-only approval mode/);
 });
 
+test('doctor lists a worker CLI that is installed but not in the config, without counting it as a problem', () => {
+  const s = sandbox();
+  const out = s.run(['doctor'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, GEMINI_API_KEY: 'test-key' }).stdout;
+  assert.match(out, /^Gemini CLI \(installed, not in your config\)$/m);
+  assert.match(out, /✔ Gemini CLI 0\.35\.3 at/);
+  assert.match(out, /use it with -W gemini\[:model\]/);
+  // one that is not installed stays out of the way
+  const missing = s.run(['doctor'], { PITROOM_GEMINI_BIN: path.join(s.base, 'no-such-gemini') }).stdout;
+  assert.doesNotMatch(missing, /Gemini CLI \(installed, not in your config\)/);
+  // a Gemini CLI signed in with an API key it keeps itself is not "not signed in"
+  const home = path.join(s.base, 'gemini-home');
+  fs.mkdirSync(path.join(home, '.gemini'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } } }));
+  const kept = s.run(['doctor'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, GEMINI_CLI_HOME: home, GEMINI_API_KEY: '' }).stdout;
+  assert.match(kept, /Gemini CLI: an API key is selected \(kept by Gemini CLI\)/);
+  assert.doesNotMatch(kept, /not signed in/);
+});
+
+test('doctor sees Pitroom as a Gemini CLI extension, and warns when its skills are also linked into ~/.agents/skills', () => {
+  const s = sandbox();
+  const home = path.join(s.base, 'home-dir');
+  fs.mkdirSync(path.join(home, '.gemini', 'extensions', 'pitroom'), { recursive: true });
+  const alone = s.run(['doctor'], { HOME: home, USERPROFILE: home, GEMINI_CLI_HOME: home }).stdout;
+  assert.match(alone, /✔ Gemini CLI extension installed \(skills \+ context\)/);
+  fs.mkdirSync(path.join(home, '.agents', 'skills', 'using-pitroom'), { recursive: true });
+  fs.writeFileSync(path.join(home, '.agents', 'skills', 'using-pitroom', 'SKILL.md'), '---\nname: using-pitroom\n---\n');
+  const twice = s.run(['doctor'], { HOME: home, USERPROFILE: home, GEMINI_CLI_HOME: home }).stdout;
+  assert.match(twice, /! Pitroom is installed as a Gemini CLI extension and linked into ~\/\.agents\/skills: Gemini loads the skills twice/);
+});
+
 test('config "models" gives each worker a default model; explicit models win', () => {
   const s = sandbox();
   s.config({ models: { opencode: 'mock/configured' }, fallback: ['opencode'] });
