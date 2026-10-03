@@ -113,9 +113,9 @@ test('targets: backend[:model], bare models and models containing ":"', () => {
   assert.throws(() => parseTarget('  ', 'opencode'), /empty worker target/);
 });
 
-test('targets: planned workers are recognised with a clear message', () => {
+test('targets: gemini is a worker; an unknown one gets a clear message', () => {
   assert.deepEqual(parseTarget('gemini:gemini-3-flash', 'opencode'), { backend: 'gemini', model: 'gemini-3-flash' });
-  assert.throws(() => getBackend('gemini'), /"gemini" worker is not supported yet/);
+  assert.equal(getBackend('gemini').id, 'gemini');
   assert.throws(() => getBackend('nope'), /unknown worker "nope"/);
 });
 
@@ -191,4 +191,84 @@ test('claude: an auth failure did no work, so the fallback chain may move on', (
   assert.equal(run.usage.steps, 0);
   assert.equal(run.model, 'claude-opus-5[1m]');
   assert.equal(b.failure(run, '', 1).kind, 'auth');
+});
+
+test('gemini: read is the CLI\'s plan mode; write and isolate auto-approve edits and allow vetted shell', () => {
+  const b = getBackend('gemini');
+  const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];
+  const policies = (inv) => inv.args.flatMap((a, i) => (a === '--policy' ? [path.basename(inv.args[i + 1])] : []));
+  const read = b.invocation(request({ mode: 'read' }));
+  assert.equal(after(read, '--approval-mode'), 'plan');
+  assert.deepEqual(policies(read), ['base.toml', 'no-web.toml'], 'secrets and MCP refused, no web unless asked');
+  for (const mode of ['write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    assert.equal(after(inv, '--approval-mode'), 'auto_edit', mode);
+    assert.deepEqual(policies(inv), ['base.toml', 'no-web.toml', 'shell.toml'], mode);
+  }
+  assert.deepEqual(policies(b.invocation(request({ mode: 'read', web: true }))), ['base.toml'], 'a web run drops the no-web rule');
+  for (const mode of ['read', 'write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    assert.equal(after(inv, '-e'), 'none', 'no extensions');
+    assert.match(inv.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH, /policies[\\/]gemini[\\/]system-settings\.json$/, 'the isolating settings outrank the user\'s');
+    assert.ok(!inv.args.includes('yolo') && !inv.args.some((a) => /yolo/i.test(a)));
+  }
+});
+
+test('gemini: the shipped settings and rules close off hooks, MCP and unsafe shell', () => {
+  const dir = path.resolve(FIXTURES, '..', '..', 'policies', 'gemini');
+  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'system-settings.json'), 'utf8'));
+  assert.equal(settings.hooksConfig.enabled, false, 'the user\'s hooks would run on every worker');
+  assert.deepEqual(settings.mcp.allowed, [], 'no MCP server');
+  assert.equal(settings.security.disableYoloMode, true);
+  assert.equal(settings.general.enableAutoUpdate, false);
+  const shell = fs.readFileSync(path.join(dir, 'shell.toml'), 'utf8');
+  for (const cmd of ['git commit', 'git push', 'rm -rf', 'sudo', 'pitroom', 'gemini']) assert.ok(shell.includes(`"${cmd}"`), cmd);
+  assert.match(fs.readFileSync(path.join(dir, 'base.toml'), 'utf8'), /mcpName = "\*"\ndecision = "deny"/);
+  assert.match(fs.readFileSync(path.join(dir, 'no-web.toml'), 'utf8'), /google_web_search/);
+});
+
+test('gemini: "model#level" drops the level (no effort option); a prompt starting with "-" stays a value', () => {
+  const b = getBackend('gemini');
+  const inv = b.invocation(request({ model: 'gemini-2.5-flash#high' }));
+  assert.equal(inv.args[inv.args.indexOf('--model') + 1], 'gemini-2.5-flash');
+  assert.equal(b.invocation(request({})).args.includes('--model'), false);
+  const dash = b.invocation(request({ prompt: '--help me' }));
+  assert.equal(dash.args[dash.args.indexOf('--prompt') + 1], ' --help me');
+});
+
+test('gemini: the stream is merged into steps and an answer; hook noise and warnings are ignored', () => {
+  const b = getBackend('gemini');
+  const stream = [
+    'Created execution plan for SessionEnd: 2 hook(s) to execute in parallel', // a user's hook printing into stdout
+    '{"type":"init","timestamp":"t","session_id":"S1","model":"gemini-2.5-flash"}',
+    '{"type":"message","timestamp":"t","role":"assistant","content":"Look","delta":true}',
+    '{"type":"message","timestamp":"t","role":"assistant","content":"ing.","delta":true}',
+    '{"type":"tool_use","timestamp":"t","tool_name":"glob","tool_id":"g1","parameters":{"pattern":"**/*.ts"}}',
+    '{"type":"error","timestamp":"t","severity":"warning","message":"loop detected"}',
+    '{"type":"tool_result","timestamp":"t","tool_id":"g1","status":"success"}',
+    '{"type":"message","timestamp":"t","role":"assistant","content":"Done: ","delta":true}',
+    '{"type":"message","timestamp":"t","role":"assistant","content":"two files.","delta":true}',
+    '{"type":"result","timestamp":"t","status":"success","stats":{"total_tokens":100,"input_tokens":80,"output_tokens":20,"cached":30,"input":50,"tool_calls":1,"models":{}}}',
+  ].join('\n');
+  const run = b.parse(stream);
+  assert.equal(run.model, 'gemini-2.5-flash');
+  assert.equal(run.finalText, 'Done: two files.', 'only the answer after the last tool call');
+  assert.equal(run.error, undefined, 'a warning is not an error');
+  assert.equal(run.usage.steps, 2);
+  assert.deepEqual([run.usage.input, run.usage.cacheRead, run.usage.output, run.usage.total], [50, 30, 20, 100]);
+  assert.deepEqual(run.timeline.map((s) => s.kind), ['say', 'tool', 'say']);
+  assert.equal(run.timeline[1].ok, true);
+  assert.equal(run.tools.glob, 1);
+});
+
+test('gemini: a refused tool counts as denied; an error result is the failure message', () => {
+  const b = getBackend('gemini');
+  const denied = b.parse(fs.readFileSync(path.join(FIXTURES, 'gemini', 'events', 'write-edit.jsonl'), 'utf8'));
+  assert.equal(denied.usage.denied, 1);
+  assert.deepEqual(denied.edits, ['/work/math.js', '/work/test/divide.test.js']);
+  assert.ok(denied.timeline.some((s) => s.kind === 'shell' && s.ok === false));
+  const quota = b.parse(fs.readFileSync(path.join(FIXTURES, 'gemini', 'failures', 'quota.stdout.jsonl'), 'utf8'));
+  assert.match(quota.error, /exhausted your capacity/);
+  assert.equal(quota.finalText, '');
+  assert.equal(b.failure(quota, '', 1).kind, 'rate-limited');
 });

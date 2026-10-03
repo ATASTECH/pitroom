@@ -19,4 +19,4 @@ export function splitWorker(w: string): { backend: string; model?: string } {
   const m = /^(\S+)(?: \((.*)\))?$/.exec(w);
   return { backend: m?.[1] ?? w, model: m?.[2] };
 }
-export const BACKEND_COLOR: Record<string, string> = { opencode: 'var(--info)', codex: 'var(--success)', claude: 'var(--brand)' };
+export const BACKEND_COLOR: Record<string, string> = { opencode: 'var(--info)', codex: 'var(--success)', claude: 'var(--brand)', gemini: 'var(--gemini)' };

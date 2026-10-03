@@ -1,5 +1,5 @@
 // The contract every worker CLI adapter implements (OpenCode today; Codex, Claude
-// Code, Gemini CLI next). Adapters only translate: build the command line for a
+// Code, Gemini CLI). Adapters only translate: build the command line for a
 // request and normalise the CLI's output. Everything that must hold for every
 // worker — closed stdin, the git guard, timeouts, snapshots, reference checks,
 // receipts — lives in the core, so an adapter cannot forget it.

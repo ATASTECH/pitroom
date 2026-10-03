@@ -49,8 +49,8 @@ export function resolveChain(flags: { worker?: string; model?: string; tier?: st
     }
   }
 
-  // Codex and Claude Code run their own default model when none is pinned; it can change and cost more.
-  if ((worker.backend === 'codex' || worker.backend === 'claude') && !(worker.model ?? '').replace(/#.*$/, '')) {
+  // Codex, Claude Code and Gemini CLI run their own default model when none is pinned; it can change and cost more.
+  if ((worker.backend === 'codex' || worker.backend === 'claude' || worker.backend === 'gemini') && !(worker.model ?? '').replace(/#.*$/, '')) {
     warnings.push(
       `${worker.backend} has no pinned model, so it runs its own default (which can change and cost more): set "models": {"${worker.backend}": "<model>"} in the pitroom config, or pass -W ${worker.backend}:<model>`,
     );

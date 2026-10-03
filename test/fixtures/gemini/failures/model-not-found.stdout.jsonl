@@ -1,0 +1,2 @@
+{"type":"init","timestamp":"2026-10-03T12:00:00.000Z","session_id":"1a2b3c4d-0000-4000-8000-000000000002","model":"gemini-9-ultra"}
+{"type":"result","timestamp":"2026-10-03T12:00:01.000Z","status":"error","error":{"type":"ApiError","message":"[404 Not Found] models/gemini-9-ultra is not found for API version v1beta, or is not supported for generateContent."}}

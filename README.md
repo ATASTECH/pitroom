@@ -6,7 +6,7 @@
 
 **Cheaper and faster: hand the reading, fixes, tests and reviews to workers that run in parallel. Keep the decisions.**
 
-Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code workers
+Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code / Gemini CLI workers
 
 <br />
 
@@ -72,7 +72,7 @@ Pitroom uses your worker CLI's default model: a free tier, a local MLX/Ollama mo
 
 ### Any worker CLI
 
-OpenCode, Codex CLI and Claude Code today, Gemini CLI soon.
+OpenCode, Codex CLI, Claude Code and Gemini CLI.
 
 One group can mix them, and a fallback chain can cross them ([how adapters work](docs/backends.md)).
 
@@ -512,7 +512,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | OpenCode (v2+) | ✅ | per-run permission rules | reported | private `--standalone` server per run |
 | Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
-| Gemini CLI | soon | approval mode + policy engine | | |
+| Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | sign in with `gemini` or set `GEMINI_API_KEY` (Google AI Studio); your Gemini hooks, MCP servers, extensions and `GEMINI.md` are switched off for workers; its default can be a Pro model, so prefer `-W gemini:gemini-2.5-flash`; no `--continue` (see [the notes](docs/backends.md#gemini-cli-notes)) |
 
 ### Models, costs and effort
 

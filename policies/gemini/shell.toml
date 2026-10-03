@@ -1,0 +1,50 @@
+# Added in write and isolate modes. Shell commands default to "ask the user", which a headless run cannot answer,
+# so they are allowed here, minus history-changing git, bulk deletes and other agents (the git guard backs this up).
+[[rule]]
+toolName = "run_shell_command"
+decision = "allow"
+priority = 500
+
+[[rule]]
+toolName = "run_shell_command"
+decision = "deny"
+priority = 900
+commandPrefix = [
+  "git commit",
+  "git push",
+  "git pull",
+  "git reset",
+  "git checkout",
+  "git restore",
+  "git clean",
+  "git stash",
+  "git rebase",
+  "git merge",
+  "git switch",
+  "git branch",
+  "git tag",
+  "git rm",
+  "git worktree",
+  "git update-ref",
+  "git config",
+  "git remote",
+  "git cherry-pick",
+  "git revert",
+  "git am",
+  "git add",
+  "rm -rf",
+  "rm -fr",
+  "sudo",
+  "chown",
+  "kill",
+  "pkill",
+  "killall",
+  "gh",
+  "npm publish",
+  "pitroom",
+  "opencode",
+  "claude",
+  "codex",
+  "gemini"
+]
+deny_message = "Pitroom: history-changing git, destructive commands and other agents are not for workers."

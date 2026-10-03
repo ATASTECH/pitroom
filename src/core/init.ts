@@ -74,7 +74,7 @@ export function planInit(opts: { model?: string; fallback?: string[] } = {}): In
   // Tiers name a worker per kind of task (plans use them): only worth proposing when more than one worker exists.
   const tiers = Object.fromEntries(TIER_ORDER.filter(([, id]) => workers.find((w) => w.id === id)?.found));
   if (Object.keys(tiers).length > 1) config.tiers = tiers;
-  if (!workers.some((w) => w.found)) blocked = 'no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI or Claude Code first';
+  if (!workers.some((w) => w.found)) blocked = 'no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI, Claude Code or Gemini CLI first';
   else if (!blocked && !Object.keys(config).length) notes.push('nothing to propose: the default model and the single worker need no config');
 
   return { path: file, exists: fs.existsSync(file), workers, opencode, config, blocked, notes };

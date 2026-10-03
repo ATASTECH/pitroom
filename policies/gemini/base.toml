@@ -1,0 +1,24 @@
+# Pitroom's rules for Gemini CLI workers, every mode. Passed with --policy: user tier, so they outrank the CLI's
+# own defaults (priority 900 here is 4.900 there). The read-only mode itself is Gemini's `--approval-mode plan`.
+
+# A worker is told not to read secrets; this makes the file tools refuse too.
+[[rule]]
+toolName = "read_file"
+decision = "deny"
+priority = 950
+argsPattern = '[\\/]\.env[^\\/"]*"|"\.env[^\\/"]*"|[\\/][^\\/"]*\.pem"|[\\/]id_rsa[^\\/"]*"|[\\/]id_ed25519[^\\/"]*"'
+deny_message = "Pitroom: secret files (.env, keys) are not for workers."
+
+[[rule]]
+toolName = "read_many_files"
+decision = "deny"
+priority = 950
+argsPattern = '\.env|\.pem|id_rsa|id_ed25519'
+deny_message = "Pitroom: secret files (.env, keys) are not for workers."
+
+# No other tool servers: MCP tools are refused (the system settings also allow no MCP server).
+[[rule]]
+mcpName = "*"
+decision = "deny"
+priority = 950
+deny_message = "Pitroom: MCP tools are off for workers."

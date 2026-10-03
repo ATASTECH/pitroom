@@ -85,6 +85,7 @@
   --success: oklch(0.6 0.15 160);
   --warning: oklch(0.7 0.15 75);
   --info: oklch(0.6 0.15 235);
+  --gemini: oklch(0.6 0.19 262);
 }
 
 .dark {
@@ -110,6 +111,7 @@
   --success: oklch(0.78 0.16 160);
   --warning: oklch(0.82 0.15 80);
   --info: oklch(0.75 0.14 235);
+  --gemini: oklch(0.72 0.16 262);
 }
 
 @layer base {

@@ -481,6 +481,52 @@ test('fallback crosses backends: Claude Code (session expired) → OpenCode', ()
   assert.match(r.stdout, /SUMMARY: login is in auth.ts/);
 });
 
+const GEMINI_MOCK = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'gemini', 'mock', 'gemini.mjs');
+
+test('a Gemini CLI worker runs in plan mode and its answer comes back with the model it used', () => {
+  const s = sandbox();
+  const before = s.status();
+  const r = s.run(['run', '-W', 'gemini:gemini-2.5-flash', 'where is app.txt?'], { PITROOM_GEMINI_BIN: GEMINI_MOCK });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout, /worker gemini · model gemini-2\.5-flash/);
+  assert.match(r.stdout, /SUMMARY: app\.txt contains a greeting\./);
+  assert.match(r.stdout, /refs: 1\/1 verified/);
+  const call = s.calls().find((c) => c.backend === 'gemini' && c.argv.includes('--output-format'));
+  assert.equal(call.argv[call.argv.indexOf('--approval-mode') + 1], 'plan');
+  assert.equal(call.argv[call.argv.indexOf('--model') + 1], 'gemini-2.5-flash');
+  assert.match(call.systemSettings, /policies[\\/]gemini[\\/]system-settings\.json$/);
+  assert.equal(s.status(), before, 'a read run touches nothing');
+});
+
+test('a Gemini CLI isolated run auto-approves edits and loads the shell rules; a quota error fails over', () => {
+  const s = sandbox();
+  const iso = s.run(['run', '-i', '-W', 'gemini', 'add divide'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, MOCK_GEMINI_FIXTURE: 'events/write-edit.jsonl' });
+  assert.equal(iso.status, 0, iso.stdout + iso.stderr);
+  const call = s.calls().find((c) => c.backend === 'gemini' && c.argv.includes('--output-format'));
+  assert.equal(call.argv[call.argv.indexOf('--approval-mode') + 1], 'auto_edit');
+  assert.ok(call.argv.some((a) => /shell\.toml$/.test(a)));
+  const failover = sandbox().run(['run', '-W', 'gemini', 'where is app.txt?'], {
+    PITROOM_GEMINI_BIN: GEMINI_MOCK,
+    MOCK_GEMINI_FIXTURE: 'failures/quota',
+    PITROOM_FALLBACK: 'opencode:mock/alive',
+    MOCK_ACTIONS: 'answer:SUMMARY: found it',
+  });
+  assert.equal(failover.status, 0, failover.stdout + failover.stderr);
+  assert.match(failover.stdout, /fallback: gemini \(default model\) failed \(.*exhausted your capacity/);
+  assert.match(failover.stdout, /worker opencode/);
+});
+
+test('doctor checks a Gemini CLI worker: version, sign-in and a model hint', () => {
+  const s = sandbox();
+  s.config({ worker: 'gemini:gemini-2.5-pro' });
+  const out = s.run(['doctor'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, GEMINI_API_KEY: 'test-key' }).stdout;
+  assert.match(out, /^Gemini CLI$/m);
+  assert.match(out, /✔ Gemini CLI 0\.35\.3 at/);
+  assert.match(out, /Gemini CLI: an API key is set/);
+  assert.match(out, /! Gemini model: gemini-2\.5-pro is the largest tier for a worker; consider -W gemini:gemini-2\.5-flash/);
+  assert.match(out, /Gemini CLI: read-only runs enforced by the CLI's read-only approval mode/);
+});
+
 test('config "models" gives each worker a default model; explicit models win', () => {
   const s = sandbox();
   s.config({ models: { opencode: 'mock/configured' }, fallback: ['opencode'] });

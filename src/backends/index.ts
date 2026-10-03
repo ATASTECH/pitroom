@@ -3,15 +3,16 @@
 import { UserError } from '../core/errors.js';
 import { claude } from './claude/index.js';
 import { codex } from './codex/index.js';
+import { gemini } from './gemini/index.js';
 import { opencode } from './opencode/index.js';
 import type { Backend } from './types.js';
 
-const REGISTRY = new Map<string, Backend>([opencode, codex, claude].map((b) => [b.id, b]));
+const REGISTRY = new Map<string, Backend>([opencode, codex, claude, gemini].map((b) => [b.id, b]));
 
 export const DEFAULT_BACKEND = opencode.id;
 
 /** Recognised so users get a clear message instead of a confusing model-not-found. */
-const PLANNED = ['gemini'];
+const PLANNED: string[] = [];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
 export const allBackends = (): Backend[] => [...REGISTRY.values()];

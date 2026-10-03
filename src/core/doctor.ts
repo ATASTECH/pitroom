@@ -26,6 +26,7 @@ const NEXT: { when: RegExp; command: string; why: string }[] = [
   { when: /pitroom install|no Pitroom skills|launcher on PATH/, command: 'pitroom install', why: 'link the skills and the pitroom command' },
   { when: /first `node` on PATH/, command: 'nvm alias default 24', why: 'a current Node first in every new shell' },
   { when: /not logged in/, command: 'claude auth login', why: 'sign in the Claude Code worker (Codex: codex login)' },
+  { when: /Gemini CLI is not signed in|IneligibleTierError/, command: 'export GEMINI_API_KEY=…', why: 'a Google AI Studio key for the Gemini worker' },
 ];
 
 /** The first `node` a shell would run, and its version (agent apps start such shells). */

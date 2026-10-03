@@ -58,7 +58,7 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | **OpenCode v2** (`run --standalone --format json`) | permission profile: edit denied, shell allowlist, `execute` and web off | profile: edits on, history-changing git, bulk deletes and `execute` denied | `--session <id>` | reported |
 | **Codex** (`exec --json --ignore-user-config`) | `-c sandbox_mode="read-only"` (OS sandbox) | `-c sandbox_mode="workspace-write"` (writes only in the working dir, no network), `approval_policy="never"` | `exec resume <id>` | tokens only |
 | **Claude Code** (`-p --output-format stream-json --verbose`) | `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk`, tools `Read,Grep,Glob` only | same lockdown, tools `+Edit,Write,Bash`, `--disallowedTools Bash(git commit:*)`… | `--resume <id>` | `total_cost_usd` |
-| **Gemini CLI** (soon; `-p -o stream-json`) | `--approval-mode plan` | `auto_edit` + policy engine rules | index/latest only → `resume: 'none'` | tokens only |
+| **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | index/latest only → `resume: 'none'` | tokens only |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -96,6 +96,19 @@ Recorded v2 streams live in `test/fixtures/opencode/{events,failures}/v2-*`; the
 - **Argument order**: `--tools`, `--allowedTools` and `--disallowedTools` take lists; non-list options follow them and the prompt comes after `--`, so no list can swallow it.
 - **Errors**: an API error arrives as an assistant message with `is_api_error_message` (e.g. `authentication_failed`, "OAuth session expired"); it is not counted as work, so the fallback chain can move on.
 - **Model**: the init event names it. The user's default is often an Opus-class model; `doctor` warns and suggests `-W claude:haiku`.
+
+## Gemini CLI notes
+
+Status: **beta**. The adapter is built from Gemini CLI 0.35's own sources (its `stream-json` event types, policy engine and settings schema) and its pieces were checked against the real CLI where that was possible: the policy files load without errors in Gemini's own TOML loader, the system settings switch the user's hooks off (a real run printed hook output before, none after), and one real failure is recorded. No full real run is recorded yet, because the Google sign-in this machine used (`oauth-personal`, Gemini Code Assist for individuals) now answers `IneligibleTierError`; the event fixtures under `test/fixtures/gemini/events` are therefore constructed from the CLI's event types, and should be replaced by recorded runs once a key works (`GEMINI_API_KEY`, Google AI Studio).
+
+- **Read-only is the CLI's `plan` approval mode.** Its default policy allows only `glob`, `grep_search`, `list_directory`, `read_file`, `google_web_search` and a few built-ins, denies the shell, and lets file writes through only to its own plans folder under `~/.gemini`, not to the project.
+- **`policies/gemini/*.toml`** are passed with `--policy` (user tier, outranking the CLI's defaults): `base.toml` (secret files unreadable, MCP tools refused), `no-web.toml` (no web search or fetch unless `--web`), `shell.toml` for write and isolate (shell is allowed, since a headless run cannot answer "ask the user", minus history-changing git, bulk deletes and other agents). The files are validated with Gemini's own loader.
+- **`GEMINI_CLI_SYSTEM_SETTINGS_PATH`** points at `policies/gemini/system-settings.json`, which outranks the user's settings: hooks off (the user's hooks run on every worker and print into stdout), no MCP servers, no skills, no user `GEMINI.md`, no auto-update, YOLO mode disabled. `-e none` turns extensions off.
+- **Never `--yolo`.** The contract tests reject it, and the system settings disable it too.
+- **Stream**: `message` events carry the answer in `delta` chunks, merged per model turn; a turn ends at a `tool_result`; the final answer is the text after the last tool call. `result.stats` gives tokens (`cached` is part of `input_tokens`), not dollars. Lines that are not JSON are skipped.
+- **Models**: Gemini CLI cannot list models; the catalogue is its built-in names. Its own default may be a Pro model (`doctor` warns), so a worker should pin `-W gemini:gemini-2.5-flash`. There is no effort option: `#level` is dropped.
+- **Resume**: sessions are chosen by index or `latest` per project, which is not safe with parallel workers, so `--continue` is not supported (`resume: 'none'`).
+- **Errors**: they arrive on stderr and in the `result` event. Classified as `auth` (`IneligibleTierError`, sign-in, API key), `rate-limited` (`429`, `RESOURCE_EXHAUSTED`, quota) or `model-unavailable` (`404`), so the fallback chain can move on.
 
 ## Adding a worker
 

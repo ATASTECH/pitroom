@@ -1,0 +1,6 @@
+# Added unless the run asked for the web (--web): Gemini's plan mode would otherwise allow a web search.
+[[rule]]
+toolName = ["google_web_search", "web_fetch"]
+decision = "deny"
+priority = 950
+deny_message = "Pitroom: the web is off for this run (use --web)."

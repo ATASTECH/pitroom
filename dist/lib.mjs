@@ -208,7 +208,8 @@ var DENY_BASH = [
   "pitroom",
   "opencode",
   "claude",
-  "codex"
+  "codex",
+  "gemini"
 ].map((c) => `Bash(${c}:*)`);
 var SECRETS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*"].map((p) => `Read(${p})`);
 function toolsFor(mode, web2) {
@@ -261,8 +262,8 @@ function failure(run, stderr, exitCode) {
 }
 function defaultModel() {
   try {
-    const settings = JSON.parse(fs2.readFileSync(path2.join(os2.homedir(), ".claude", "settings.json"), "utf8"));
-    return typeof settings.model === "string" ? settings.model : void 0;
+    const settings2 = JSON.parse(fs2.readFileSync(path2.join(os2.homedir(), ".claude", "settings.json"), "utf8"));
+    return typeof settings2.model === "string" ? settings2.model : void 0;
   } catch {
     return void 0;
   }
@@ -541,13 +542,240 @@ var codex = {
   doctor: doctor2
 };
 
-// src/backends/opencode/index.ts
+// src/backends/gemini/index.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
+import fs4 from "node:fs";
+import os4 from "node:os";
+import path4 from "node:path";
+import { fileURLToPath } from "node:url";
+
+// src/backends/gemini/events.ts
+var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
+var DENIED2 = /policy|permission|not allowed|denied|blocked|disallowed|refus/i;
+function parseEvents3(jsonl) {
+  const usage = {
+    input: 0,
+    output: 0,
+    reasoning: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    total: 0,
+    steps: 0,
+    toolCalls: 0,
+    denied: 0
+  };
+  const tools = {};
+  const edits = [];
+  const pendingEdits = /* @__PURE__ */ new Map();
+  const timeline = [];
+  const stepOf = /* @__PURE__ */ new Map();
+  let sessionId;
+  let model;
+  let text = "";
+  let lastText = "";
+  let lastActivity;
+  let error;
+  let turns = 0;
+  let inTurn = false;
+  const flush = () => {
+    const said = text.trim();
+    text = "";
+    if (!said) return;
+    lastText = said;
+    lastActivity = `says: ${oneLine3(said)}`;
+    if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(said, 600) });
+  };
+  const startTurn = () => {
+    if (!inTurn) turns++;
+    inTurn = true;
+  };
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!e || typeof e !== "object") continue;
+    if (e.type === "init") {
+      sessionId ??= e.session_id;
+      model ??= e.model;
+    } else if (e.type === "message") {
+      if (e.role !== "assistant") continue;
+      startTurn();
+      if (!e.delta && text) flush();
+      text += String(e.content ?? "");
+    } else if (e.type === "tool_use") {
+      flush();
+      startTurn();
+      const name = String(e.tool_name ?? "tool");
+      const p = e.parameters ?? {};
+      usage.toolCalls++;
+      tools[name] = (tools[name] ?? 0) + 1;
+      const target = p.file_path ?? p.absolute_path ?? p.path ?? p.dir_path ?? p.pattern ?? p.command ?? p.query ?? p.url ?? p.prompt;
+      lastActivity = `${name} ${target ? oneLine3(String(target), 60) : ""}`.trim();
+      const file = p.file_path ?? p.absolute_path ?? p.path;
+      if (EDIT_TOOLS2.has(name) && file) pendingEdits.set(String(e.tool_id), String(file));
+      if (timeline.length < MAX_STEPS) {
+        const step = { kind: EDIT_TOOLS2.has(name) ? "edit" : name === "run_shell_command" ? "shell" : "tool", name, text: clip3(String(target ?? ""), 240) };
+        timeline.push(step);
+        stepOf.set(String(e.tool_id), step);
+      }
+    } else if (e.type === "tool_result") {
+      inTurn = false;
+      const ok = e.status === "success";
+      const step = stepOf.get(String(e.tool_id));
+      if (step) step.ok = ok;
+      if (!ok && DENIED2.test(`${e.error?.type ?? ""} ${e.error?.message ?? ""}`)) usage.denied++;
+      if (ok && pendingEdits.has(String(e.tool_id))) edits.push(pendingEdits.get(String(e.tool_id)));
+    } else if (e.type === "error") {
+      if (e.severity === "error") error ??= String(e.message ?? "Gemini CLI error");
+    } else if (e.type === "result") {
+      const s = e.stats ?? {};
+      const cached = num3(s.cached);
+      usage.cacheRead += cached;
+      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached);
+      usage.output += num3(s.output_tokens);
+      usage.total += num3(s.total_tokens) || num3(s.input_tokens) + num3(s.output_tokens);
+      usage.toolCalls = Math.max(usage.toolCalls, num3(s.tool_calls));
+      model ??= Object.keys(s.models ?? {})[0];
+      if (e.status === "error") error ??= String(e.error?.message ?? e.error?.type ?? "Gemini CLI error");
+    }
+  }
+  flush();
+  usage.steps = turns;
+  return { sessionId, model, finalText: error ? "" : lastText, usage, tools, edits, lastActivity, timeline, error };
+}
+var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+function num3(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function oneLine3(s, max = 80) {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
+}
+
+// src/backends/gemini/index.ts
+var binary3 = () => findBinary("gemini", "PITROOM_GEMINI_BIN", ["~/.local/bin/gemini"]);
+function gem(args, timeout = 6e4) {
+  const { command, prefix } = resolveCommand(binary3());
+  const r = spawnSync3(command, [...prefix, ...args], {
+    encoding: "utf8",
+    timeout,
+    stdio: ["ignore", "pipe", "pipe"],
+    maxBuffer: 16 * 1024 * 1024
+  });
+  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
+}
+var policyDir = () => path4.resolve(path4.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+function invocation3(req) {
+  const dir = policyDir();
+  const policies = ["base.toml", ...req.web ? [] : ["no-web.toml"], ...req.mode === "read" ? [] : ["shell.toml"]];
+  const args = [
+    // A prompt that starts with "-" would be read as an option: a leading space keeps it a value.
+    "--prompt",
+    req.prompt.startsWith("-") ? ` ${req.prompt}` : req.prompt,
+    "--output-format",
+    "stream-json",
+    "--approval-mode",
+    req.mode === "read" ? "plan" : "auto_edit",
+    "-e",
+    "none"
+  ];
+  for (const p of policies) args.push("--policy", path4.join(dir, p));
+  const [model] = (req.model ?? "").split("#");
+  if (model) args.push("--model", model);
+  const { command, prefix } = resolveCommand(binary3());
+  return { command, args: [...prefix, ...args], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path4.join(dir, "system-settings.json") } };
+}
+function classify3(message) {
+  if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
+    return "auth";
+  }
+  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
+  if (/model[^.]*(not found|not available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
+  return "other";
+}
+function failure3(run, stderr, exitCode) {
+  if (exitCode === 0 && !run.error) return void 0;
+  const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  const detail = lines.find((l) => /error|failed|exceeded|quota|exhausted|unsupported/i.test(l) && !/^at /.test(l)) ?? lines.at(-1);
+  const message = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  return { kind: classify3(message), message };
+}
+var geminiHome = () => path4.join(process.env.GEMINI_CLI_HOME ?? os4.homedir(), ".gemini");
+function settings() {
+  try {
+    return JSON.parse(fs4.readFileSync(path4.join(geminiHome(), "settings.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function defaultModel2() {
+  const m = settings().model;
+  const name = typeof m === "string" ? m : m?.name;
+  return typeof name === "string" ? name : void 0;
+}
+function doctor3({ models, hasFallback }) {
+  const version = gem(["--version"]);
+  if (version.missing || !version.ok) {
+    return [{ level: "fail", message: `gemini not runnable (${binary3()}). Install Gemini CLI (npm i -g @google/gemini-cli), or set PITROOM_GEMINI_BIN` }];
+  }
+  const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary3()}` }];
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
+  const signedIn = fs4.existsSync(path4.join(geminiHome(), "oauth_creds.json"));
+  const type = settings().security?.auth?.selectedType;
+  if (key || vertex) {
+    checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
+  } else if (signedIn && type === "oauth-personal") {
+    checks.push({
+      level: "warn",
+      message: "Gemini CLI is signed in with a Google account (oauth-personal). If a run fails with IneligibleTierError, Google no longer serves that sign-in to this CLI: set GEMINI_API_KEY (Google AI Studio) instead"
+    });
+  } else if (signedIn) {
+    checks.push({ level: "ok", message: "Gemini CLI: signed in" });
+  } else {
+    checks.push({ level: "fail", message: "Gemini CLI is not signed in: run `gemini` once to sign in, or set GEMINI_API_KEY (Google AI Studio)" });
+  }
+  for (const m of models) {
+    const model = m ?? defaultModel2();
+    const pricey = model && /pro/i.test(model);
+    checks.push({
+      level: pricey ? "warn" : "ok",
+      message: pricey ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-2.5-flash` : model ? `Gemini model: ${model}` : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-2.5-flash)"
+    });
+  }
+  if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Gemini runs" });
+  return checks;
+}
+function catalog3() {
+  const def = defaultModel2();
+  const models = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"].map((id) => ({ id }));
+  if (def && !models.some((m) => m.id === def)) models.push({ id: def });
+  return { models, source: "Gemini CLI's built-in model names (it cannot list models); the effort suffix is not used" };
+}
+var gemini = {
+  id: "gemini",
+  name: "Gemini CLI",
+  capabilities: { readOnly: "approval-mode", resume: "none", reportsCost: false, attachFiles: false },
+  binary: binary3,
+  catalog: catalog3,
+  invocation: invocation3,
+  parse: parseEvents3,
+  failure: failure3,
+  defaultModel: defaultModel2,
+  doctor: doctor3
+};
+
+// src/backends/opencode/index.ts
+import { spawnSync as spawnSync4 } from "node:child_process";
 
 // src/backends/opencode/events.ts
-var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
-var DENIED2 = /rule which prevents you|permission denied|permission\.rejected/i;
-function parseEvents3(ndjson) {
+var EDIT_TOOLS3 = /* @__PURE__ */ new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
+var DENIED3 = /rule which prevents you|permission denied|permission\.rejected/i;
+function parseEvents4(ndjson) {
   const usage = {
     input: 0,
     output: 0,
@@ -584,8 +812,8 @@ function parseEvents3(ndjson) {
         const key = String(p.messageID ?? "");
         if (!textByMessage.has(key)) textByMessage.set(key, []);
         textByMessage.get(key).push(text);
-        lastActivity = `says: ${oneLine3(text)}`;
-        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(text.trim(), 600), at: stamp(e.timestamp) });
+        lastActivity = `says: ${oneLine4(text)}`;
+        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip4(text.trim(), 600), at: stamp(e.timestamp) });
         break;
       }
       case "tool_use": {
@@ -593,28 +821,28 @@ function parseEvents3(ndjson) {
         const st = p.state ?? {};
         usage.toolCalls++;
         tools[name] = (tools[name] ?? 0) + 1;
-        if (st.status === "error" && DENIED2.test(String(st.error ?? ""))) usage.denied++;
-        if (st.status === "completed" && EDIT_TOOLS2.has(name)) {
+        if (st.status === "error" && DENIED3.test(String(st.error ?? ""))) usage.denied++;
+        if (st.status === "completed" && EDIT_TOOLS3.has(name)) {
           edits.push(String(st.input?.filePath ?? st.input?.path ?? name));
         }
         lastActivity = `${name} ${describe2(st.input)}`.trim();
         if (timeline.length < MAX_STEPS) {
-          const kind = EDIT_TOOLS2.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
+          const kind = EDIT_TOOLS3.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
           const text = kind === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
-          timeline.push({ kind, name, text: clip3(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
+          timeline.push({ kind, name, text: clip4(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
         }
         break;
       }
       case "step_finish": {
         const t = p.tokens ?? {};
         usage.steps++;
-        usage.input += num3(t.input);
-        usage.output += num3(t.output);
-        usage.reasoning += num3(t.reasoning);
-        usage.cacheRead += num3(t.cache?.read);
-        usage.cacheWrite += num3(t.cache?.write);
-        usage.total += num3(t.total) || num3(t.input) + num3(t.output) + num3(t.reasoning) + num3(t.cache?.read);
-        usage.cost = (usage.cost ?? 0) + num3(p.cost);
+        usage.input += num4(t.input);
+        usage.output += num4(t.output);
+        usage.reasoning += num4(t.reasoning);
+        usage.cacheRead += num4(t.cache?.read);
+        usage.cacheWrite += num4(t.cache?.write);
+        usage.total += num4(t.total) || num4(t.input) + num4(t.output) + num4(t.reasoning) + num4(t.cache?.read);
+        usage.cost = (usage.cost ?? 0) + num4(p.cost);
         break;
       }
       case "error": {
@@ -638,25 +866,25 @@ function describeError(err) {
   const tags = [err.type, inner, err.status && `HTTP ${err.status}`].filter(Boolean);
   return tags.length ? `${message} [${tags.join(", ")}]` : message;
 }
-var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var clip4 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 var stamp = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
-function num3(v) {
+function num4(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
-function oneLine3(s, max = 80) {
+function oneLine4(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 function describe2(input) {
   if (!input || typeof input !== "object") return "";
   const v = input.filePath ?? input.path ?? input.pattern ?? input.command ?? input.url ?? input.query;
-  return v ? oneLine3(String(v), 60) : "";
+  return v ? oneLine4(String(v), 60) : "";
 }
 
 // src/backends/opencode/profiles.ts
-import fs4 from "node:fs";
-import os4 from "node:os";
-import path4 from "node:path";
+import fs5 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
 var READ_FILES = {
   "*": "allow",
@@ -754,18 +982,18 @@ var FORBIDDEN_BASH = [
   "*pitroom*"
 ];
 function scratchDirs() {
-  const data = process.env.XDG_DATA_HOME ?? path4.join(os4.homedir(), ".local", "share");
+  const data = process.env.XDG_DATA_HOME ?? path5.join(os5.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path4.join(data, "opencode", "tool-output", "*")]: "allow",
-    [path4.join(data, "opencode", "shell", "*", "*")]: "allow"
+    [path5.join(data, "opencode", "tool-output", "*")]: "allow",
+    [path5.join(data, "opencode", "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os4.tmpdir(), realpath(os4.tmpdir())])) rules[path4.join(tmp, "opencode", "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os5.tmpdir(), realpath(os5.tmpdir())])) rules[path5.join(tmp, "opencode", "*")] = "allow";
   return rules;
 }
 function realpath(p) {
   try {
-    return fs4.realpathSync(p);
+    return fs5.realpathSync(p);
   } catch {
     return p;
   }
@@ -853,10 +1081,10 @@ function isObject(v) {
 }
 
 // src/backends/opencode/index.ts
-var binary3 = () => findBinary("opencode", "PITROOM_OPENCODE_BIN", ["~/.opencode/bin/opencode"]);
+var binary4 = () => findBinary("opencode", "PITROOM_OPENCODE_BIN", ["~/.opencode/bin/opencode"]);
 function oc(args, opts = {}) {
-  const { command, prefix } = resolveCommand(binary3());
-  const r = spawnSync3(command, [...prefix, ...args], {
+  const { command, prefix } = resolveCommand(binary4());
+  const r = spawnSync4(command, [...prefix, ...args], {
     encoding: "utf8",
     timeout: opts.timeout ?? 6e4,
     env: opts.env ?? process.env,
@@ -866,7 +1094,7 @@ function oc(args, opts = {}) {
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
 var jsonIn = (s) => JSON.parse(s.slice(s.indexOf("{")));
-function invocation3(req) {
+function invocation4(req) {
   const args = [
     "run",
     "--standalone",
@@ -885,7 +1113,7 @@ function invocation3(req) {
   if (req.sessionId) args.push("--session", req.sessionId);
   for (const f of req.files) args.push("--file", f);
   args.push(req.prompt);
-  const { command, prefix } = resolveCommand(binary3());
+  const { command, prefix } = resolveCommand(binary4());
   return {
     command,
     args: [...prefix, ...args],
@@ -900,7 +1128,7 @@ function majorVersion(output) {
   const m = /(\d+)\.\d+\.\d+/.exec(output);
   return m ? Number(m[1]) : void 0;
 }
-function classify3(message) {
+function classify4(message) {
   if (/model not found|ModelNotFound|unknown model|no such model|deprecated/i.test(message)) return "model-unavailable";
   if (/rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
   if (/provider\.auth|FreeTierError|free tier|unauthori[sz]ed|\b40[13]\b|api.?key|insufficient|credits?\b|billing|payment/i.test(message)) {
@@ -908,19 +1136,19 @@ function classify3(message) {
   }
   return "other";
 }
-function failure3(run, stderr, exitCode) {
+function failure4(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.match(/error="([^"]+)"/g)?.pop()?.slice(7, -1);
   const raw = run.error ?? `opencode exited with code ${exitCode}`;
   const message = detail && !raw.includes(detail) ? `${raw}: ${detail}` : raw;
-  return { kind: classify3(message), message };
+  return { kind: classify4(message), message };
 }
 function modelId(m) {
   if (typeof m === "string") return m;
   const id = m?.model ?? m?.id;
   return m?.providerID && id ? `${m.providerID}/${id}` : void 0;
 }
-function defaultModel2() {
+function defaultModel3() {
   try {
     const out = oc(["debug", "config"], { timeout: 3e4 }).out;
     const json = JSON.parse(out.slice(out.search(/[[{]/)));
@@ -945,7 +1173,7 @@ function resolveModel2(sessionId) {
     return void 0;
   }
 }
-function catalog3() {
+function catalog4() {
   const ids = listModels();
   return {
     models: (ids.length ? ids : listModels()).map((id) => ({ id })),
@@ -955,20 +1183,20 @@ function catalog3() {
 function listModels() {
   return oc(["models"]).out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
-function doctor3({ models, hasFallback }) {
+function doctor4({ models, hasFallback }) {
   const checks = [];
   const version = oc(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `opencode not runnable (${binary3()}). Install: https://opencode.ai or set PITROOM_OPENCODE_BIN` }];
+    return [{ level: "fail", message: `opencode not runnable (${binary4()}). Install: https://opencode.ai or set PITROOM_OPENCODE_BIN` }];
   }
   const v = version.out.trim().replace(/^opencode\s+/i, "");
   const major = majorVersion(v);
   if (major !== void 0 && major < 2) {
     return [{ level: "fail", message: `OpenCode ${v} is too old: Pitroom needs OpenCode v2 or newer (run \`opencode upgrade\`)` }];
   }
-  checks.push({ level: "ok", message: `opencode ${v} at ${binary3()} (private --standalone server per run)` });
+  checks.push({ level: "ok", message: `opencode ${v} at ${binary4()} (private --standalone server per run)` });
   const known = new Set(listModels());
-  const def = defaultModel2();
+  const def = defaultModel3();
   for (const m of models) {
     const model = m ?? def;
     const label = m ? "model" : "default model";
@@ -994,21 +1222,21 @@ var opencode = {
   id: "opencode",
   name: "OpenCode",
   capabilities: { readOnly: "permission-rules", resume: "by-id", reportsCost: true, attachFiles: true },
-  binary: binary3,
-  invocation: invocation3,
-  parse: parseEvents3,
-  failure: failure3,
-  defaultModel: defaultModel2,
+  binary: binary4,
+  invocation: invocation4,
+  parse: parseEvents4,
+  failure: failure4,
+  defaultModel: defaultModel3,
   resolveModel: resolveModel2,
   listModels,
-  catalog: catalog3,
-  doctor: doctor3
+  catalog: catalog4,
+  doctor: doctor4
 };
 
 // src/backends/index.ts
-var REGISTRY = new Map([opencode, codex, claude].map((b) => [b.id, b]));
+var REGISTRY = new Map([opencode, codex, claude, gemini].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
-var PLANNED = ["gemini"];
+var PLANNED = [];
 var backendIds = () => [...REGISTRY.keys()];
 var allBackends = () => [...REGISTRY.values()];
 var isBackendId = (id) => REGISTRY.has(id) || PLANNED.includes(id);
@@ -1038,8 +1266,8 @@ var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
 var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
 
 // src/core/refs.ts
-import fs5 from "node:fs";
-import path5 from "node:path";
+import fs6 from "node:fs";
+import path6 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -1090,13 +1318,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path5.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path6.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs5.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs5.readFileSync(file, "utf8").split("\n");
+      const size = fs6.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs6.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -1107,9 +1335,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path5.isAbsolute(ref.file)) return [];
+    if (path6.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path5.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path5.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path6.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path6.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -1124,7 +1352,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path5.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path6.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -1145,7 +1373,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path5.basename(name);
+  const base = path6.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -1154,19 +1382,19 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs5.readdirSync(dir, { withFileTypes: true });
+      entries = fs6.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path5.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path6.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list = index.get(e.name);
-        if (list) list.push(path5.join(dir, e.name));
-        else index.set(e.name, [path5.join(dir, e.name)]);
+        if (list) list.push(path6.join(dir, e.name));
+        else index.set(e.name, [path6.join(dir, e.name)]);
       }
     }
   };
@@ -1174,10 +1402,10 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path5.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path5.join(r, ref));
+  const candidates = path6.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path6.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs5.statSync(c).isFile() && inside(c, roots);
+      return fs6.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -1185,21 +1413,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path5.relative(r, path5.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path5.isAbsolute(rel);
+    const rel = path6.relative(r, path6.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path6.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
-import fs6 from "node:fs";
-import path7 from "node:path";
+import fs7 from "node:fs";
+import path8 from "node:path";
 
 // src/core/install.ts
-import path6 from "node:path";
-import { fileURLToPath } from "node:url";
+import path7 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
 function packageRoot() {
-  return path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..");
+  return path7.resolve(path7.dirname(fileURLToPath2(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -1210,9 +1438,9 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path7.join(root, "skills", FILES[name]);
-  if (!fs6.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
-  return fs6.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  const file = path8.join(root, "skills", FILES[name]);
+  if (!fs7.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs7.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -1241,8 +1469,8 @@ function parseVerdict(text) {
 }
 
 // src/core/plan.ts
-import fs7 from "node:fs";
-import path8 from "node:path";
+import fs8 from "node:fs";
+import path9 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -1289,9 +1517,9 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path8.resolve(file);
-  if (!fs7.existsSync(abs) || !fs7.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
-  const plan = parsePlan(fs7.readFileSync(abs, "utf8"), fs7.realpathSync(abs));
+  const abs = path9.resolve(file);
+  if (!fs8.existsSync(abs) || !fs8.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs8.readFileSync(abs, "utf8"), fs8.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
   return plan;
 }
@@ -1310,7 +1538,7 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path8.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path9.basename(file).replace(/\.md$/i, "");
 export {
   DEFAULT_BACKEND,
   allBackends,

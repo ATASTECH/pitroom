@@ -1,0 +1,10 @@
+{
+  "general": { "enableAutoUpdate": false, "enableAutoUpdateNotification": false, "checkpointing": { "enabled": false } },
+  "hooksConfig": { "enabled": false },
+  "mcp": { "allowed": [] },
+  "skills": { "enabled": false },
+  "context": { "fileName": ["PITROOM-NO-CONTEXT.md"] },
+  "security": { "disableYoloMode": true, "disableAlwaysAllow": true },
+  "privacy": { "usageStatisticsEnabled": false },
+  "telemetry": { "enabled": false }
+}
