@@ -107,7 +107,7 @@ In isolate mode nothing reaches your tree until you apply it.
 - **Self-healing worker chain.** Free models get rate-limited or retired. List fallback workers once (`fallback`) and a run that hits "model not found", 429 or quota errors moves to the next model automatically. Still no model hardcoded: the chain is yours.
 - **A crew, not just one worker.** `pitroom crew` starts several workers at once, `pitroom watch --json` streams one line per change so your agent follows them live, `pitroom wait -g` collects every answer, `pitroom apply -g` lands isolated patches in order. Up to 20 workers run at once by default (`maxParallel`, 30 at most), the rest queue, and the fallback chain absorbs free-tier rate limits; parallel writers are refused.
 - **Faster, not only cheaper.** Workers run in the background and side by side (up to 20 at once) while your agent keeps working, so slow reading and review stop blocking it. In the [benchmark](#benchmarks), 470 s of worker time finished in 156 s of wall clock, about 3× faster than one question after another, and your agent's own context stayed small.
-- **Free first, dearer only when needed.** Runs and plan tasks start on the `cheap` tier, OpenCode's free model; `standard` (Codex) and `capable` (Claude Code) are for tasks that need them, and an optional `review` tier names who reviews. `pitroom models` shows what each worker offers, the effort levels (`low` … `xhigh`) each model accepts, what you say it costs (`costs`) and what it used; `--effort` sets the level per run. Details: [Models, costs and effort](#models-costs-and-effort).
+- **Free first, dearer only when needed.** Runs and plan tasks start on the `cheap` tier, OpenCode's free model; `standard` (Codex) and `capable` (Claude Code) are for tasks that need them, and an optional `review` tier names who reviews. Gemini CLI with a free Google AI Studio key is one more cheap worker (small daily quota per model). `pitroom models` shows what each worker offers, the effort levels (`low` … `xhigh`) each model accepts, what you say it costs (`costs`) and what it used; `--effort` sets the level per run. Details: [Models, costs and effort](#models-costs-and-effort).
 - **Exact changes, even in a dirty tree.** Pitroom snapshots the working tree with a throwaway git index (your index, branches and stash are never touched), so it reports *only the worker's* edits and can undo exactly those: `pitroom revert <id>`.
 - **Your agent sets the permissions.** It creates each worker with the permissions the task and your session allow (read-only, isolated copy, in-place edits, web), and a worker never widens its own. A fixed floor stays for every run: no git history changes, no `sudo`, no publishing, no secrets. A worker cannot land a deletion either: `pitroom apply` refuses a patch that deletes files unless your agent passes `--allow-delete`.
 - **Real isolation.** `--isolate` runs the worker in a private copy of your **current** state (its own repository, sharing your objects read-only), uncommitted and untracked files included, then hands you a patch: `pitroom apply <id>` (checked, refuses on conflict) or `pitroom discard <id>`.
@@ -239,7 +239,7 @@ To repeat it on your own repository: `pitroom crew -d <repo> -g bench "<question
 
 ## Quick start
 
-You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex) or [Claude Code](https://claude.com/claude-code).
+You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) or [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it).
 
 ### 1. Install: pick your agent
 
@@ -294,6 +294,7 @@ Or start a worker yourself and read its receipt:
 
 ```bash
 pitroom "Which files read the session cookie? Cite file:line."
+pitroom -W gemini:gemini-3.8-flash "…"   # the same on another worker (see Workers below)
 pitroom savings          # what all your runs saved so far
 pitroom models           # what each worker offers, what it costs you, what it used
 ```
@@ -519,8 +520,9 @@ A worker is named by a target: `backend[:model]`.
 pitroom run "…"                                          # preferred worker (config "worker", default opencode)
 pitroom run -W opencode:opencode/space-bunny-free "…"    # a specific backend and model
 pitroom run -W 'codex:#low' "…"                          # the model from config "models" (not Codex's default), low reasoning effort
-pitroom run --effort high "…"                           # any worker: model#level (Codex, Claude Code, OpenCode)
+pitroom run --effort high "…"                           # model#level (Codex, Claude Code, OpenCode; Gemini CLI has no effort option)
 pitroom run -W claude:haiku "…"                          # Claude Code on a cheap model
+pitroom run -W gemini:gemini-3.8-flash "…"               # Gemini CLI (beta; needs a Google AI Studio API key)
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
 
@@ -533,7 +535,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 
 ### Models, costs and effort
 
-`pitroom models` lists what each worker offers (Codex from its own model cache, Claude Code's aliases, OpenCode's `opencode models`), the reasoning-effort levels each model accepts, what you say it costs and what your own runs used:
+`pitroom models` lists what each worker offers (Codex from its own model cache, Claude Code's aliases, OpenCode's `opencode models`, Gemini CLI's built-in names), the reasoning-effort levels each model accepts, what you say it costs and what your own runs used:
 
 ```text
 worker  model        effort (* default)                 cost  runs  avg tokens  $/run   in use

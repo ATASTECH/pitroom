@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "pitroom",
-      "description": "Delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex or Claude Code workers, with verified answers, exact diffs and cost receipts.",
+      "description": "Delegate research, fixes, tests and parallel investigations to cheap OpenCode, Codex, Claude Code or Gemini CLI workers, with verified answers, exact diffs and cost receipts.",
       "source": {
         "source": "npm",
         "package": "pitroom"
