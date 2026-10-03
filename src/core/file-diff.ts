@@ -20,7 +20,7 @@ export interface FileDiffData {
 
 const PREVIEW_LINES = 300;
 
-function gitPath(value: string): string {
+function gitPath(value: string, prefix = true): string {
   let path = value;
   if (value.startsWith('"') && value.endsWith('"')) {
     const bytes: number[] = [];
@@ -31,7 +31,7 @@ function gitPath(value: string): string {
     }
     path = new TextDecoder().decode(new Uint8Array(bytes));
   }
-  return path.replace(/^[ab]\//, '');
+  return prefix ? path.replace(/^[ab]\//, '') : path;
 }
 
 function headerPath(header: string): string {
@@ -105,7 +105,7 @@ export function fileDiffs(patch: string, changes: { path: string; status: string
       else if (/^(new file mode|deleted file mode|old mode|new mode|rename from|rename to|similarity index) /.test(line)) {
         if (line.startsWith('new file mode ')) file.status = 'A';
         if (line.startsWith('deleted file mode ')) file.status = 'D';
-        if (line.startsWith('rename to ')) { file.path = gitPath(line.slice(10)); file.status = 'R'; }
+        if (line.startsWith('rename to ')) { file.path = gitPath(line.slice(10), false); file.status = 'R'; }
         add({ type: 'meta', content: line });
       }
     }

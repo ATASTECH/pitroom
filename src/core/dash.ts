@@ -17,7 +17,7 @@ import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
-import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds, runFile } from './store.js';
+import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds } from './store.js';
 import { describeTarget } from './target.js';
 import { elapsed, kind, what, workerName, ranTarget } from './ui.js';
 
@@ -139,11 +139,6 @@ export interface RunDetail {
 
 const TASK_MAX = 6000;
 const PATCH_LINES = 300;
-
-function readFile(id: string, name: string): string {
-  const f = runFile(id, name);
-  return fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
-}
 
 /** Everything the expanded card shows about one run. */
 export function runDetail(id: string): RunDetail | undefined {

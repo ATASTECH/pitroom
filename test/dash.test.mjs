@@ -1,6 +1,8 @@
 // pitroom dash (a live page of the runs) and watch --brief (one card line per start and end).
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import http from 'node:http';
+import path from 'node:path';
 import { test } from 'node:test';
 import { sandbox } from './helpers.mjs';
 
@@ -68,6 +70,7 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
     assert.match(detail.report, /done/);
     assert.equal(detail.task, 'list the files', 'the task the agent gave the worker');
     assert.ok(Array.isArray(detail.steps), 'what the worker did, step by step');
+    assert.deepEqual(detail.fileDiffs, [], 'research has no file diffs');
     assert.ok(detail.answer, 'the worker\'s answer');
     assert.equal(detail.info.worker, 'opencode');
     assert.equal(detail.card.id, id, 'the detail carries the card the #run-id link pins');
@@ -99,6 +102,61 @@ test('dash: a bad port is a usage error', () => {
   const r = s.run(['dash', '--port', 'abc']);
   assert.equal(r.status, 2);
   assert.match(r.stderr, /--port takes a number/);
+});
+
+test('dash: per-file previews count the full patch and also survive archiving', async () => {
+  const s = sandbox();
+  const additions = Array.from({ length: 450 }, (_, i) => `line ${i}`).join('\n');
+  const run = s.run(['run', '-i', 'change two files'], { MOCK_ACTIONS: `append:app.txt:${additions};write:z-last.ts:export const last = true;answer:SUMMARY: done` });
+  assert.equal(run.status, 0, run.stderr);
+  const id = RUN_ID.exec(run.stdout)[0];
+  const start = s.run(['dash', '--detach', '--port', '0']);
+  assert.equal(start.status, 0, start.stderr);
+  const url = start.stdout.trim();
+  try {
+    const detail = JSON.parse((await get(`${url}api/run/${id}`)).body);
+    assert.equal(detail.fileDiffs.length, 2);
+    const large = detail.fileDiffs.find((f) => f.path === 'app.txt');
+    assert.equal(large.additions, 450);
+    assert.equal(large.lines.length, 300);
+    assert.ok(large.omittedLines > 0);
+    assert.equal(large.incomplete, false);
+    assert.equal(detail.fileDiffs.find((f) => f.path === 'z-last.ts').additions, 1);
+    assert.match(detail.patch, /more lines/, 'the existing raw patch preview stays bounded');
+    assert.equal(s.run(['discard', id]).status, 0);
+    assert.equal(s.run(['clean', '--days', '0', '--yes']).status, 0);
+    assert.equal(fs.existsSync(path.join(s.base, 'home', 'runs', id)), false, 'the run directory was actually removed');
+    const archived = JSON.parse((await get(`${url}api/run/${id}`)).body);
+    assert.deepEqual(archived.fileDiffs, detail.fileDiffs, 'the same previews load from history');
+  } finally {
+    assert.equal(s.run(['dash', '--stop']).status, 0);
+  }
+});
+
+test('dash: raw patches take precedence over clipped history, and clipped archives show incomplete counts', async () => {
+  const s = sandbox();
+  const generate = `node -e "require('fs').writeFileSync('a-large.ts', ('export const text = ' + 'x'.repeat(2600) + '\\n').repeat(450))"`;
+  const run = s.run(['run', '-i', 'create a large patch'], { MOCK_ACTIONS: `exec:${generate};write:z-last.ts:export const last = true;answer:SUMMARY: done` });
+  assert.equal(run.status, 0, run.stderr);
+  const id = RUN_ID.exec(run.stdout)[0];
+  const start = s.run(['dash', '--detach', '--port', '0']);
+  assert.equal(start.status, 0, start.stderr);
+  const url = start.stdout.trim();
+  try {
+    const detail = JSON.parse((await get(`${url}api/run/${id}`)).body);
+    assert.equal(detail.fileDiffs.find((f) => f.path === 'a-large.ts').additions, 450, 'the full file is used while it is on disk');
+    assert.equal(detail.fileDiffs.find((f) => f.path === 'z-last.ts').additions, 1);
+    assert.equal(s.run(['discard', id]).status, 0);
+    assert.equal(s.run(['clean', '--days', '0', '--yes']).status, 0);
+    assert.equal(fs.existsSync(path.join(s.base, 'home', 'runs', id)), false);
+    const archived = JSON.parse((await get(`${url}api/run/${id}`)).body);
+    const large = archived.fileDiffs.find((f) => f.path === 'a-large.ts');
+    assert.equal(large.incomplete, true);
+    assert.equal(large.additions, undefined, 'partial counts are not presented as totals');
+    assert.equal(archived.fileDiffs.find((f) => f.path === 'z-last.ts').unavailable, true, 'files beyond the history limit remain visible');
+  } finally {
+    assert.equal(s.run(['dash', '--stop']).status, 0);
+  }
 });
 
 test('watch --brief: one card line when a run starts, one when it ends, then a total', () => {

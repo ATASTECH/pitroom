@@ -1950,7 +1950,7 @@ function archivedRun(id) {
       at: s.at ?? void 0,
       t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1e3)) : void 0
     }));
-    return { meta: JSON.parse(r.meta_json), answer: r.answer ?? "", patch: r.patch ?? void 0, steps };
+    return { meta: JSON.parse(r.meta_json), answer: r.answer ?? "", patch: r.patch ?? void 0, patchTruncated: r.patch?.length >= PATCH_MAX, steps };
   } catch {
     return void 0;
   }
@@ -2969,6 +2969,118 @@ import http from "node:http";
 import path16 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
+// src/core/file-diff.ts
+var PREVIEW_LINES = 300;
+function gitPath(value, prefix = true) {
+  let path24 = value;
+  if (value.startsWith('"') && value.endsWith('"')) {
+    const bytes = [];
+    const escapes = { t: "	", n: "\n", r: "\r", b: "\b", f: "\f", v: "\v" };
+    for (const match of value.slice(1, -1).matchAll(/\\([0-7]{1,3}|.)|([^\\]+)/g)) {
+      if (match[1] && /^[0-7]+$/.test(match[1])) bytes.push(parseInt(match[1], 8));
+      else bytes.push(...new TextEncoder().encode(match[2] ?? escapes[match[1]] ?? match[1]));
+    }
+    path24 = new TextDecoder().decode(new Uint8Array(bytes));
+  }
+  return prefix ? path24.replace(/^[ab]\//, "") : path24;
+}
+function headerPath(header) {
+  const quoted = header.match(/^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|\S+)$/);
+  if (quoted) return gitPath(quoted[2]);
+  return gitPath(header.slice(header.lastIndexOf(" b/") + 1));
+}
+function fileDiffs(patch, changes, sourceTruncated = false) {
+  const files = [];
+  let file;
+  let oldLine = 0;
+  let newLine = 0;
+  let oldLeft = 0;
+  let newLeft = 0;
+  let inHunk = false;
+  let row = 0;
+  const finishHunk = () => {
+    if (file && (oldLeft > 0 || newLeft > 0)) file.incomplete = true;
+    oldLeft = newLeft = 0;
+    inHunk = false;
+  };
+  const add = (line) => {
+    if (!file) return;
+    if (file.lines.length < PREVIEW_LINES) file.lines.push({ ...line, id: String(row) });
+    else file.omittedLines++;
+    row++;
+  };
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      finishHunk();
+      file = { path: headerPath(line), status: "M", lines: [], additions: 0, deletions: 0, omittedLines: 0, binary: false, incomplete: false };
+      files.push(file);
+      row = 0;
+      continue;
+    }
+    if (!file) continue;
+    const hunk = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (hunk) {
+      finishHunk();
+      oldLine = Number(hunk[1]);
+      newLine = Number(hunk[3]);
+      oldLeft = Number(hunk[2] ?? 1);
+      newLeft = Number(hunk[4] ?? 1);
+      inHunk = true;
+      add({ type: "hunk", content: line });
+    } else if (inHunk && line.startsWith("\\ No newline at end of file")) {
+      add({ type: "meta", content: line });
+    } else if (inHunk && (oldLeft > 0 || newLeft > 0)) {
+      if (line.startsWith("+") && newLeft > 0) {
+        file.additions++;
+        newLeft--;
+        add({ type: "added", newLine: newLine++, content: line.slice(1) });
+      } else if (line.startsWith("-") && oldLeft > 0) {
+        file.deletions++;
+        oldLeft--;
+        add({ type: "removed", oldLine: oldLine++, content: line.slice(1) });
+      } else if (line.startsWith(" ") && oldLeft > 0 && newLeft > 0) {
+        oldLeft--;
+        newLeft--;
+        add({ type: "context", oldLine: oldLine++, newLine: newLine++, content: line.slice(1) });
+      } else {
+        file.incomplete = true;
+      }
+    } else if (!inHunk) {
+      if (line.startsWith("+++ ") && line !== "+++ /dev/null") file.path = gitPath(line.slice(4).replace(/\t$/, ""));
+      else if (line.startsWith("--- ") && line !== "--- /dev/null") file.path = gitPath(line.slice(4).replace(/\t$/, ""));
+      else if (/^(GIT binary patch|Binary files .* differ)$/.test(line)) file.binary = true;
+      else if (/^(new file mode|deleted file mode|old mode|new mode|rename from|rename to|similarity index) /.test(line)) {
+        if (line.startsWith("new file mode ")) file.status = "A";
+        if (line.startsWith("deleted file mode ")) file.status = "D";
+        if (line.startsWith("rename to ")) {
+          file.path = gitPath(line.slice(10), false);
+          file.status = "R";
+        }
+        add({ type: "meta", content: line });
+      }
+    }
+  }
+  finishHunk();
+  if (sourceTruncated && file) file.incomplete = true;
+  for (const f of files) {
+    if (f.incomplete || f.binary) f.additions = f.deletions = void 0;
+  }
+  const byPath = new Map(files.map((f) => [f.path, f]));
+  const result = changes.map((change) => {
+    const diff = byPath.get(change.path);
+    byPath.delete(change.path);
+    return diff ? { ...diff, status: change.status } : {
+      ...change,
+      lines: [],
+      omittedLines: 0,
+      binary: false,
+      incomplete: sourceTruncated,
+      unavailable: true
+    };
+  });
+  return [...result, ...byPath.values()];
+}
+
 // src/core/dash-page.ts
 var THEME_SCRIPT = "(function(){try{var t=localStorage.getItem('pitroom-theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d)}catch(e){}})()";
 var ICON3 = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff6a2b'/%3E%3Cpath d='M9 8h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4zM9 16h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4z' fill='%23fff'/%3E%3C/svg%3E";
@@ -3041,10 +3153,6 @@ function dashState(opts = {}) {
 }
 var TASK_MAX = 6e3;
 var PATCH_LINES = 300;
-function readFile(id, name) {
-  const f = runFile(id, name);
-  return fs19.existsSync(f) ? fs19.readFileSync(f, "utf8") : "";
-}
 function runDetail(id) {
   if (!RUN_ID2.test(id)) return void 0;
   let m;
@@ -3069,7 +3177,8 @@ function runDetail(id) {
   const answer = isActive(m.state) ? "" : readSummary(m).replace(/^SUMMARY:\s*SPEC[^\n]*\n+/i, "").replace(/^DETAILS:[ \t]*\n+/i, "").trim();
   const lastSay = steps.at(-1);
   if (lastSay?.kind === "say" && answer && (answer.includes(lastSay.text.slice(0, 80)) || lastSay.text.includes(answer.slice(0, 80)))) steps.pop();
-  const patch = kept?.patch ?? readFile(id, "changes.patch");
+  const fullPatch = readRunFile(id, "changes.patch");
+  const patch = fullPatch ?? kept?.patch ?? "";
   const patchLines = patch.split("\n");
   const u = m.usage;
   return {
@@ -3080,6 +3189,7 @@ function runDetail(id) {
     steps,
     answer,
     changes: m.changes ?? [],
+    fileDiffs: fileDiffs(patch, m.changes ?? [], fullPatch === void 0 && kept?.patchTruncated),
     patch: patch ? `${patchLines.slice(0, PATCH_LINES).join("\n")}${patchLines.length > PATCH_LINES ? `
 \u2026 ${patchLines.length - PATCH_LINES} more lines (pitroom show ${id} --patch)` : ""}` : void 0,
     info: {

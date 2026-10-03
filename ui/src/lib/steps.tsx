@@ -1,5 +1,5 @@
 import { Eye, FolderSearch, Globe, MessageSquare, PencilLine, Search, SquareTerminal, Wrench } from 'lucide-react';
-import type { Step } from '@/api';
+import type { FileDiffData, Step } from '@/api';
 import type { AgentActivityItem } from '@/components/agents/agent-activity';
 import { clock } from '@/lib/format';
 
@@ -7,7 +7,7 @@ const cls = 'size-4';
 
 function describe(s: Step): { kind: string; label: string; icon: React.ReactNode } {
   const name = (s.name ?? '').toLowerCase();
-  if (s.kind === 'say') return { kind: 'message', label: 'Said', icon: <MessageSquare className={cls} /> };
+  if (s.kind === 'say') return { kind: 'message', label: 'Message', icon: <MessageSquare className={cls} /> };
   if (s.kind === 'shell') return { kind: 'run', label: 'Ran command', icon: <SquareTerminal className={cls} /> };
   if (s.kind === 'edit') return { kind: 'write', label: 'Edited', icon: <PencilLine className={cls} /> };
   if (/^(read|cat|view|open)$/.test(name)) return { kind: 'read', label: 'Read', icon: <Eye className={cls} /> };
@@ -18,7 +18,7 @@ function describe(s: Step): { kind: string; label: string; icon: React.ReactNode
 }
 
 /** The worker's steps as beUI's Agent Activity trace rows (icon, label with its time offset, the path or command). */
-export function traceItems(steps: Step[]): AgentActivityItem[] {
+export function traceItems(steps: Step[], diffs: FileDiffData[] = []): AgentActivityItem[] {
   return steps.map((s, i) => {
     const d = describe(s);
     return {
@@ -26,14 +26,13 @@ export function traceItems(steps: Step[]): AgentActivityItem[] {
       type: 'trace',
       kind: d.kind,
       icon: d.icon,
-      label: (
-        <>
-          {d.label}
-          {s.ok === false && <span className="ml-1.5 text-xs font-normal text-destructive">failed</span>}
-          {s.t != null && <span className="ml-1.5 text-xs font-normal tabular-nums text-muted-foreground/60">+{clock(s.t)}</span>}
-        </>
-      ),
-      detail: s.text.length > 200 ? `${s.text.slice(0, 199)}…` : s.text,
+      label: d.label,
+      navigationLabel: `Step ${i + 1}: ${d.label}`,
+      meta: s.t != null ? `+${clock(s.t)}` : undefined,
+      ok: s.ok,
+      detail: s.text,
+      tool: s.name ?? s.kind,
+      diffs: s.kind === 'edit' && s.ok !== false ? diffs.filter((diff) => s.text.trim() === diff.path || s.text.split(/, |\n/).some((path) => path.trim() === diff.path)) : undefined,
     };
   });
 }

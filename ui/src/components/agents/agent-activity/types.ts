@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { FileDiffData } from "@/api";
 
 export type AgentActivityStatus = "working" | "complete";
 export type AgentStepStatus = "pending" | "active" | "complete";
@@ -57,6 +58,11 @@ export interface AgentActivityTrace {
   label: ReactNode;
   detail?: ReactNode;
   icon?: ReactNode;
+  meta?: ReactNode;
+  ok?: boolean;
+  navigationLabel?: string;
+  tool?: string;
+  diffs?: FileDiffData[];
 }
 
 export type AgentActivityItem =
@@ -73,15 +79,15 @@ export interface AgentActivityProps {
   items: AgentActivityItem[];
   /** Expected activity kind before the first streamed item arrives. */
   contentType?: AgentActivityContentType;
-  /** Current run phase. Active runs always stay expanded. */
+  /** Current run phase. */
   status?: AgentActivityStatus;
   /** Elapsed run time, in seconds. Used by the step-only summary. */
   duration?: number;
-  /** Controlled expanded state used after the run completes. */
+  /** Controlled expanded state. */
   open?: boolean;
-  /** Initial expanded state used after the run completes. */
+  /** Initial expanded state. */
   defaultOpen?: boolean;
-  /** Called when the completed activity disclosure changes state. */
+  /** Called when the activity disclosure changes state. */
   onOpenChange?: (open: boolean) => void;
   /** Collapse the disclosure when status changes from working to complete. */
   collapseOnComplete?: boolean;
@@ -99,7 +105,7 @@ export interface AgentActivityProps {
     summary: ReactNode;
     duration: number;
   }) => ReactNode;
-  /** Maximum visible activity height before the stream begins gliding. */
+  /** Maximum height of the scrollable activity transcript. */
   maxHeight?: number;
   className?: string;
   contentClassName?: string;

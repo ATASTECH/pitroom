@@ -8,12 +8,12 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useRef,
   useState,
 } from "react";
 import { ThinkingShimmer } from "@/components/agents/loading-states/thinking-shimmer";
 import { AgentDisclosure } from "@/components/agents/agent-disclosure";
+import { MessageScroller } from "@/components/agents/message-scroller";
 import {
   EASE_OUT,
   SPRING_LAYOUT,
@@ -137,43 +137,24 @@ export function AgentActivity({
   const baseId = useId();
   const triggerId = `${baseId}-trigger`;
   const contentId = `${baseId}-content`;
-  const contentRef = useRef<HTMLDivElement>(null);
-  const viewportRef = useRef<HTMLDivElement>(null);
   const previousStatus = useRef(status);
-  const [contentHeight, setContentHeight] = useState(0);
   const [currentOpen, setOpen] = useControllableOpen({
     open,
-    defaultOpen,
+    defaultOpen: defaultOpen || status === 'working',
     onOpenChange,
   });
   const working = status === "working";
-  const expanded = working || currentOpen;
+  const expanded = currentOpen;
   const contentType = items.length
     ? getContentType(items)
     : (initialContentType ?? "mixed");
-  const cappedHeight = Math.min(contentHeight, Math.max(0, maxHeight));
-  const viewportHeight = working ? Math.max(0, maxHeight) : cappedHeight;
-  const capped = contentHeight > maxHeight;
-  const streamOffset = working
-    ? Math.min(0, viewportHeight - contentHeight)
-    : 0;
-
-  useLayoutEffect(() => {
-    const node = contentRef.current;
-    if (!node) return;
-
-    const measure = () => setContentHeight(node.offsetHeight);
-    measure();
-
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, []);
 
   useEffect(() => {
-    if (previousStatus.current === "working" && status === "complete") {
-      setOpen(!collapseOnComplete);
+    if (previousStatus.current !== "working" && status === "working") {
+      setOpen(true);
+    }
+    if (previousStatus.current === "working" && status === "complete" && collapseOnComplete) {
+      setOpen(false);
     }
     previousStatus.current = status;
   }, [collapseOnComplete, setOpen, status]);
@@ -181,16 +162,15 @@ export function AgentActivity({
   const toggle = () => {
     const next = !currentOpen;
     setOpen(next);
-    if (next) requestAnimationFrame(() => viewportRef.current?.scrollTo({ top: 0 }));
   };
 
   const liveLabel = activeLabel ?? getActiveLabel(contentType);
   const completedSummary = summary ?? getSummary(contentType, items, duration);
-  const maskImage = capped
-    ? working
-      ? "linear-gradient(to bottom, transparent, black 12px)"
-      : "linear-gradient(to bottom, transparent, black 12px, black calc(100% - 12px), transparent)"
-    : undefined;
+  const navigationItems = items.map((item, index) => ({
+    id: item.id,
+    label: item.type === 'trace' ? item.navigationLabel ?? `Step ${index + 1}` : `Step ${index + 1}`,
+    description: item.type === 'trace' && typeof item.detail === 'string' ? item.detail : undefined,
+  }));
 
   return (
     <div
@@ -199,27 +179,18 @@ export function AgentActivity({
       aria-busy={working}
       className={cn("w-full text-sm", className)}
     >
-      {working ? (
-        <div
-          id={triggerId}
-          role="status"
-          className="flex h-7 min-w-0 items-center text-muted-foreground"
-        >
-          {renderWorkingStatus
-            ? renderWorkingStatus({ label: liveLabel, duration })
-            : <ThinkingShimmer>{liveLabel}</ThinkingShimmer>}
-        </div>
-      ) : (
         <button
           id={triggerId}
           type="button"
           aria-expanded={expanded}
           aria-controls={contentId}
           onClick={toggle}
-          className="group flex h-7 min-w-0 items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          className="flex h-7 min-w-0 cursor-pointer items-center gap-1.5 rounded-md text-left font-medium text-muted-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           <span className="truncate">
-            {renderCompletedStatus
+            {working ? (renderWorkingStatus
+              ? renderWorkingStatus({ label: liveLabel, duration })
+              : <ThinkingShimmer>{liveLabel}</ThinkingShimmer>) : renderCompletedStatus
               ? renderCompletedStatus({ summary: completedSummary, duration })
               : completedSummary}
           </span>
@@ -227,42 +198,25 @@ export function AgentActivity({
             aria-hidden="true"
             animate={{ rotate: expanded ? 180 : 0 }}
             transition={reduce ? { duration: 0 } : SPRING_SWAP}
-            className="inline-flex shrink-0 text-muted-foreground/70 group-hover:text-foreground"
+            className="inline-flex shrink-0 text-muted-foreground/70"
           >
             <ChevronDown className="size-3.5" />
           </motion.span>
         </button>
-      )}
 
       <AgentDisclosure
         id={contentId}
         role="region"
         aria-labelledby={triggerId}
         open={expanded}
-        openHeight={viewportHeight}
       >
-        <div
-          ref={viewportRef}
-          className={cn(
-            "scrollbar-hide pr-1",
-            capped && expanded && !working ? "overflow-y-auto" : "overflow-y-hidden",
-          )}
-          style={{ height: viewportHeight, maskImage, WebkitMaskImage: maskImage }}
-        >
-          <motion.div
-            ref={contentRef}
-            role="list"
-            initial={false}
-            animate={{ y: streamOffset }}
-            transition={reduce ? { duration: 0 } : SPRING_LAYOUT}
-            className={cn("space-y-0.5 py-2", contentClassName)}
-          >
+        {expanded && <MessageScroller items={navigationItems} followOutput={working} maxHeight={maxHeight} className={contentClassName}>
             <AnimatePresence mode="popLayout">
               {items.map((item) => (
                 <motion.div
-                  layout="position"
                   key={item.id}
                   role="listitem"
+                  data-activity-id={item.id}
                   initial={reduce ? { opacity: 1 } : { opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   exit={reduce ? { opacity: 0 } : { opacity: 0, y: -3 }}
@@ -272,7 +226,6 @@ export function AgentActivity({
                       : {
                           opacity: { duration: 0.18, ease: EASE_OUT },
                           y: SPRING_LAYOUT,
-                          layout: SPRING_LAYOUT,
                         }
                   }
                 >
@@ -280,8 +233,7 @@ export function AgentActivity({
                 </motion.div>
               ))}
             </AnimatePresence>
-          </motion.div>
-        </div>
+        </MessageScroller>}
       </AgentDisclosure>
     </div>
   );

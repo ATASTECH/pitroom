@@ -24,8 +24,8 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 | [Base UI](https://github.com/mui/base-ui) | MIT | Material-UI SAS (2019) |
 | [shadcn/ui](https://github.com/shadcn-ui/ui) components (`ui/src/components/ui`) | MIT | shadcn |
 | [Shadix UI](https://github.com/apix-js/shadix-ui) expandable card (`ui/src/components/expandable-card.tsx`) | MIT | gihanrangana (2025) |
-| [beUI](https://github.com/starc007/ui-components) agent activity and file diff (`ui/src/components/agents`, `motion`, `lib`) | MIT | Saurabh Chauhan (2026) |
-| [Shiki](https://github.com/shikijs/shiki) syntax highlighting | MIT | Anthony Fu (2021) |
+| [beUI](https://github.com/starc007/ui-components) agent activity, file diff, tool result, message scroller and preview rail (`ui/src/components/agents`, `motion`, `lib`) | MIT | Saurabh Chauhan (2026) |
+| [Shiki](https://github.com/shikijs/shiki) syntax highlighting | MIT | Pine Wu (2021), Anthony Fu (2023) |
 | [Motion](https://github.com/motiondivision/motion) (with framer-motion) | MIT | Motion B.V. (2024), Framer B.V. (2018) |
 | [Tailwind CSS](https://github.com/tailwindlabs/tailwindcss) | MIT | Tailwind Labs, Inc. |
 | [tw-animate-css](https://github.com/Wombosvideo/tw-animate-css) | MIT | Wombosvideo (2025) |

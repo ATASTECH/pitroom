@@ -1,15 +1,20 @@
-import { Check, Copy } from 'lucide-react';
-import { useEffect, useRef, useState } from 'react';
+import { Check, ChevronDown, Copy } from 'lucide-react';
+import { motion, useReducedMotion } from 'motion/react';
+import { useId, useState } from 'react';
 import { type RunDetail, api } from '@/api';
 import { Pill } from '@/components/badges';
 import { AgentActivity } from '@/components/agents/agent-activity';
+import { FileDiff } from '@/components/agents/file-diff';
+import { AgentDisclosure } from '@/components/agents/agent-disclosure';
 import { FadeDiv } from '@/components/fade-div';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePoll } from '@/hooks/use-poll';
 import { tokens, usd } from '@/lib/format';
 import { traceItems } from '@/lib/steps';
+import { SPRING_SWAP } from '@/lib/ease';
 import { cn } from '@/lib/utils';
+import { fileDiffs } from '../../../src/core/file-diff';
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
@@ -20,23 +25,29 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function CollapsibleSection({ title, children }: { title: string; children: React.ReactNode }) {
+  const [open, setOpen] = useState(false);
+  const id = useId();
+  const reduce = useReducedMotion();
+  return (
+    <section className="space-y-2">
+      <h4>
+        <button id={`${id}-trigger`} type="button" aria-expanded={open} aria-controls={`${id}-content`} onClick={() => setOpen((value) => !value)}
+          className="flex min-h-7 w-full cursor-pointer items-center gap-2 rounded-md text-left text-[11px] font-semibold uppercase tracking-widest text-muted-foreground/80 outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background">
+          {title}
+          <motion.span aria-hidden="true" animate={{ rotate: open ? 180 : 0 }} transition={reduce ? { duration: 0 } : SPRING_SWAP} className="inline-flex shrink-0 text-muted-foreground/60">
+            <ChevronDown className="size-3.5" />
+          </motion.span>
+        </button>
+      </h4>
+      <AgentDisclosure id={`${id}-content`} role="region" aria-labelledby={`${id}-trigger`} open={open} className="space-y-2">{children}</AgentDisclosure>
+    </section>
+  );
+}
+
 const Block = ({ children, mono }: { children: React.ReactNode; mono?: boolean }) => (
   <FadeDiv className={cn('max-h-60 whitespace-pre-wrap break-words rounded-lg border bg-muted/40 p-3 text-[13px] leading-relaxed', mono && 'font-mono text-xs')}>{children}</FadeDiv>
 );
-
-function Diff({ patch }: { patch: string }) {
-  return (
-    <FadeDiv className="max-h-72 rounded-lg border bg-muted/40">
-      <pre className="min-w-max p-3 font-mono text-xs leading-5">
-        {patch.split('\n').map((l, i) => (
-          <div key={i} className={cn(l.startsWith('+') && !l.startsWith('+++') && 'bg-success/10 text-success', l.startsWith('-') && !l.startsWith('---') && 'bg-destructive/10 text-destructive', l.startsWith('@@') && 'text-info')}>
-            {l || ' '}
-          </div>
-        ))}
-      </pre>
-    </FadeDiv>
-  );
-}
 
 const LABEL: Record<string, string> = { worker: 'Worker', model: 'Model', mode: 'Mode', started: 'Started', time: 'Duration', steps: 'Steps', toolCalls: 'Tool calls', tokens: 'Tokens', returnedTokens: 'Returned to agent', cost: 'Worker cost', saved: 'Saved', group: 'Group', directory: 'Directory' };
 function value(k: string, v: string | number): string {
@@ -52,42 +63,26 @@ function Note({ children, tone }: { children: React.ReactNode; tone?: 'bad' | 'o
 }
 
 function Body({ d }: { d: RunDetail }) {
-  const [diff, setDiff] = useState(false);
   const [report, setReport] = useState(false);
   const [copied, setCopied] = useState(false);
   const running = d.state === 'running' || d.state === 'queued';
-  const activity = useRef<HTMLDivElement>(null);
-  const follow = useRef(true);
-  const stepCount = d.steps.length;
-  // The step list scrolls by hand, also while the worker runs. New steps scroll into view only while you are at
-  // the bottom: scroll up to read and it stays where you left it.
-  useEffect(() => {
-    const list = activity.current?.querySelector<HTMLElement>('[role="list"]')?.parentElement;
-    if (!list) return;
-    const onScroll = () => { follow.current = list.scrollHeight - list.scrollTop - list.clientHeight < 40; };
-    list.addEventListener('scroll', onScroll, { passive: true });
-    return () => list.removeEventListener('scroll', onScroll);
-  }, [stepCount > 0]);
-  useEffect(() => {
-    const list = activity.current?.querySelector<HTMLElement>('[role="list"]')?.parentElement;
-    if (running && list && follow.current) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
-  }, [stepCount, running]);
+  const diffs = d.fileDiffs ?? fileDiffs(d.patch ?? '', d.changes, /\n… \d+ more lines/.test(d.patch ?? ''));
   return (
     <div className="space-y-5">
       {!/^Review of /.test(d.task) && <Section title="Task"><Block>{d.task}</Block></Section>}
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
-        {d.steps.length ? <div ref={activity}><AgentActivity items={traceItems(d.steps)} status="complete" defaultOpen collapseOnComplete={false} maxHeight={260} activeLabel="Working…" /></div> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
+        {d.steps.length ? <AgentActivity key={d.id} items={traceItems(d.steps, diffs)} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={440} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
       </Section>
       {d.answer && <Section title="Result"><Block>{d.answer}</Block></Section>}
       {d.changes.length > 0 && (
-        <Section title={`Changes · ${d.changes.length} file${d.changes.length === 1 ? '' : 's'}`}>
-          <div className="space-y-0.5 font-mono text-xs">
-            {d.changes.map((c) => (
-              <div key={c.path} className="flex gap-2"><b className={cn('w-3', c.status === 'A' && 'text-success', c.status === 'M' && 'text-warning', c.status === 'D' && 'text-destructive')}>{c.status}</b><span className="break-all">{c.path}</span></div>
+        <CollapsibleSection title={`Changes · ${d.changes.length} file${d.changes.length === 1 ? '' : 's'}`}>
+          <div className="space-y-0.5">
+            {diffs.map((diff) => (
+              <FileDiff key={diff.path} diff={diff} />
             ))}
           </div>
-          {d.patch && <><Button variant="ghost" size="sm" onClick={() => setDiff((x) => !x)}>{diff ? 'Hide the diff' : 'Show the diff'}</Button>{diff && <Diff patch={d.patch} />}</>}
-        </Section>
+          {diffs.some((diff) => diff.omittedLines > 0 || diff.incomplete) && <p className="text-xs text-muted-foreground">{diffs.some((diff) => diff.incomplete) ? 'Saved patch' : 'Full patch'}: <code className="font-mono">pitroom show {d.id} --patch</code></p>}
+        </CollapsibleSection>
       )}
       <Section title="Details">
         <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3">

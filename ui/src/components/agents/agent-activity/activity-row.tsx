@@ -14,6 +14,8 @@ import {
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { EASE_OUT, SPRING_LAYOUT } from "@/lib/ease";
 import { cn } from "@/lib/utils";
+import { ToolResult } from "@/components/agents/tool-result";
+import { FileDiff } from "@/components/agents/file-diff";
 import type {
   AgentActivityItem,
   AgentActivitySearch,
@@ -213,22 +215,28 @@ function TraceIcon({ kind }: { kind: AgentActivityTrace["kind"] }) {
 }
 
 function TraceRow({ item }: { item: AgentActivityTrace }) {
+  if (item.kind === 'message') {
+    return (
+      <article aria-label="Agent message" className="flex min-w-0 items-start gap-2.5 py-3">
+        <span aria-hidden="true" className="mt-1 grid size-4 shrink-0 place-items-center text-muted-foreground/50">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
+        <div className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere] text-sm leading-6 text-foreground/85">{item.detail}</div>
+      </article>
+    );
+  }
+  if (item.kind === 'write' && item.diffs?.length) {
+    return <div aria-label="Edited files" className="min-w-0 space-y-0.5">{item.diffs.map((diff) => <FileDiff key={diff.path} diff={diff} meta={item.meta} variant="hover" />)}</div>;
+  }
+  if (item.kind !== 'message' && item.kind !== 'thinking' && typeof item.detail === 'string') {
+    return <ToolResult title={item.label} tool={item.tool} detail={item.detail} icon={item.icon ?? <TraceIcon kind={item.kind} />} meta={item.meta} ok={item.ok} language={item.kind === 'run' ? 'bash' : 'text'} variant="hover" />;
+  }
   return (
-    <div className="grid min-h-8 grid-cols-[1rem_auto_minmax(0,1fr)] items-center gap-2.5 rounded-md px-1.5 py-0.5">
-      <span
-        aria-hidden="true"
-        className="grid size-4 place-items-center text-muted-foreground/70"
-      >
-        {item.icon ?? <TraceIcon kind={item.kind} />}
-      </span>
-      <span className="font-medium text-foreground/90">{item.label}</span>
-      {item.detail ? (
-        <span className="min-w-0 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
-          {item.detail}
-        </span>
-      ) : (
-        <span />
-      )}
+    <div className="min-w-0 py-2">
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <span aria-hidden="true">{item.icon ?? <TraceIcon kind={item.kind} />}</span>
+        <span className="font-medium">{item.label}</span>
+        {item.meta && <span className="tabular-nums">{item.meta}</span>}
+      </div>
+      <div className="pl-6 whitespace-pre-wrap [overflow-wrap:anywhere] text-[13px] leading-6 text-foreground/90">{item.detail}</div>
     </div>
   );
 }
