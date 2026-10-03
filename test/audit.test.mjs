@@ -17,11 +17,24 @@ async function audited(s, id) {
   const end = Date.now() + 30_000;
   for (;;) {
     const a = meta(s, id).audit;
-    if (a && a.state !== 'running' && a.state !== 'queued') return a;
+    if (a && a.state !== 'running' && a.state !== 'queued') {
+      // the audit process still compacts files after it has written the verdict: wait for it to exit
+      // before the test directory is removed
+      const pid = meta(s, a.id).pid;
+      if (!pid || !alive(pid)) return a;
+    }
     if (Date.now() > end) assert.fail(`the audit of ${id} did not finish: ${JSON.stringify(a)}`);
     await sleep(200);
   }
 }
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
 const two = (s) => s.config({ worker: 'opencode:mock/good-model', tiers: { audit: 'opencode:mock/other' } });
 
 test('audit: the verdict line and the disputed claims are read from the auditor\'s answer', () => {

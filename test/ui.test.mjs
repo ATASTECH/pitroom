@@ -117,9 +117,14 @@ before(async () => {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
 });
 
-after(() => {
+after(async () => {
   try { ws?.close(); } catch { /* closed */ }
-  try { proc?.kill(); } catch { /* gone */ }
+  if (proc) {
+    // Chrome writes to its profile while it shuts down: let it finish before the directory is removed
+    const exited = new Promise((resolve) => proc.once('exit', resolve));
+    try { proc.kill(); } catch { /* gone */ }
+    await Promise.race([exited, sleep(5000)]);
+  }
   if (s) s.run(['dash', '--stop']);
 });
 

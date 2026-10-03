@@ -18,7 +18,8 @@ fs.chmodSync(MOCK, 0o755);
 const made = [];
 process.on('exit', () => {
   if (process.env.PITROOM_TEST_KEEP) return;
-  for (const d of made) fs.rmSync(d, { recursive: true, force: true });
+  // a background process (Chrome, a dash server, an audit) may still be writing as the test ends: retry a few times
+  for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 export function scratchDir(prefix) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
