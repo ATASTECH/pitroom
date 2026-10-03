@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0
+
+### Gemini CLI worker (beta)
+- A fourth worker: `-W gemini` (or `gemini:<model>`). Read runs use Gemini's `plan` approval mode, isolate and write runs use `auto_edit`; never `--yolo`. Shell commands that change history or delete in bulk (`git commit`, `git push`, `rm -rf`, `sudo`, other agents) are refused by Pitroom's policy files (`policies/gemini`), which ship in the package.
+- Workers run in a private Gemini home (`<pitroom home>/gemini-home`): your hooks, MCP servers, skills and global `GEMINI.md` are not loaded, and your sign-in method is carried over. Folders you trusted in Gemini stay trusted; `PITROOM_GEMINI_TRUST=1` trusts others (`--skip-trust`).
+- Needs a Google AI Studio API key (`gemini` stores it, or `GEMINI_API_KEY`): Google refuses account sign-in for this CLI (`IneligibleTierError`). Pin a model, e.g. `-W gemini:gemini-3.8-flash`: the 2.5 models are no longer served to new keys, and the free tier has a small daily quota per model. Tokens are reported, cost is not.
+- Tried against Gemini CLI 0.62; real runs are recorded as test fixtures. **Not enforced by Gemini 0.62, so do not rely on it:** the secret-file deny rules (`.env`, `*.pem`, keys): use `--isolate`. The web-tool rule was not verified. Details in `docs/backends.md`.
+- The dashboard shows Gemini's logo and mascot, and `doctor` has a Gemini section.
+
+### Tests and docs
+- Browser tests for the dashboard (`test/ui.test.mjs`): system Chrome over the DevTools protocol, skipped when Chrome is missing. They cover opening and closing a card, a `#run-id` link, an isolate run's highlighted diff and the Stats logos.
+- README screenshots and the GIF are regenerated: a file opened to its diff, Stats with worker logos, a running Gemini worker.
+- The adapter test fixtures' `*.stderr.log` files were git-ignored by `*.log` and so missing from the repository (their tests were skipped there); they are tracked now.
+
 ## 0.8.1
 
 ### Dashboard
