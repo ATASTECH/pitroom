@@ -31,7 +31,7 @@ Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / 
 
 <br />
 
-<img src="docs/pitroom-hero.png" alt="Pitroom — a free pit crew for your expensive coding agent. Orange Claw’d and a blue terminal-faced Codex pet work together at a coding terminal." width="94%" />
+<img src="docs/pitroom-hero.png" alt="Pitroom — a free pit crew for your expensive coding agent. Orange Claw’d, a blue terminal-faced Codex pet and a purple-blue Gemini star work together at a coding terminal." width="94%" />
 
 <br />
 
