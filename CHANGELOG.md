@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.1
+
+### Docs
+- The README names Gemini CLI in the quick start (with the API-key requirement), the features, the examples and `pitroom models`; the Gemini star joins Claude and Codex in the hero image. The skills and the marketplace text list Gemini CLI too. The npm page shows the README of the published package, so this is where it reaches it.
+
 ## 0.10.0
 
 ### Audits
