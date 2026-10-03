@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.11.0
+
+### Gemini CLI as your primary agent
+- Pitroom installs into Gemini CLI as an extension: `gemini extensions install https://github.com/ATASTECH/pitroom` gives it the 14 skills and a short context file that introduces Pitroom (`gemini-extension.json`, `gemini-context.md`). Gemini CLI also still works as a worker (`-W gemini`); the two are separate. Gemini asks you to confirm the extension. Its session-start hook text did not reach a Gemini session in a test (Gemini probably runs extension hooks only once you trust them), so the context file is what introduces Pitroom there.
+- `hooks/hooks.json` is now valid for both Claude Code and Gemini CLI (a Gemini extension reads that file too and warned about Claude Code's `PostToolUse` event on every session): it holds SessionStart only, with a command that fills `${CLAUDE_PLUGIN_ROOT}` in Claude Code and `${extensionPath}` in Gemini CLI. The card after each `pitroom` command is Claude Code's alone and moved to `hooks/claude-hooks.json`, named by `hooks` in the Claude plugin manifest. `npm run bump` and the release test keep `gemini-extension.json` in step with the version.
+
+### Doctor
+- Worker CLIs that are installed but not in your config now get a section ("Gemini CLI (installed, not in your config)") with how to use them, so a new worker is not invisible. They never count as warnings, and a CLI that is not installed stays out of the way.
+- A Gemini API key that Gemini CLI keeps itself is no longer reported as "not signed in".
+- Doctor warns when Pitroom is a Gemini extension and its skills are also linked into `~/.agents/skills`: Gemini would load them twice.
+
+### Docs
+- The README has a Gemini CLI install block and a row in the install table.
+
 ## 0.10.1
 
 ### Docs
