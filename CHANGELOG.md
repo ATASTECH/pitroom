@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.1
+
+### Dashboard
+- The Stats table shows each worker's logo next to its badge.
+- Stats no longer lists an `unknown` worker with no runs: an old savings record (from before pluggable workers: no backend, a model without its provider) now counts for its own worker row, so the per-worker figures still add up to the total.
+- The step list's scroller stays mounted so the list animates closed with its content, and a tap on a touch screen no longer leaves auto-follow off while you are at the bottom. A file path containing `", "` still matches its edit step.
+
 ## 0.8.0
 
 ### Dashboard
