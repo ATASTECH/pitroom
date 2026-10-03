@@ -10,7 +10,8 @@ import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
-import { formatReport, progress } from '../core/report.js';
+import { formatReport, progress, readSummary } from '../core/report.js';
+import { auditTask, pickAuditor } from '../core/audit.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
 import { formatModels, modelTable } from '../core/models.js';
@@ -85,6 +86,35 @@ export async function cmdReview(p: Parsed): Promise<number> {
   }
   fs.writeFileSync(runFile(meta.id, 'package.md'), job.package);
   return launch(p, meta);
+}
+
+/** Another worker re-checks a finished read run's answer: AGREE, PARTIAL or DISAGREE with the claims it disputes. */
+export async function cmdAudit(p: Parsed): Promise<number> {
+  if (!p.positional[0]) throw new UserError('pitroom audit RUN: which run?');
+  if (has(p, 'write') || has(p, 'isolate')) throw new UserError('audits are read-only; drop -w/-i');
+  const m = freshMeta(resolveRun(p.positional[0]));
+  if (isActive(m.state)) throw new UserError(`run ${m.id} is still ${m.state}; pitroom wait ${m.id} first`, 3);
+  if (m.reviewOf || m.auditOf) throw new UserError(`run ${m.id} is itself a ${m.reviewOf ? 'review' : 'audit'}`);
+  if (m.mode !== 'read') throw new UserError(`run ${m.id} changed files; an audit re-checks a read run's answer: pitroom review ${m.id} judges a change`);
+  const answer = readSummary(m);
+  if (!answer.trim()) throw new UserError(`run ${m.id} gave no answer to audit`);
+  const worker = flag(p, 'worker') ?? (flag(p, 'tier') ? undefined : pickAuditor(m));
+  if (!worker && !flag(p, 'tier')) {
+    throw new UserError('no other worker to audit with: name one with -W, or configure tiers "audit" or "cheap", or fallback workers, that differ from the one that answered', 3);
+  }
+  const a = prepareRun({
+    ...runOptions(p, auditTask(m, answer)),
+    mode: 'read',
+    dir: m.dir,
+    worker,
+    group: flag(p, 'group') ?? m.group,
+    noFallback: true,
+    audit: { of: m.id },
+    auditRate: undefined,
+  });
+  m.audit = { id: a.id, state: 'running' };
+  writeMeta(m);
+  return launch(p, a);
 }
 
 /** `pitroom plan status PLAN` / `pitroom plan note PLAN "Task N: …"`. */

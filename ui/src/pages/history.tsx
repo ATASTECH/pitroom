@@ -18,7 +18,7 @@ const shortModel = (m: string) => (m.split('/').pop() ?? m).replace(/-(contribut
 const toRun = (r: HistoryRow): DashRun => ({
   id: r.id, state: r.state, kind: r.kind, worker: r.model ? `${r.backend} (${shortModel(r.model)})` : r.backend, task: r.task, group: r.group,
   startedAt: r.startedAt, time: r.seconds != null ? clock(r.seconds) : '', steps: r.steps ?? 0, tokens: r.tokens, saved: r.saved,
-  verdict: r.verdict, changes: r.files || undefined, applied: r.applied || undefined, note: '',
+  verdict: r.verdict, audit: r.audit, changes: r.files || undefined, applied: r.applied || undefined, note: '',
 });
 
 export function HistoryPage() {

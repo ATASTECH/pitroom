@@ -1,5 +1,6 @@
 // The text the primary agent reads. Everything here costs the primary tokens,
 // so it is compact and ends with exact next commands.
+import { auditLines } from './audit.js';
 import { archivedRun } from './history.js';
 import fs from 'node:fs';
 import { planName } from './plan.js';
@@ -62,6 +63,8 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
     if (lines.length > maxLines) out.push(`… (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);
   }
   out.push('');
+
+  out.push(...auditLines(meta));
 
   if (meta.refs) {
     const r = meta.refs;

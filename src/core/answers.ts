@@ -35,3 +35,29 @@ export function parseVerdict(text: string): Verdict {
     minor: count('minor'),
   };
 }
+
+export type AuditVerdict = 'agree' | 'partial' | 'disagree' | 'unclear';
+
+export interface AuditResult {
+  verdict: AuditVerdict;
+  /** The claims the auditor disputes, one line each. */
+  disputed: string[];
+}
+
+/** An auditor's `AUDIT: AGREE | PARTIAL | DISAGREE` line and the bullets under `DISPUTED:`. */
+export function parseAudit(text: string): AuditResult {
+  const word = /^\s*AUDIT:\s*(AGREE|PARTIAL|DISAGREE)\b/im.exec(text)?.[1]?.toLowerCase();
+  const verdict: AuditVerdict = word === 'agree' || word === 'partial' || word === 'disagree' ? word : 'unclear';
+  const after = /^\s*DISPUTED:\s*$/im.exec(text);
+  const disputed = after
+    ? text
+        .slice(after.index + after[0].length)
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => /^[-*•]\s+\S/.test(l))
+        .map((l) => l.replace(/^[-*•]\s+/, ''))
+        .filter((l) => !/^\(?none\)?\.?$/i.test(l))
+        .slice(0, 8)
+    : [];
+  return { verdict, disputed };
+}

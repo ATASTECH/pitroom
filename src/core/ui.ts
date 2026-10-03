@@ -49,6 +49,7 @@ const PITROOM_CALL = /(^|[\s;&|(`])(\S*\/)?pitroom(\.mjs)?(\s|$)/;
 const ICON: Record<string, string> = { done: '✔', failed: '✘', timeout: '⏱', stopped: '■' };
 
 export function kind(m: RunMeta): string {
+  if (m.auditOf) return 'audit';
   if (m.reviewOf) return m.reviewKind === 'range' ? 'branch review' : m.reviewKind === 'fix' ? 're-review' : 'review';
   return m.mode === 'read' ? 'research' : m.mode === 'isolate' ? 'change (isolated copy)' : 'change';
 }
@@ -88,6 +89,7 @@ export function ranTarget(m: RunMeta): Target {
 export function what(m: RunMeta): string {
   if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
   // a range review is named by two full commit hashes; nine characters tell them apart
+  if (m.auditOf) return `of ${m.auditOf}`;
   if (m.reviewOf) return `of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}`;
   const line = m.task.split('\n').find((l) => l.trim()) ?? '';
   // A hand-written plan brief opens with this boilerplate; the task and the plan are what count.
@@ -113,6 +115,7 @@ export function endedCard(m: RunMeta): string {
     what(m),
     elapsed(m),
     v && `SPEC ${v.spec.toUpperCase()} · QUALITY ${v.quality.toUpperCase()}`,
+    m.auditVerdict && `${m.auditVerdict.toUpperCase()}${m.auditDisputed?.length ? ` · ${m.auditDisputed.length} disputed` : ''}`,
     m.changes?.length ? `${m.changes.length} file${m.changes.length === 1 ? '' : 's'} changed` : '',
     m.savedUsd ? `~${usd(m.savedUsd)} saved` : '',
   ];

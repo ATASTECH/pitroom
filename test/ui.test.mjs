@@ -76,6 +76,11 @@ before(async () => {
   });
   assert.equal(change.status, 0, change.stderr + change.stdout);
   ids.change = RUN_ID.exec(change.stdout)[0];
+  // another worker disputes the research answer
+  const audit = s.run(['audit', ids.research, '-W', 'opencode:mock/other'], {
+    MOCK_ACTIONS: 'answer:AUDIT: DISAGREE\nCHECKED: 1\nDISPUTED:\n- the file list is incomplete (app.txt:1)',
+  });
+  assert.equal(audit.status, 0, audit.stderr + audit.stdout);
   const start = s.run(['dash', '--detach', '--port', '0']);
   assert.equal(start.status, 0, start.stderr);
   url = start.stdout.trim().split('\n')[0];
@@ -112,9 +117,14 @@ before(async () => {
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height: 900, deviceScaleFactor: 1, mobile: false });
 });
 
-after(() => {
+after(async () => {
   try { ws?.close(); } catch { /* closed */ }
-  try { proc?.kill(); } catch { /* gone */ }
+  if (proc) {
+    // Chrome writes to its profile while it shuts down: let it finish before the directory is removed
+    const exited = new Promise((resolve) => proc.once('exit', resolve));
+    try { proc.kill(); } catch { /* gone */ }
+    await Promise.race([exited, sleep(5000)]);
+  }
   if (s) s.run(['dash', '--stop']);
 });
 
@@ -189,4 +199,23 @@ test('ui: the Stats tab shows each worker with its logo and the totals', { skip 
   assert.match(text, /RUNS\s*\n?\s*2/i, 'both runs are counted');
   await click("[...document.querySelectorAll('[role=tab]')].find((e) => e.textContent === 'History')");
   await until("document.body.innerText.includes('add a greeting helper')", 'the History tab to list the isolate run');
+});
+
+test('ui: an audited run carries the audit\'s verdict, its disputed claims, and a Stats count', async () => {
+  await open();
+  await until(`${cardWith('list the files')} !== undefined`, 'the research card');
+  assert.match(await evaluate(`${cardWith('list the files')}.parentElement.innerText`), /audited · disagrees/, 'the badge on the audited run');
+  assert.match(await evaluate('document.body.innerText'), /Audit disagrees/, 'and the audit run\'s own card');
+  await click(cardWith('list the files'));
+  await until("document.querySelector('[aria-label=\"Close\"]') !== null", 'the card to open');
+  await until("document.body.innerText.includes('the file list is incomplete')", 'the disputed claim in the card');
+  await key('Escape', 'Escape', 27);
+
+  await open('#stats');
+  const audited = await until(
+    "[...document.querySelectorAll('tr')].find((r) => r.textContent.includes('opencode'))?.querySelector('td[title*=\"audited answers\"]')?.textContent",
+    'the Audited column',
+  );
+  assert.equal(audited, '0/1', 'one audited answer, none confirmed');
+  assert.match(await evaluate('document.body.innerText'), /RUNS\s*\n?\s*2/i, 'the audit is not counted as a run');
 });

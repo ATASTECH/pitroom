@@ -58,8 +58,8 @@ export interface LedgerEntry {
 }
 
 export function record(meta: RunMeta): void {
-  // Runs that never reached the model (stopped early, setup errors) would only skew the stats.
-  if (!meta.usage?.steps) return;
+  // Runs that never reached the model (stopped early, setup errors) would only skew the stats; an audit saved nothing.
+  if (!meta.usage?.steps || meta.auditOf) return;
   const entry: LedgerEntry = {
     id: meta.id,
     at: meta.endedAt ?? new Date().toISOString(),

@@ -11,6 +11,7 @@ import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
 import { type LedgerEntry, readLedger, totals } from './receipt.js';
 import { type RunMeta, TERMINAL, home, listRunIds, readMeta, runFile } from './store.js';
+import { auditBadge } from './audit.js';
 import { kind } from './ui.js';
 
 type Db = {
@@ -143,8 +144,8 @@ export function recordRun(meta: RunMeta): void {
     const fields = {
       id: meta.id, started_at: meta.startedAt, ended_at: meta.endedAt ?? null, state: meta.state, mode: meta.mode, kind: kind(meta),
       backend: t.backend, model: meta.resolvedModel ?? t.model ?? null, task: clip(meta.task, 20_000) ?? '', grp: meta.group ?? null,
-      dir: meta.dir, review_of: meta.reviewOf ?? null,
-      verdict: meta.verdict ? `SPEC ${meta.verdict.spec.toUpperCase()} · QUALITY ${meta.verdict.quality.toUpperCase()}` : null,
+      dir: meta.dir, review_of: meta.reviewOf ?? meta.auditOf ?? null,
+      verdict: meta.verdict ? `SPEC ${meta.verdict.spec.toUpperCase()} · QUALITY ${meta.verdict.quality.toUpperCase()}` : meta.auditVerdict ? `AUDIT ${meta.auditVerdict.toUpperCase()}` : null,
       seconds, steps: u?.steps ?? null, tool_calls: u?.toolCalls ?? null, tokens: u?.total ?? null, returned_tokens: meta.returnedTokens ?? null,
       cost: u?.cost ?? null, saved: meta.savedUsd ?? null, files_changed: meta.changes?.length ?? 0, applied: meta.applied ? 1 : 0,
       error: clip(meta.error, 2000) ?? null, meta_json: JSON.stringify(meta),
@@ -244,6 +245,8 @@ export interface HistoryRow {
   task: string;
   group?: string;
   verdict?: string;
+  /** On an audited run: what its audit found (AGREE, PARTIAL, DISAGREE, UNCLEAR), PENDING while it runs. */
+  audit?: string;
   seconds?: number;
   steps?: number;
   tokens?: number;
@@ -285,13 +288,15 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base}`).get(...args).n as number;
     const page = q.beforeId ? `${base ? `${base} AND` : 'WHERE'} r.id < ?` : base;
-    const rows = db.prepare(`SELECT r.* FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r: any) => ({
         id: r.id, startedAt: r.started_at, state: r.state, kind: r.kind, backend: r.backend, model: r.model ?? undefined,
         task: r.review_of ? `of ${r.review_of.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : (r.task as string).split('\n').find((l: string) => l.trim()) ?? '',
-        group: r.grp ?? undefined, verdict: r.verdict ?? undefined, seconds: r.seconds ?? undefined, steps: r.steps ?? undefined,
+        group: r.grp ?? undefined, verdict: r.verdict ?? undefined,
+        audit: auditBadge({ audit: r.audit_state ? { id: '', state: r.audit_state, verdict: r.audit_verdict ?? undefined } : undefined }),
+        seconds: r.seconds ?? undefined, steps: r.steps ?? undefined,
         tokens: r.tokens ?? undefined, saved: r.saved ?? undefined, files: r.files_changed ?? 0, applied: !!r.applied,
       })),
     };
@@ -300,9 +305,41 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
   }
 }
 
+/** Audits are runs of their own (about another run's answer): left out of the run counts, counted here. */
+const NOT_AUDIT = "json_extract(meta_json, '$.auditOf') IS NULL";
+
+/** What the audits since then found, in all and per worker and model of the audited answer. */
+function auditStats(db: Db, since: string): { total: Stats['audits']; byWorker: Map<string, { audited: number; agreed: number }> } {
+  const total: Stats['audits'] = { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 };
+  const byWorker = new Map<string, { audited: number; agreed: number }>();
+  try {
+    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(tokens),0) tokens FROM runs WHERE started_at >= ? AND json_extract(meta_json, '$.auditOf') IS NOT NULL").get(since);
+    total.runs = t.runs;
+    total.tokens = t.tokens;
+    const rows = db.prepare(`SELECT r.backend, r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
+      FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
+      WHERE a.started_at >= ? AND a.state = 'done' AND json_extract(a.meta_json, '$.auditOf') IS NOT NULL
+      GROUP BY r.backend, r.model, v`).all(since);
+    for (const r of rows) {
+      const v = (r.v ?? 'unclear') as keyof Stats['audits'];
+      if (v in total && v !== 'runs' && v !== 'tokens') total[v] += r.n;
+      const k = `${r.backend ?? ''}\0${r.model ?? ''}`;
+      const w = byWorker.get(k) ?? { audited: 0, agreed: 0 };
+      w.audited += r.n;
+      if (r.v === 'agree') w.agreed += r.n;
+      byWorker.set(k, w);
+    }
+  } catch {
+    // no audits, or an SQLite without JSON functions
+  }
+  return { total, byWorker };
+}
+
 export interface Stats {
   totals: { runs: number; ok: number; failed: number; seconds: number; tokens: number; saved: number };
-  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number }[];
+  /** Audits are not counted as runs above: they are overhead. `audited` and `agreed` per worker count audits of its answers. */
+  audits: { runs: number; agree: number; partial: number; disagree: number; unclear: number; tokens: number };
+  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
   byDay: { day: string; runs: number; ok: number; saved: number }[];
 }
 
@@ -311,8 +348,8 @@ export interface Stats {
  * also names a worker the history files under another model (a run that stopped before its model was known),
  * so the rows always add up to the total.
  */
-function workerRows(rows: any[], ledger: LedgerEntry[]): Stats['byWorker'] {
-  const out = rows.map((r) => ({ backend: r.backend as string, model: (r.model ?? undefined) as string | undefined, runs: r.runs as number, ok: (r.ok ?? 0) as number, avgSeconds: r.avg_s as number | null, avgTokens: r.avg_t as number | null, saved: 0 }));
+function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { audited: number; agreed: number }>): Stats['byWorker'] {
+  const out = rows.map((r) => ({ backend: r.backend as string, model: (r.model ?? undefined) as string | undefined, runs: r.runs as number, ok: (r.ok ?? 0) as number, avgSeconds: r.avg_s as number | null, avgTokens: r.avg_t as number | null, saved: 0, audited: 0, agreed: 0 }));
   const key = (backend?: string, model?: string) => `${backend ?? ''}\0${model ?? ''}`;
   const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
   for (const e of ledger) {
@@ -320,24 +357,29 @@ function workerRows(rows: any[], ledger: LedgerEntry[]): Stats['byWorker'] {
     const backend = e.backend ?? 'opencode';
     let row = index.get(key(backend, e.model)) ?? (e.model ? out.find((r) => r.backend === backend && r.model?.endsWith(`/${e.model}`)) : undefined);
     if (!row) {
-      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0 };
+      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
       index.set(key(backend, e.model), row);
       out.push(row);
     }
     row.saved += e.saved;
   }
+  for (const r of out) {
+    const a = audited.get(key(r.backend, r.model));
+    if (a) Object.assign(r, a);
+  }
   return out;
 }
 
 export function historyStats(sinceMs?: number): Stats {
-  const empty: Stats = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, byWorker: [], byDay: [] };
+  const empty: Stats = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
   if (!db) return empty;
   const since = sinceMs ? new Date(sinceMs).toISOString() : '';
   try {
-    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ?").get(since);
-    const w = db.prepare("SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY backend, model ORDER BY runs DESC LIMIT 40").all(since);
-    const d = db.prepare("SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY day ORDER BY day DESC LIMIT 60").all(since);
+    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
+    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
+    const audits = auditStats(db, since);
     // Savings come from the ledger, the same figures the Live page, `pitroom savings` and the status line add up,
     // so one number is never calculated two ways. The database only supplies counts and times.
     const ledger = readLedger(sinceMs);
@@ -345,7 +387,8 @@ export function historyStats(sinceMs?: number): Stats {
     for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
     return {
       totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
-      byWorker: workerRows(w, ledger),
+      audits: audits.total,
+      byWorker: workerRows(w, ledger, audits.byWorker),
       byDay: d.reverse().map((r: any) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: byDay.get(r.day) ?? 0 })),
     };
   } catch {

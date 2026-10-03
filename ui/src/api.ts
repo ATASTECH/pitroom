@@ -16,6 +16,8 @@ export interface DashRun {
   tokens?: number;
   saved?: number;
   verdict?: string;
+  /** On an audited run: AGREE, PARTIAL, DISAGREE, UNCLEAR, PENDING or FAILED. */
+  audit?: string;
   changes?: number;
   applied?: boolean;
   note: string;
@@ -53,6 +55,7 @@ export interface RunDetail {
   refs?: { valid: number; total: number; invalid: string[] };
   verify?: { command: string; ok: boolean; tail: string };
   error?: string;
+  audit?: { id?: string; state: string; verdict?: string; disputed: string[] };
   report: string;
 }
 
@@ -66,6 +69,7 @@ export interface HistoryRow {
   task: string;
   group?: string;
   verdict?: string;
+  audit?: string;
   seconds?: number;
   steps?: number;
   tokens?: number;
@@ -77,7 +81,8 @@ export interface HistoryRow {
 export interface Stats {
   price: string;
   totals: { runs: number; ok: number; failed: number; seconds: number; tokens: number; saved: number };
-  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number }[];
+  audits: { runs: number; agree: number; partial: number; disagree: number; unclear: number; tokens: number };
+  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
   byDay: { day: string; runs: number; ok: number; saved: number }[];
 }
 

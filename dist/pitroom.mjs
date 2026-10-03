@@ -1413,7 +1413,8 @@ var SCHEMA = {
   maxParallel: "number",
   models: "record",
   tiers: "record",
-  costs: "numbers"
+  costs: "numbers",
+  audit: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1457,6 +1458,7 @@ function matches(v, type) {
   if (type === "numbers") {
     return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
   }
+  if (type === "number") return typeof v === "number" && Number.isFinite(v) && v >= 0;
   return typeof v === type;
 }
 var DEFAULT_PARALLEL = 20;
@@ -1465,6 +1467,10 @@ var clampParallel = (s) => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT)
 var positiveInt = (v) => {
   const n = Number(v);
   return v !== void 0 && v !== "" && Number.isInteger(n) && n > 0 ? n : void 0;
+};
+var rate = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
 };
 var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
 function setting(flag2, env, conf, fallback) {
@@ -1489,7 +1495,8 @@ function effective(flags = {}) {
     maxParallel: clampParallel(setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
     models: setting(void 0, void 0, c.models, {}),
     tiers: setting(void 0, void 0, c.tiers, {}),
-    costs: setting(void 0, void 0, c.costs, {})
+    costs: setting(void 0, void 0, c.costs, {}),
+    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0)
   };
 }
 
@@ -1536,6 +1543,8 @@ var BOOL_FLAGS = {
   "-i": "isolate",
   "--isolate": "isolate",
   "--bg": "bg",
+  "--audit": "audit",
+  "--no-audit": "no-audit",
   "--web": "web",
   "--no-fallback": "no-fallback",
   "--json": "json",
@@ -1622,8 +1631,11 @@ function runOptions(p, task) {
   const modes = ["read", "write", "isolate"].filter((m) => has(p, m));
   if (modes.length > 1) throw new UserError("choose one of --read, --write, --isolate");
   const cont = flag(p, "continue");
+  if (has(p, "audit") && has(p, "no-audit")) throw new UserError("choose one of --audit, --no-audit");
+  if (has(p, "audit") && (has(p, "write") || has(p, "isolate"))) throw new UserError("audits re-check the answer of a read run: drop -w/-i");
   return {
     mode: modes[0] ?? "read",
+    auditRate: has(p, "no-audit") ? 0 : has(p, "audit") ? 1 : void 0,
     task,
     dir: flag(p, "dir") ?? process.cwd(),
     files: p.flags.get("file") ?? [],
@@ -1782,6 +1794,93 @@ function formatInit(plan, written) {
   return out.join("\n");
 }
 
+// src/core/audit.ts
+import crypto2 from "node:crypto";
+
+// src/core/target.ts
+function parseTarget(spec, defaultBackend) {
+  const s = spec.trim();
+  if (!s) throw new UserError("empty worker target");
+  const i = s.indexOf(":");
+  if (i > 0 && isBackendId(s.slice(0, i))) {
+    const model = s.slice(i + 1).trim();
+    return model ? { backend: s.slice(0, i), model } : { backend: s.slice(0, i) };
+  }
+  if (isBackendId(s)) return { backend: s };
+  return { backend: defaultBackend, model: s };
+}
+var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
+var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
+var sameTarget = (a, b) => a.backend === b.backend && a.model === b.model;
+
+// src/core/audit.ts
+var ANSWER_MAX = 8e3;
+function auditRate(meta) {
+  return meta.auditRate ?? effective().audit.value;
+}
+function draw(id) {
+  return crypto2.createHash("sha256").update(id).digest().readUInt32BE(0) / 4294967296;
+}
+function auditable(meta, answer) {
+  return meta.mode === "read" && meta.state === "done" && !meta.reviewOf && !meta.auditOf && !meta.audit && !!answer.trim();
+}
+function sampled(meta) {
+  const rate2 = auditRate(meta);
+  return rate2 > 0 && (rate2 >= 1 || draw(meta.id) < rate2);
+}
+function pickAuditor(meta) {
+  const eff = effective();
+  const tiers = eff.tiers.value;
+  const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
+  const ran = meta.ran ?? meta.worker;
+  const candidates = [tiers.audit, tiers.cheap, ...eff.fallback.value, eff.worker.value].filter((s) => !!s);
+  return candidates.find((c) => !sameTarget(parseTarget(c, def), ran));
+}
+function auditTask(meta, answer) {
+  const text = answer.trim();
+  const shown = text.length > ANSWER_MAX ? `${text.slice(0, ANSWER_MAX)}
+\u2026 (cut: ${text.length - ANSWER_MAX} more characters)` : text;
+  return [
+    "You are auditing another worker's answer to a read-only question about this project. Do not take the answer on trust:",
+    "check its key claims yourself against the files here (open the cited files and lines, search for what it says exists or is missing).",
+    "Do not edit anything and do not run anything that changes files.",
+    "",
+    "QUESTION:",
+    meta.task.trim(),
+    "",
+    "ANSWER TO AUDIT:",
+    shown,
+    "",
+    "Reply in exactly this form and nothing else:",
+    "AUDIT: AGREE | PARTIAL | DISAGREE",
+    "CHECKED: <how many key claims you checked>",
+    "DISPUTED:",
+    "- <the claim> \u2014 <what is actually true, with path:line>",
+    "",
+    "AGREE: every key claim you checked holds. PARTIAL: some are wrong or could not be verified. DISAGREE: the main conclusion is wrong.",
+    'Under DISPUTED list only claims you checked and found wrong or unsupported; write "- (none)" when there are none.'
+  ].join("\n");
+}
+function auditLines(meta) {
+  if (meta.auditOf) {
+    return meta.state === "done" ? [`\u2500\u2500 audit of ${meta.auditOf}: ${(meta.auditVerdict ?? "unclear").toUpperCase()}${meta.auditDisputed?.length ? ` \xB7 ${meta.auditDisputed.length} disputed` : ""}`] : [];
+  }
+  const a = meta.audit;
+  if (!a) return [];
+  if (a.state === "done") {
+    const head = `\u2500\u2500 audit (run ${a.id}): ${(a.verdict ?? "unclear").toUpperCase()}${a.verdict === "agree" ? "" : a.verdict === "unclear" ? " (the auditor did not answer in the expected form)" : ""}`;
+    return [head, ...(a.disputed ?? []).map((d) => `   disputed: ${d}`)];
+  }
+  if (a.state === "running" || a.state === "queued") return [`\u2500\u2500 audit: another worker is re-checking this answer in the background (pitroom show ${a.id})`];
+  return [`\u2500\u2500 audit (run ${a.id}) ${a.state}: no verdict`];
+}
+function auditBadge(meta) {
+  const a = meta.audit;
+  if (!a) return void 0;
+  if (a.state === "done") return (a.verdict ?? "unclear").toUpperCase();
+  return a.state === "running" || a.state === "queued" ? "PENDING" : "FAILED";
+}
+
 // src/core/history.ts
 import fs12 from "node:fs";
 import { createRequire } from "node:module";
@@ -1812,7 +1911,7 @@ function savedUsd(usage2, returnedTokens, price = primaryPrice()) {
   return Math.max(0, wouldCost - (usage2.cost ?? 0) - readingTheReport);
 }
 function record(meta) {
-  if (!meta.usage?.steps) return;
+  if (!meta.usage?.steps || meta.auditOf) return;
   const entry = {
     id: meta.id,
     at: meta.endedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
@@ -1939,6 +2038,7 @@ var RUN_ID = /\b\d{8}-\d{6}-[0-9a-f]{4}\b/g;
 var PITROOM_CALL = /(^|[\s;&|(`])(\S*\/)?pitroom(\.mjs)?(\s|$)/;
 var ICON = { done: "\u2714", failed: "\u2718", timeout: "\u23F1", stopped: "\u25A0" };
 function kind(m) {
+  if (m.auditOf) return "audit";
   if (m.reviewOf) return m.reviewKind === "range" ? "branch review" : m.reviewKind === "fix" ? "re-review" : "review";
   return m.mode === "read" ? "research" : m.mode === "isolate" ? "change (isolated copy)" : "change";
 }
@@ -1962,6 +2062,7 @@ function ranTarget(m) {
 }
 function what(m) {
   if (m.plan) return short(`Task ${m.plan.step}: ${m.plan.title}`);
+  if (m.auditOf) return `of ${m.auditOf}`;
   if (m.reviewOf) return `of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, "$1")}`;
   const line = m.task.split("\n").find((l) => l.trim()) ?? "";
   const brief2 = /^You are implementing Task (\d+)\b.*?\bplan\s+(\S+)/i.exec(line);
@@ -1981,6 +2082,7 @@ function endedCard(m) {
     what(m),
     elapsed(m),
     v && `SPEC ${v.spec.toUpperCase()} \xB7 QUALITY ${v.quality.toUpperCase()}`,
+    m.auditVerdict && `${m.auditVerdict.toUpperCase()}${m.auditDisputed?.length ? ` \xB7 ${m.auditDisputed.length} disputed` : ""}`,
     m.changes?.length ? `${m.changes.length} file${m.changes.length === 1 ? "" : "s"} changed` : "",
     m.savedUsd ? `~${usd(m.savedUsd)} saved` : ""
   ];
@@ -2031,7 +2133,7 @@ ${output}`.match(RUN_ID) ?? [])].filter((id) => fs11.existsSync(`${runsDir()}/${
 // src/core/history.ts
 var SCHEMA_VERSION = 1;
 var PATCH_MAX = 1e6;
-var ANSWER_MAX = 2e5;
+var ANSWER_MAX2 = 2e5;
 var cached2;
 var historyFile = () => path10.join(home(), "history.db");
 function openDb() {
@@ -2127,7 +2229,7 @@ function recordRun(meta) {
   try {
     const u = meta.usage;
     const known = db.prepare("SELECT answer IS NOT NULL AS has FROM runs WHERE id = ?").get(meta.id);
-    const answer = known?.has ? void 0 : clip5(readRunFile(meta.id, "summary.md")?.trim(), ANSWER_MAX);
+    const answer = known?.has ? void 0 : clip5(readRunFile(meta.id, "summary.md")?.trim(), ANSWER_MAX2);
     const patch = known?.has ? void 0 : clip5(readRunFile(meta.id, "changes.patch"), PATCH_MAX);
     const seconds = meta.endedAt ? Math.max(0, Math.round((Date.parse(meta.endedAt) - Date.parse(meta.startedAt)) / 1e3)) : null;
     const t = meta.ran ?? meta.worker;
@@ -2143,8 +2245,8 @@ function recordRun(meta) {
       task: clip5(meta.task, 2e4) ?? "",
       grp: meta.group ?? null,
       dir: meta.dir,
-      review_of: meta.reviewOf ?? null,
-      verdict: meta.verdict ? `SPEC ${meta.verdict.spec.toUpperCase()} \xB7 QUALITY ${meta.verdict.quality.toUpperCase()}` : null,
+      review_of: meta.reviewOf ?? meta.auditOf ?? null,
+      verdict: meta.verdict ? `SPEC ${meta.verdict.spec.toUpperCase()} \xB7 QUALITY ${meta.verdict.quality.toUpperCase()}` : meta.auditVerdict ? `AUDIT ${meta.auditVerdict.toUpperCase()}` : null,
       seconds,
       steps: u?.steps ?? null,
       tool_calls: u?.toolCalls ?? null,
@@ -2261,7 +2363,7 @@ function listHistory(q = {}) {
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base2}`).get(...args).n;
     const page = q.beforeId ? `${base2 ? `${base2} AND` : "WHERE"} r.id < ?` : base2;
-    const rows = db.prepare(`SELECT r.* FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r) => ({
@@ -2274,6 +2376,7 @@ function listHistory(q = {}) {
         task: r.review_of ? `of ${r.review_of.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, "$1")}` : r.task.split("\n").find((l) => l.trim()) ?? "",
         group: r.grp ?? void 0,
         verdict: r.verdict ?? void 0,
+        audit: auditBadge({ audit: r.audit_state ? { id: "", state: r.audit_state, verdict: r.audit_verdict ?? void 0 } : void 0 }),
         seconds: r.seconds ?? void 0,
         steps: r.steps ?? void 0,
         tokens: r.tokens ?? void 0,
@@ -2286,37 +2389,68 @@ function listHistory(q = {}) {
     return { rows: [], total: 0 };
   }
 }
-function workerRows(rows, ledger) {
-  const out = rows.map((r) => ({ backend: r.backend, model: r.model ?? void 0, runs: r.runs, ok: r.ok ?? 0, avgSeconds: r.avg_s, avgTokens: r.avg_t, saved: 0 }));
+var NOT_AUDIT = "json_extract(meta_json, '$.auditOf') IS NULL";
+function auditStats(db, since) {
+  const total = { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 };
+  const byWorker = /* @__PURE__ */ new Map();
+  try {
+    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(tokens),0) tokens FROM runs WHERE started_at >= ? AND json_extract(meta_json, '$.auditOf') IS NOT NULL").get(since);
+    total.runs = t.runs;
+    total.tokens = t.tokens;
+    const rows = db.prepare(`SELECT r.backend, r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
+      FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
+      WHERE a.started_at >= ? AND a.state = 'done' AND json_extract(a.meta_json, '$.auditOf') IS NOT NULL
+      GROUP BY r.backend, r.model, v`).all(since);
+    for (const r of rows) {
+      const v = r.v ?? "unclear";
+      if (v in total && v !== "runs" && v !== "tokens") total[v] += r.n;
+      const k = `${r.backend ?? ""}\0${r.model ?? ""}`;
+      const w = byWorker.get(k) ?? { audited: 0, agreed: 0 };
+      w.audited += r.n;
+      if (r.v === "agree") w.agreed += r.n;
+      byWorker.set(k, w);
+    }
+  } catch {
+  }
+  return { total, byWorker };
+}
+function workerRows(rows, ledger, audited) {
+  const out = rows.map((r) => ({ backend: r.backend, model: r.model ?? void 0, runs: r.runs, ok: r.ok ?? 0, avgSeconds: r.avg_s, avgTokens: r.avg_t, saved: 0, audited: 0, agreed: 0 }));
   const key = (backend, model) => `${backend ?? ""}\0${model ?? ""}`;
   const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
   for (const e of ledger) {
     const backend = e.backend ?? "opencode";
     let row = index.get(key(backend, e.model)) ?? (e.model ? out.find((r) => r.backend === backend && r.model?.endsWith(`/${e.model}`)) : void 0);
     if (!row) {
-      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0 };
+      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
       index.set(key(backend, e.model), row);
       out.push(row);
     }
     row.saved += e.saved;
   }
+  for (const r of out) {
+    const a = audited.get(key(r.backend, r.model));
+    if (a) Object.assign(r, a);
+  }
   return out;
 }
 function historyStats(sinceMs2) {
-  const empty = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, byWorker: [], byDay: [] };
+  const empty = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
   if (!db) return empty;
   const since = sinceMs2 ? new Date(sinceMs2).toISOString() : "";
   try {
-    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ?").get(since);
-    const w = db.prepare("SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY backend, model ORDER BY runs DESC LIMIT 40").all(since);
-    const d = db.prepare("SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? GROUP BY day ORDER BY day DESC LIMIT 60").all(since);
+    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
+    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
+    const audits = auditStats(db, since);
     const ledger = readLedger(sinceMs2);
     const byDay = /* @__PURE__ */ new Map();
     for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
     return {
       totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
-      byWorker: workerRows(w, ledger),
+      audits: audits.total,
+      byWorker: workerRows(w, ledger, audits.byWorker),
       byDay: d.reverse().map((r) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: byDay.get(r.day) ?? 0 }))
     };
   } catch {
@@ -2447,6 +2581,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
     if (lines.length > maxLines) out.push(`\u2026 (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);
   }
   out.push("");
+  out.push(...auditLines(meta));
   if (meta.refs) {
     const r = meta.refs;
     const bad = r.invalid.slice(0, 8).map((i) => `${i.ref} (${i.reason})`).join(", ");
@@ -2507,22 +2642,6 @@ function progress(meta) {
   const last = l.last ? ` \xB7 last: ${l.last}` : "";
   return `pitroom \u2026 running \xB7 ${meta.mode} \xB7 ${duration(meta)} \xB7 ${l.steps} steps, ${l.toolCalls} tool calls${last} \xB7 run ${meta.id}`;
 }
-
-// src/core/target.ts
-function parseTarget(spec, defaultBackend) {
-  const s = spec.trim();
-  if (!s) throw new UserError("empty worker target");
-  const i = s.indexOf(":");
-  if (i > 0 && isBackendId(s.slice(0, i))) {
-    const model = s.slice(i + 1).trim();
-    return model ? { backend: s.slice(0, i), model } : { backend: s.slice(0, i) };
-  }
-  if (isBackendId(s)) return { backend: s };
-  return { backend: defaultBackend, model: s };
-}
-var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
-var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
-var sameTarget = (a, b) => a.backend === b.backend && a.model === b.model;
 
 // src/core/group.ts
 function groupIds(group) {
@@ -2758,11 +2877,11 @@ function installedSkills() {
 }
 
 // src/core/plan-status.ts
-import crypto2 from "node:crypto";
+import crypto3 from "node:crypto";
 import fs16 from "node:fs";
 import path13 from "node:path";
 function notesFile(plan) {
-  const id = crypto2.createHash("sha1").update(plan.file).digest("hex").slice(0, 12);
+  const id = crypto3.createHash("sha1").update(plan.file).digest("hex").slice(0, 12);
   return path13.join(home(), "plans", id, "notes.md");
 }
 function readNotes(plan) {
@@ -2847,13 +2966,13 @@ ${rulings}`,
 }
 
 // src/core/review.ts
-import crypto4 from "node:crypto";
+import crypto5 from "node:crypto";
 import fs18 from "node:fs";
 import path15 from "node:path";
 
 // src/vcs/git.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
-import crypto3 from "node:crypto";
+import crypto4 from "node:crypto";
 import fs17 from "node:fs";
 import os9 from "node:os";
 import path14 from "node:path";
@@ -2891,7 +3010,7 @@ function repoRoot(dir) {
   return r.code === 0 ? path14.resolve(r.stdout.trim()) : void 0;
 }
 function snapshotTree(root, exclude = []) {
-  const tmp = path14.join(os9.tmpdir(), `pitroom-index-${process.pid}-${crypto3.randomBytes(4).toString("hex")}`);
+  const tmp = path14.join(os9.tmpdir(), `pitroom-index-${process.pid}-${crypto4.randomBytes(4).toString("hex")}`);
   const real = path14.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
   const env = { ...process.env, GIT_INDEX_FILE: tmp };
   try {
@@ -3102,7 +3221,7 @@ function pickReviewer(job) {
 function writePackage(job) {
   const g = gitDir(job.dir);
   if (!g) throw new UserError(`not a git repository: ${job.dir}`);
-  const file = path15.join(g, "pitroom", `review-${crypto4.randomBytes(4).toString("hex")}.md`);
+  const file = path15.join(g, "pitroom", `review-${crypto5.randomBytes(4).toString("hex")}.md`);
   fs18.mkdirSync(path15.dirname(file), { recursive: true });
   fs18.writeFileSync(file, job.package);
   return file;
@@ -3226,7 +3345,7 @@ function formatModels(t) {
 
 // src/core/dash.ts
 import { spawn } from "node:child_process";
-import crypto5 from "node:crypto";
+import crypto6 from "node:crypto";
 import fs20 from "node:fs";
 import http from "node:http";
 import path17 from "node:path";
@@ -3385,10 +3504,11 @@ function toRun(m) {
     steps: l ? l.steps : m.usage?.steps ?? 0,
     tokens: m.usage?.total,
     saved: m.savedUsd || void 0,
-    verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} \xB7 QUALITY ${m.verdict.quality.toUpperCase()}` : void 0,
+    verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} \xB7 QUALITY ${m.verdict.quality.toUpperCase()}` : m.auditVerdict ? `AUDIT ${m.auditVerdict.toUpperCase()}` : void 0,
+    audit: auditBadge(m),
     changes: m.changes?.length || void 0,
     applied: m.applied || void 0,
-    note: l?.last ? oneLine6(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : headline(m, 200) || oneLine6(m.error ?? "", 200)
+    note: l?.last ? oneLine6(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine6(m.error ?? "", 200)
   };
 }
 function dashState(opts = {}) {
@@ -3448,7 +3568,7 @@ function runDetail(id) {
     id,
     state: m.state,
     card: toRun(m),
-    task: (m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, "$1")}` : m.task).slice(0, TASK_MAX),
+    task: (m.auditOf ? `Audit of ${m.auditOf}` : m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, "$1")}` : m.task).slice(0, TASK_MAX),
     steps,
     answer,
     changes: m.changes ?? [],
@@ -3476,6 +3596,7 @@ function runDetail(id) {
     refs: m.refs ? { valid: m.refs.valid, total: m.refs.total, invalid: m.refs.invalid.map((r) => `${r.ref} (${r.reason})`) } : void 0,
     verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail } : void 0,
     error: m.error,
+    audit: m.auditOf ? m.state === "done" ? { state: m.state, verdict: m.auditVerdict, disputed: m.auditDisputed ?? [] } : void 0 : m.audit && { id: m.audit.id, state: m.audit.state, verdict: m.audit.verdict, disputed: m.audit.disputed ?? [] },
     report: isActive(m.state) ? progress(m) : formatReport(m, void 0, 120)
   };
 }
@@ -3484,7 +3605,7 @@ var HEADERS = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   // Own files only, plus the hash of the one inline theme script; styles may be inline (the components position popups with them).
-  "content-security-policy": `default-src 'none'; script-src 'self' 'sha256-${crypto5.createHash("sha256").update(THEME_SCRIPT).digest("base64")}'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'`
+  "content-security-policy": `default-src 'none'; script-src 'self' 'sha256-${crypto6.createHash("sha256").update(THEME_SCRIPT).digest("base64")}'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'`
 };
 var ASSETS = { "/assets/app.js": "text/javascript; charset=utf-8", "/assets/app.css": "text/css; charset=utf-8" };
 var assetsDir = () => fileURLToPath3(new URL("./ui/", import.meta.url));
@@ -3910,9 +4031,16 @@ function parseVerdict(text) {
     minor: count("minor")
   };
 }
+function parseAudit(text) {
+  const word = /^\s*AUDIT:\s*(AGREE|PARTIAL|DISAGREE)\b/im.exec(text)?.[1]?.toLowerCase();
+  const verdict = word === "agree" || word === "partial" || word === "disagree" ? word : "unclear";
+  const after = /^\s*DISPUTED:\s*$/im.exec(text);
+  const disputed = after ? text.slice(after.index + after[0].length).split("\n").map((l) => l.trim()).filter((l) => /^[-*•]\s+\S/.test(l)).map((l) => l.replace(/^[-*•]\s+/, "")).filter((l) => !/^\(?none\)?\.?$/i.test(l)).slice(0, 8) : [];
+  return { verdict, disputed };
+}
 
 // src/core/slots.ts
-import crypto6 from "node:crypto";
+import crypto7 from "node:crypto";
 import fs23 from "node:fs";
 import path19 from "node:path";
 var slotsDir = () => path19.join(home(), "slots");
@@ -3967,7 +4095,7 @@ function tryAcquireSlot(runId, maxParallel) {
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
-var lockFile = (repoRoot2) => path19.join(locksDir(), `write-${crypto6.createHash("sha1").update(path19.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot2) => path19.join(locksDir(), `write-${crypto7.createHash("sha1").update(path19.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot2, runId) {
   const file = lockFile(repoRoot2);
   if (tryClaim(file, runId)) return;
@@ -4315,6 +4443,8 @@ function prepareRun(o) {
     baseTree: parent?.mode === "isolate" ? parent.baseTree : void 0,
     worktree: parent?.mode === "isolate" ? parent.worktree : void 0,
     reviewOf: o.review?.of,
+    auditOf: o.audit?.of,
+    auditRate: o.auditRate,
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
     packageFile: o.review?.packageFile
@@ -4416,7 +4546,48 @@ async function execute(meta) {
   } finally {
     releaseSlot(slot, meta.id);
   }
-  return finalize(meta, result);
+  const done = finalize(meta, result);
+  autoAudit(done);
+  return done;
+}
+function autoAudit(meta) {
+  try {
+    if (!auditable(meta, read(runFile(meta.id, "summary.md"))) || !sampled(meta)) return;
+    startAudit(meta);
+  } catch {
+  }
+}
+function startAudit(meta, worker) {
+  const answer = read(runFile(meta.id, "summary.md"));
+  const auditor = worker ?? pickAuditor(meta);
+  if (!auditor) return void 0;
+  const a = prepareRun({
+    mode: "read",
+    task: auditTask(meta, answer),
+    dir: meta.dir,
+    files: [],
+    link: [],
+    worker: auditor,
+    timeoutSec: Math.min(meta.timeoutSec, 15 * 60),
+    allowNonGit: true,
+    web: false,
+    // never fall back to the worker being audited
+    noFallback: true,
+    group: meta.group,
+    audit: { of: meta.id }
+  });
+  meta.audit = { id: a.id, state: "running" };
+  writeMeta(meta);
+  startInBackground(a);
+  return a;
+}
+function settleAudit(a) {
+  try {
+    const target = readMeta(a.auditOf);
+    target.audit = { id: a.id, state: a.state, verdict: a.state === "done" ? a.auditVerdict : void 0, disputed: a.state === "done" ? a.auditDisputed : void 0 };
+    writeMeta(target);
+  } catch {
+  }
 }
 function prepareTree(meta) {
   const root = meta.repoRoot;
@@ -4496,14 +4667,20 @@ function finalize(meta, res) {
     }
   }
   meta.state = res.timedOut ? "timeout" : res.stopped ? "stopped" : meta.error ? "failed" : "done";
+  if (meta.auditOf && meta.state === "done") {
+    const found = parseAudit(run.finalText);
+    meta.auditVerdict = found.verdict;
+    meta.auditDisputed = found.disputed;
+  }
   if (meta.state === "done" && !run.finalText) meta.warnings.push("worker finished without a written answer");
   if (meta.state === "done" && meta.verify) meta.verifyResult = runVerify(meta);
   meta.endedAt = (/* @__PURE__ */ new Date()).toISOString();
   meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
-  meta.savedUsd = savedUsd(meta.usage, meta.returnedTokens);
+  meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
   if (meta.mode === "write" && meta.repoRoot) releaseWriteLock(meta.repoRoot, meta.id);
   record(meta);
+  if (meta.auditOf) settleAudit(meta);
   return meta;
 }
 function captureChanges(meta) {
@@ -4627,6 +4804,33 @@ async function cmdReview(p) {
   }
   fs27.writeFileSync(runFile(meta.id, "package.md"), job.package);
   return launch(p, meta);
+}
+async function cmdAudit(p) {
+  if (!p.positional[0]) throw new UserError("pitroom audit RUN: which run?");
+  if (has(p, "write") || has(p, "isolate")) throw new UserError("audits are read-only; drop -w/-i");
+  const m = freshMeta(resolveRun(p.positional[0]));
+  if (isActive(m.state)) throw new UserError(`run ${m.id} is still ${m.state}; pitroom wait ${m.id} first`, 3);
+  if (m.reviewOf || m.auditOf) throw new UserError(`run ${m.id} is itself a ${m.reviewOf ? "review" : "audit"}`);
+  if (m.mode !== "read") throw new UserError(`run ${m.id} changed files; an audit re-checks a read run's answer: pitroom review ${m.id} judges a change`);
+  const answer = readSummary(m);
+  if (!answer.trim()) throw new UserError(`run ${m.id} gave no answer to audit`);
+  const worker = flag(p, "worker") ?? (flag(p, "tier") ? void 0 : pickAuditor(m));
+  if (!worker && !flag(p, "tier")) {
+    throw new UserError('no other worker to audit with: name one with -W, or configure tiers "audit" or "cheap", or fallback workers, that differ from the one that answered', 3);
+  }
+  const a = prepareRun({
+    ...runOptions(p, auditTask(m, answer)),
+    mode: "read",
+    dir: m.dir,
+    worker,
+    group: flag(p, "group") ?? m.group,
+    noFallback: true,
+    audit: { of: m.id },
+    auditRate: void 0
+  });
+  m.audit = { id: a.id, state: "running" };
+  writeMeta(m);
+  return launch(p, a);
 }
 function cmdPlan(p) {
   const [sub, file, ...rest] = p.positional;
@@ -5045,6 +5249,11 @@ function doctor5(probe) {
     add("fail", e.message);
   }
   if (chain.length) add("ok", `worker chain: ${chain.map(describeTarget).join(" \u2192 ")}`);
+  const rate2 = effective().audit.value;
+  if (rate2 > 0 && chain.length) {
+    const auditor = pickAuditor({ worker: chain[0], fallback: chain.slice(1) });
+    add(auditor ? "ok" : "warn", auditor ? `audit: ${Math.round(rate2 * 100)}% of read runs are re-checked by ${auditor}` : `audit is on (${Math.round(rate2 * 100)}%) but no other worker could do it: add tiers "audit" or "cheap", or a fallback, that differs from ${describeTarget(chain[0])}`);
+  }
   const tierTargets = [];
   const tierNames = [];
   for (const name of Object.keys(effective().tiers.value)) {
@@ -5268,6 +5477,8 @@ Usage
   pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
                                         read-only review of a run's change (a follow-up: only its
                                         fix round) or of a commit range; by default on another worker
+  pitroom audit RUN [-W worker]         another worker re-checks a read run's answer (AGREE / PARTIAL / DISAGREE);
+                                        "audit" in the config (0 to 1) does it for a share of read runs
   pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
   pitroom plan note PLAN "Task N: \u2026"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
@@ -5315,6 +5526,7 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, \u2026 (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
@@ -5343,6 +5555,7 @@ var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,
   review: cmdReview,
+  audit: cmdAudit,
   plan: cmdPlan,
   status: cmdStatus,
   wait: cmdWait,

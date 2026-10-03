@@ -1512,6 +1512,13 @@ function parseVerdict(text) {
     minor: count("minor")
   };
 }
+function parseAudit(text) {
+  const word = /^\s*AUDIT:\s*(AGREE|PARTIAL|DISAGREE)\b/im.exec(text)?.[1]?.toLowerCase();
+  const verdict = word === "agree" || word === "partial" || word === "disagree" ? word : "unclear";
+  const after = /^\s*DISPUTED:\s*$/im.exec(text);
+  const disputed = after ? text.slice(after.index + after[0].length).split("\n").map((l) => l.trim()).filter((l) => /^[-*•]\s+\S/.test(l)).map((l) => l.replace(/^[-*•]\s+/, "")).filter((l) => !/^\(?none\)?\.?$/i.test(l)).slice(0, 8) : [];
+  return { verdict, disputed };
+}
 
 // src/core/plan.ts
 import fs8 from "node:fs";
@@ -1596,6 +1603,7 @@ export {
   getBackend,
   loadPlan,
   loadTemplate,
+  parseAudit,
   parsePlan,
   parseStatus,
   parseTarget,

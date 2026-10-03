@@ -21,6 +21,8 @@ export interface PitroomConfig {
   models?: Record<string, string>;
   /** Worker targets by tier, for --tier and plan tasks: {"cheap": "opencode", "capable": "claude"}. */
   tiers?: Record<string, string>;
+  /** Chance (0 to 1) that a finished read run is re-checked by another worker in the background (default 0: off). */
+  audit?: number;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -37,6 +39,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   models: 'record',
   tiers: 'record',
   costs: 'numbers',
+  audit: 'number',
 };
 
 export function configPath(): string {
@@ -87,6 +90,7 @@ function matches(v: unknown, type: string): boolean {
   if (type === 'numbers') {
     return typeof v === 'object' && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === 'number' && Number.isFinite(n) && n >= 0);
   }
+  if (type === 'number') return typeof v === 'number' && Number.isFinite(v) && v >= 0;
   return typeof v === type;
 }
 
@@ -105,6 +109,12 @@ const clampParallel = (s: Setting<number>): Setting<number> => ({ ...s, value: M
 const positiveInt = (v: unknown) => {
   const n = Number(v);
   return v !== undefined && v !== '' && Number.isInteger(n) && n > 0 ? n : undefined;
+};
+
+/** An audit chance: 0 to 1. */
+const rate = (v: unknown) => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : undefined;
 };
 
 const list = (s: string | undefined) => s?.split(',').map((x) => x.trim()).filter(Boolean);
@@ -134,5 +144,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     models: setting<Record<string, string>>(undefined, undefined, c.models, {}),
     tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
     costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),
+    audit: setting<number>(undefined, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
   };
 }

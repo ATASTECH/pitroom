@@ -22,7 +22,7 @@ const VALUE_FLAGS: Record<string, string> = {
 
 const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
-  '--bg': 'bg', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
+  '--bg': 'bg', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe',
   '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running', '--detach': 'detach', '--stop': 'stop', '--open': 'open', '--serve': 'serve',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
@@ -95,8 +95,11 @@ export function runOptions(p: Parsed, task: string): RunOptions {
   const modes = (['read', 'write', 'isolate'] as Mode[]).filter((m) => has(p, m));
   if (modes.length > 1) throw new UserError('choose one of --read, --write, --isolate');
   const cont = flag(p, 'continue');
+  if (has(p, 'audit') && has(p, 'no-audit')) throw new UserError('choose one of --audit, --no-audit');
+  if (has(p, 'audit') && (has(p, 'write') || has(p, 'isolate'))) throw new UserError('audits re-check the answer of a read run: drop -w/-i');
   return {
     mode: modes[0] ?? 'read',
+    auditRate: has(p, 'no-audit') ? 0 : has(p, 'audit') ? 1 : undefined,
     task,
     dir: flag(p, 'dir') ?? process.cwd(),
     files: p.flags.get('file') ?? [],

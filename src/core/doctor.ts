@@ -8,11 +8,12 @@ import { getBackend } from '../backends/index.js';
 import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
+import { pickAuditor } from './audit.js';
 import { resolveChain } from './chain.js';
 import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { VERSION } from './run.js';
-import { home } from './store.js';
+import { type RunMeta, home } from './store.js';
 import { bold, cyan, dim, green, red, wrapText, yellow } from './style.js';
 import { describeTarget } from './target.js';
 
@@ -87,6 +88,12 @@ export function doctor(probe: boolean): number {
     add('fail', (e as Error).message);
   }
   if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
+  // Audits (config "audit") need a worker other than the one that answered: say when there is none.
+  const rate = effective().audit.value;
+  if (rate > 0 && chain.length) {
+    const auditor = pickAuditor({ worker: chain[0]!, fallback: chain.slice(1) } as RunMeta);
+    add(auditor ? 'ok' : 'warn', auditor ? `audit: ${Math.round(rate * 100)}% of read runs are re-checked by ${auditor}` : `audit is on (${Math.round(rate * 100)}%) but no other worker could do it: add tiers "audit" or "cheap", or a fallback, that differs from ${describeTarget(chain[0]!)}`);
+  }
   // Tier workers (config "tiers") are checked like the chain's; a broken tier is one failed
   // check, not the end of the diagnosis.
   const tierTargets: Target[] = [];

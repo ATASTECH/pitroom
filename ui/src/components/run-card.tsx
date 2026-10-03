@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { DashRun } from '@/api';
-import { Pill, VerdictBadge, WorkerBadge } from '@/components/badges';
+import { AuditBadge, Pill, VerdictBadge, WorkerBadge } from '@/components/badges';
 import {
   ExpandableCard,
   ExpandableCardBody,
@@ -41,6 +41,7 @@ function Header({ run, expanded, when }: { run: DashRun; expanded?: boolean; whe
           <WorkerBadge worker={run.worker} />
           <span className="text-[13px] text-muted-foreground">{run.kind}</span>
           {run.verdict && <VerdictBadge verdict={run.verdict} />}
+          {run.audit && <AuditBadge audit={run.audit} />}
           {run.changes ? <Pill>{run.changes} file{run.changes === 1 ? '' : 's'}</Pill> : null}
           {run.applied && <Pill tone="good">applied</Pill>}
         </div>
