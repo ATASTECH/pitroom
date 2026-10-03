@@ -9,7 +9,7 @@ import { root, scratchDir } from './helpers.mjs';
 
 const SCRIPT = path.join(root, 'scripts', 'bump-version.mjs');
 const json = (dir, name) => JSON.parse(fs.readFileSync(path.join(dir, name), 'utf8'));
-const FILES = ['package.json', 'package-lock.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'CHANGELOG.md'];
+const FILES = ['package.json', 'package-lock.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'gemini-extension.json', 'CHANGELOG.md'];
 
 /** A throwaway copy of the files the script touches. */
 function copy() {
@@ -28,6 +28,7 @@ test('this repository keeps one version everywhere, with a finished CHANGELOG en
   assert.equal(json(root, 'package-lock.json').packages[''].version, version, 'package-lock.json root package');
   assert.equal(json(root, '.claude-plugin/plugin.json').version, version, 'Claude Code manifest');
   assert.equal(json(root, '.codex-plugin/plugin.json').version, version, 'Codex manifest');
+  assert.equal(json(root, 'gemini-extension.json').version, version, 'Gemini CLI extension manifest');
   const log = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
   assert.match(log, new RegExp(`^## ${version.replaceAll('.', '\\.')}$`, 'm'), 'CHANGELOG has a heading for this version');
   assert.doesNotMatch(log, /TODO/, 'the CHANGELOG stub was filled in');
@@ -46,6 +47,7 @@ test('bump: patch, minor, major and an explicit version move every file together
     assert.equal(json(dir, 'package-lock.json').packages[''].version, expected);
     assert.equal(json(dir, '.claude-plugin/plugin.json').version, expected);
     assert.equal(json(dir, '.codex-plugin/plugin.json').version, expected);
+    assert.equal(json(dir, 'gemini-extension.json').version, expected);
     assert.match(fs.readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8'), new RegExp(`^# Changelog\\n\\n## ${expected.replaceAll('.', '\\.')}\\n\\nTODO`));
   }
 });

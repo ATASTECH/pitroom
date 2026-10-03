@@ -23,6 +23,8 @@
     "policies",
     ".claude-plugin",
     ".codex-plugin",
+    "gemini-extension.json",
+    "gemini-context.md",
     "assets",
     "docs/backends.md",
     "README.md",

@@ -105,6 +105,16 @@ test('plugin manifests are valid and agree on the version', () => {
   const hooks = json('hooks/hooks.json');
   const cmd = hooks.hooks.SessionStart[0].hooks[0].command;
   assert.match(cmd, /hooks\/session-start\.mjs/);
+  // One hooks/hooks.json serves Claude Code and Gemini CLI (an extension reads that file too, and warns about event
+  // names it does not know): it holds SessionStart only, and its command works in both hosts, since Claude Code
+  // fills ${CLAUDE_PLUGIN_ROOT}, Gemini CLI fills ${extensionPath}, and the shell turns the other into nothing.
+  assert.deepEqual(Object.keys(hooks.hooks), ['SessionStart'], 'only events both hosts know');
+  assert.match(cmd, /\$\{CLAUDE_PLUGIN_ROOT\}\$\{extensionPath\}/);
+  // The card after each `pitroom` command is Claude Code's alone: the manifest names its own file.
+  assert.equal(json('.claude-plugin/plugin.json').hooks, './hooks/claude-hooks.json');
+  const post = json('hooks/claude-hooks.json').hooks.PostToolUse[0];
+  assert.equal(post.matcher, 'Bash');
+  assert.match(post.hooks[0].command, /pitroom\.mjs" hook-card/);
   assert.equal(json('.claude-plugin/plugin.json').name, 'pitroom');
   assert.equal(json('.claude-plugin/plugin.json').version, version);
   // The marketplace (read by Claude Code and Codex) installs the published npm package, not this
@@ -116,6 +126,14 @@ test('plugin manifests are valid and agree on the version', () => {
   const codex = json('.codex-plugin/plugin.json');
   assert.equal(codex.version, version);
   assert.ok(fs.existsSync(path.join(root, codex.skills)));
+  // Gemini CLI reads this manifest from the repository root, the skills from skills/ and a context file next to it.
+  const gemini = json('gemini-extension.json');
+  assert.equal(gemini.name, 'pitroom');
+  assert.equal(gemini.version, version);
+  assert.ok(fs.existsSync(path.join(root, gemini.contextFileName)), 'the context file exists');
+  assert.ok(fs.existsSync(path.join(root, 'skills', 'using-pitroom', 'SKILL.md')));
+  assert.match(fs.readFileSync(path.join(root, gemini.contextFileName), 'utf8'), /using-pitroom/);
+  assert.ok(json('package.json').files.includes('gemini-extension.json') && json('package.json').files.includes(gemini.contextFileName), 'both ship in the npm package');
 });
 
 // The manifest declares hooks (see the test above), which OpenAI's directory rejects: Pitroom is not submitted there

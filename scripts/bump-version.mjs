@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Bumps the version everywhere it lives, so no file is forgotten:
 //   package.json, package-lock.json (two places), .claude-plugin/plugin.json,
-//   .codex-plugin/plugin.json, and a new heading in CHANGELOG.md.
+//   .codex-plugin/plugin.json, gemini-extension.json, and a new heading in CHANGELOG.md.
 //
 //   npm run bump -- patch | minor | major | 1.2.3   [--root DIR] [--dry-run]
 //
@@ -46,7 +46,7 @@ const writeJson = (name, data) => {
   if (!dryRun) fs.writeFileSync(file(name), `${JSON.stringify(data, null, 2)}\n`);
 };
 
-for (const name of ['package.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json']) {
+for (const name of ['package.json', '.claude-plugin/plugin.json', '.codex-plugin/plugin.json', 'gemini-extension.json']) {
   if (!fs.existsSync(file(name))) fail(`${name} is missing`);
   const data = readJson(name);
   data.version = next;

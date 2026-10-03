@@ -260,7 +260,14 @@ codex plugin add pitroom@pitroom
 npm i -g pitroom
 ```
 
-**Any other agent (Cursor, Gemini CLI, a plain shell) or just the CLI**
+**Gemini CLI**
+
+```bash
+gemini extensions install https://github.com/ATASTECH/pitroom
+npm i -g pitroom
+```
+
+**Any other agent (Cursor, a plain shell) or just the CLI**
 
 ```bash
 npm i -g pitroom
@@ -270,6 +277,7 @@ pitroom install
 | Path | You get |
 |---|---|
 | Claude Code plugin | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. |
+| Gemini CLI extension | The 14 skills and a short context file that introduces Pitroom (Gemini asks you to confirm the extension). Gemini CLI also works as a *worker*, which is separate: see [Workers](#workers). |
 | Codex plugin | The 14 skills, a session-start hook that introduces Pitroom (so it is known even when Codex drops skill descriptions because many are installed), and a card after each `pitroom` command. Codex asks you to trust the plugin's hooks once. The hooks call `pitroom`, which comes from npm (`npm i -g pitroom`). |
 | npm + `pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
 
