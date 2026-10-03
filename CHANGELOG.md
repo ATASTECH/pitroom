@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+### Audits
+- A finished read run's answer can be re-checked in the background by another worker, which verifies the key claims against your project and replies `AGREE`, `PARTIAL` or `DISAGREE` with the claims it disputes. Pitroom already checked that every cited `path:line` exists; an audit checks that what is said about it is true.
+- Ways to use it: `pitroom audit RUN [-W worker]` now; `pitroom run --audit` / `--no-audit` per run; `"audit": 0.1` in the config (or `PITROOM_AUDIT=0.1`) for about one read run in ten, chosen by a stable hash of the run id. The auditor is the `audit` tier, else `cheap`.
+- **Off by default.** An audit costs about the rate times the answer's own tokens, runs detached after the run and never delays or fails it. The auditor is never the worker and model that gave the answer, and does not fall back to it; with no other worker nothing starts and `pitroom doctor` says so. Only read runs are audited, never reviews, changes or other audits.
+- The verdict and the disputed claims are on the audited run (`pitroom show`, the dashboard card with an `audited · agrees/disagrees` badge and a note, History), and Stats has an Audited column per worker (confirmed/audited). Audits are not counted as runs and are not in the savings ledger.
+- An audit is a sample, not a guarantee: the auditor is a model too and can share a blind spot.
+
+### Tests
+- Test cleanup retries when a background process (Chrome, a dash server, an audit) is still writing as a test directory is removed (an `ENOTEMPTY` flake seen on CI).
+
 ## 0.9.0
 
 ### Gemini CLI worker (beta)
