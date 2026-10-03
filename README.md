@@ -114,7 +114,7 @@ In isolate mode nothing reaches your tree until you apply it.
 - **Zero repo pollution.** No `.pitroom/` folder, no `.gitignore` edits, no branches. Records live in `~/.local/state/pitroom`.
 - **Works with any agent.** Fourteen [Agent Skills](https://agentskills.io): the superpowers development workflow run by workers, plus delegation (`using-pitroom`, `pitroom-research`, `-crew`, `-implement`), a CLI, and a Claude Code / Codex plugin whose session-start hook loads the workflow. Claude Code, Codex, Gemini CLI, Cursor, or anything that can run a shell command.
 - **A live dashboard and a searchable history.** `pitroom dash` opens a local page of every run (the task, what the worker did step by step, its result and diff) with history and statistics, for the agent apps that show neither hooks nor a status line; `pitroom history` searches everything Pitroom ever ran. See [Dashboard](#dashboard).
-- **Small.** About 6,000 lines of TypeScript, a ~190 KB CLI bundle (plus the ~0.7 MB of dashboard files it serves), zero runtime dependencies.
+- **Small.** About 6,500 lines of TypeScript in the CLI, a ~210 KB CLI bundle (plus the ~1.9 MB of dashboard files it serves, with syntax highlighting for ten languages), zero runtime dependencies.
 
 ### How it stays safe
 

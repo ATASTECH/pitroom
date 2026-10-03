@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.0
+
+### Dashboard
+- An edited file in a run card opens as its diff: line numbers, added and removed rows, syntax highlighting (Shiki: TypeScript, JavaScript, TSX, JSX, JSON, CSS, HTML, Python, Bash, YAML) and a copy button. Messages and tool results get their own rows with a status, and the step list has a scroller with a rail and a "Last step" button that follows new steps while you are at the bottom.
+- The dashboard files grow from about 0.7 MB to 1.9 MB for the highlighter; the npm package from 422 kB to 592 kB.
+- A renamed file whose path starts with `a/` or `b/` keeps its real name in the diff.
+
+### Fixes
+- `pitroom init` asks OpenCode for its models twice: the first call can come back empty while OpenCode's service starts, which made init see no models and suggest no fallback.
+
 ## 0.7.0
 
 ### Codex
