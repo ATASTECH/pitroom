@@ -1,7 +1,7 @@
 {
   "general": { "enableAutoUpdate": false, "enableAutoUpdateNotification": false, "checkpointing": { "enabled": false } },
   "hooksConfig": { "enabled": false },
-  "mcp": { "allowed": [] },
+  "mcp": { "allowed": ["pitroom-no-mcp-servers"] },
   "skills": { "enabled": false },
   "context": { "fileName": ["PITROOM-NO-CONTEXT.md"] },
   "security": { "disableYoloMode": true, "disableAlwaysAllow": true },

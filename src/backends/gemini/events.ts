@@ -63,6 +63,7 @@ export function parseEvents(jsonl: string): ParsedRun {
       text += String(e.content ?? '');
     } else if (e.type === 'tool_use') {
       flush();
+      lastText = ''; // the answer is the text after the last tool call, not narration before it
       startTurn();
       const name = String(e.tool_name ?? 'tool');
       const p = e.parameters ?? {};

@@ -38,7 +38,7 @@ The MIT License for the projects above is the one reproduced for superpowers, wi
 
 ## Not bundled
 
-Pitroom starts worker CLIs you install yourself (OpenCode, Codex CLI, Claude Code). They are not part of this package and keep their own licenses and terms.
+Pitroom starts worker CLIs you install yourself (OpenCode, Codex CLI, Claude Code, Gemini CLI). They are not part of this package and keep their own licenses and terms.
 
 ## Pixel mascots (CodeIsland)
 

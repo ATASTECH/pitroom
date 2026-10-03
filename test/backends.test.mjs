@@ -218,7 +218,8 @@ test('gemini: the shipped settings and rules close off hooks, MCP and unsafe she
   const dir = path.resolve(FIXTURES, '..', '..', 'policies', 'gemini');
   const settings = JSON.parse(fs.readFileSync(path.join(dir, 'system-settings.json'), 'utf8'));
   assert.equal(settings.hooksConfig.enabled, false, 'the user\'s hooks would run on every worker');
-  assert.deepEqual(settings.mcp.allowed, [], 'no MCP server');
+  // An empty allow list means "no restriction" in Gemini CLI; a name no server has blocks them all.
+  assert.ok(settings.mcp.allowed.length > 0, 'MCP allow list is not empty');
   assert.equal(settings.security.disableYoloMode, true);
   assert.equal(settings.general.enableAutoUpdate, false);
   const shell = fs.readFileSync(path.join(dir, 'shell.toml'), 'utf8');

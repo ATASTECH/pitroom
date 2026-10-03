@@ -616,6 +616,7 @@ function parseEvents3(jsonl) {
       text += String(e.content ?? "");
     } else if (e.type === "tool_use") {
       flush();
+      lastText = "";
       startTurn();
       const name = String(e.tool_name ?? "tool");
       const p = e.parameters ?? {};
@@ -721,6 +722,7 @@ function settings() {
   }
 }
 function defaultModel2() {
+  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
   const m = settings().model;
   const name = typeof m === "string" ? m : m?.name;
   return typeof name === "string" ? name : void 0;

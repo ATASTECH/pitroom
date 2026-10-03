@@ -30,7 +30,7 @@ function gem(args: string[], timeout = 60_000) {
   return { ok: r.status === 0, out: r.stdout ?? '', err: r.stderr ?? '', missing: !!r.error };
 }
 
-/** Pitroom's own rule files ship in the package next to dist/. */
+/** Pitroom's own rule files ship in the package: policies/ sits next to dist/ (package.json "files"). */
 const policyDir = () => path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'policies', 'gemini');
 
 function invocation(req: WorkerRequest) {
@@ -80,6 +80,7 @@ function settings(): any {
 }
 
 function defaultModel(): string | undefined {
+  if (process.env.GEMINI_MODEL) return process.env.GEMINI_MODEL;
   const m = settings().model;
   const name = typeof m === 'string' ? m : m?.name;
   return typeof name === 'string' ? name : undefined;
