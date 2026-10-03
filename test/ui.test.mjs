@@ -85,15 +85,22 @@ before(async () => {
   assert.equal(start.status, 0, start.stderr);
   url = start.stdout.trim().split('\n')[0];
 
-  const profile = scratchDir('pitroom-chrome-');
-  proc = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+  // A slow CI runner can take longer than a few seconds to bring Chrome up: wait up to 30 s, and start it once more
+  // if it died or never reported its port.
   let port;
-  for (let i = 0; i < 100 && !port; i++) {
-    try {
-      port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
-    } catch {
-      await sleep(100);
+  for (let attempt = 0; attempt < 2 && !port; attempt++) {
+    const profile = scratchDir('pitroom-chrome-');
+    proc = spawn(chrome, ['--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--remote-debugging-port=0', `--user-data-dir=${profile}`, 'about:blank'], { stdio: 'ignore' });
+    let gone = false;
+    proc.once('exit', () => { gone = true; });
+    for (let i = 0; i < 300 && !port && !gone; i++) {
+      try {
+        port = fs.readFileSync(path.join(profile, 'DevToolsActivePort'), 'utf8').split('\n')[0];
+      } catch {
+        await sleep(100);
+      }
     }
+    if (!port) { try { proc.kill(); } catch { /* gone */ } }
   }
   assert.ok(port, 'Chrome did not start');
   let tab;
