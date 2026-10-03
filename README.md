@@ -160,11 +160,11 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 
 **Click a card and it grows into a panel** with the task, what the worker did step by step (files read, searches, commands, edits, with times, failed ones marked), its result, the files and diff it changed, and the details (model, tokens, cost, fallbacks, reference check).
 
-<p align="center"><img src="docs/dash-card.png" width="100%" alt="An expanded run card: the task, a ten-step activity list, the result, five changed files and the details"></p>
+<p align="center"><img src="docs/dash-card.png" width="100%" alt="An expanded run card: the task, a ten-step activity list, the result, five changed files with one opened to its highlighted diff, and the details"></p>
 
 **History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period; each run opens as the same card as on Live. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
 
-<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model"></p>
+<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model, each with its logo"></p>
 
 The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 

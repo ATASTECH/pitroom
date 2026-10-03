@@ -32,6 +32,7 @@ const WORKERS = [
   { backend: 'opencode', model: 'opencode/space-bunny-free', w: 3, price: 1 },
   { backend: 'codex', model: 'gpt-6-sol', w: 3, price: 1 },
   { backend: 'claude', model: 'sonnet', w: 1, price: 1 },
+  { backend: 'gemini', model: 'gemini-3.8-flash', w: 3, price: 1 },
 ];
 const pickWorker = () => { const bag = WORKERS.flatMap((x) => Array(x.w).fill(x)); return pick(bag); };
 
@@ -67,6 +68,19 @@ function opencodeEvents(start, end, kind, files, answer, tokens) {
   ev.push({ type: 'step_finish', timestamp: end, sessionID: sid, part: { cost: 0, tokens: { input: Math.round(tokens * 0.93), output: Math.round(tokens * 0.01), reasoning: 0, cache: { read: Math.round(tokens * 0.06), write: 0 }, total: tokens } } });
   return ev;
 }
+function geminiEvents(start, end, kind, files, answer, tokens) {
+  const iso = (t) => new Date(t).toISOString();
+  let t = start; const span = (end - start) / 12; const at = () => iso((t += span * (0.4 + rnd())));
+  const ev = [{ type: 'init', timestamp: iso(start), session_id: 'gem_demo', model: 'gemini-3.8-flash' }];
+  let n = 0;
+  const tool = (tool_name, parameters) => { const tool_id = `${tool_name}__call_${++n}`; ev.push({ type: 'tool_use', timestamp: at(), tool_name, tool_id, parameters }, { type: 'tool_result', timestamp: at(), tool_id, status: 'success' }); };
+  for (const f of files.slice(0, 2)) tool('read_file', { file_path: f });
+  tool('grep_search', { pattern: pick(SEARCHES) });
+  if (kind === 'change') { for (const f of files) tool('replace', { file_path: f, old_string: 'fetchUser', new_string: 'getUser' }); tool('run_shell_command', { command: 'npm test --silent' }); }
+  ev.push({ type: 'message', timestamp: at(), role: 'assistant', content: answer, delta: true });
+  ev.push({ type: 'result', timestamp: iso(end), status: 'success', stats: { total_tokens: tokens, input_tokens: Math.round(tokens * 0.99), output_tokens: Math.round(tokens * 0.01), cached: Math.round(tokens * 0.3), input: Math.round(tokens * 0.69), tool_calls: n } });
+  return ev;
+}
 function codexEvents(kind, files, answer, tokens) {
   const ev = [{ type: 'thread.started', thread_id: 'thr_demo' }];
   const cmd = (c, code = 0) => ev.push({ type: 'item.completed', item: { id: `i${ev.length}`, type: 'command_execution', command: `/bin/zsh -lc '${c}'`, exit_code: code, status: 'completed', aggregated_output: '' } });
@@ -77,7 +91,21 @@ function codexEvents(kind, files, answer, tokens) {
   return ev;
 }
 
-const PATCH = (files) => files.filter((f) => !f.startsWith('test/')).map((f) => `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -10,7 +10,11 @@ export async function run() {\n   const config = load();\n-  return call(config);\n+  const result = await withRetry(() => call(config), { retries: 3, baseMs: 200 });\n+  return result;\n }\n`).join('');
+// A believable diff per file: a rename of fetchUser to getUser in the sources, new test files as additions.
+const SNIPPETS = {
+  'src/users/get-user.ts': ['export async function fetchUser(id: string) {', 'export async function getUser(id: string) {', 'const row = await db.users.findById(id);'],
+  'src/orders/routes.ts': ['  const user = await fetchUser(req.session.userId);', '  const user = await getUser(req.session.userId);', '  if (!user) return res.status(401).end();'],
+  'src/auth/session.ts': ['import { fetchUser } from "../users/get-user";', 'import { getUser } from "../users/get-user";', 'import { signToken } from "./token";'],
+  'src/billing/invoice.ts': ['  const owner = await fetchUser(order.userId);', '  const owner = await getUser(order.userId);', '  const lines = order.items.map(toLine);'],
+};
+const PATCH = (files) => files.map((f) => {
+  if (f.startsWith('test/')) {
+    const body = ['import { describe, expect, it } from "vitest";', 'import { computeTotal } from "../../src/orders/total";', '', 'describe("computeTotal", () => {', '  it("applies a 100% coupon before tax", () => {', '    expect(computeTotal({ items: [{ price: 40, qty: 1 }], coupon: 1 })).toBe(0);', '  });', '});'];
+    return `diff --git a/${f} b/${f}\nnew file mode 100644\n--- /dev/null\n+++ b/${f}\n@@ -0,0 +1,${body.length} @@\n${body.map((l) => `+${l}`).join('\n')}\n`;
+  }
+  const [from, to, ctx] = SNIPPETS[f] ?? ['  return call(config);', '  return withRetry(() => call(config), { retries: 3 });', '  const config = load();'];
+  return `diff --git a/${f} b/${f}\n--- a/${f}\n+++ b/${f}\n@@ -8,5 +8,5 @@\n ${ctx}\n ${ctx.startsWith('  ') ? '  ' : ''}// ${path.basename(f)}\n-${from}\n+${to}\n ${ctx.startsWith('  ') ? '  ' : ''}const result = ok(value);\n }\n`;
+}).join('');
 
 // ── the runs ─────────────────────────────────────────────────────────────────────────────────────────────
 const runs = [];
@@ -108,7 +136,7 @@ function addRun(o) {
   fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify(meta, null, 2));
   const answer = o.answer ?? (kind === 'change' ? `Done. Changed ${files.length} file${files.length === 1 ? '' : 's'}; the test suite passes.` : '');
   if (o.state !== 'failed' || o.events) {
-    const evs = w.backend === 'codex' ? codexEvents(kind, files, answer || 'Working…', tokens) : opencodeEvents(startedAt.getTime(), (endedAt ?? new Date()).getTime(), kind, files, answer || 'Working…', tokens);
+    const evs = w.backend === 'codex' ? codexEvents(kind, files, answer || 'Working…', tokens) : w.backend === 'gemini' ? geminiEvents(startedAt.getTime(), (endedAt ?? new Date()).getTime(), kind, files, answer || 'Working…', tokens) : opencodeEvents(startedAt.getTime(), (endedAt ?? new Date()).getTime(), kind, files, answer || 'Working…', tokens);
     fs.writeFileSync(path.join(dir, 'events.jsonl'), evs.map((e) => JSON.stringify(e)).join('\n') + '\n');
   }
   if (o.state !== 'running') fs.writeFileSync(path.join(dir, 'summary.md'), `${answer}\n`);
@@ -154,7 +182,7 @@ const mins = (m) => now - m * 60_000;
 const codex = WORKERS[3], muse = WORKERS[0], mimo = WORKERS[1], bunny = WORKERS[2];
 addRun({ kind: 'change', worker: codex, startedAt: now - 83_000, state: 'running', pid: sleeper.pid, task: CHANGES[0][0], files: CHANGES[0][1], answer: 'Adding the backoff helper and wiring it into the client.', tokens: 41_000 });
 addRun({ kind: 'change', worker: mimo, startedAt: now - 52_000, state: 'running', pid: sleeper.pid, task: CHANGES[3][0], files: CHANGES[3][1], answer: 'Swapping the moment calls for date-fns equivalents.', tokens: 28_000 });
-addRun({ kind: 'research', worker: WORKERS[4], startedAt: now - 11_000, state: 'running', pid: sleeper.pid, task: RESEARCH[1][0], files: ['test/orders/total.test.ts'], answer: 'Listing the checkout tests.', tokens: 9_000 });
+addRun({ kind: 'research', worker: WORKERS[5], startedAt: now - 11_000, state: 'running', pid: sleeper.pid, task: RESEARCH[1][0], files: ['test/orders/total.test.ts'], answer: 'Listing the checkout tests.', tokens: 9_000 });
 addRun({ kind: 'research', worker: muse, startedAt: now - 26_000, state: 'running', pid: sleeper.pid, task: RESEARCH[0][0], files: ['src/config/rate-limit.ts'], answer: 'Reading where the limiter is configured.', tokens: 22_000 });
 addRun({ kind: 'change', worker: muse, startedAt: mins(7), seconds: 118, state: 'done', task: CHANGES[1][0], files: CHANGES[1][1], applied: true, tokens: 520_000, group: 'rename-user' });
 addRun({ kind: 'review', worker: bunny, startedAt: mins(12), seconds: 142, state: 'done', task: REVIEWS[0], verdict: { spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 1 }, answer: 'STRENGTHS: the backoff is bounded and tested.\nIMPORTANT: none.\nMINOR: `retry.ts:31` could name the jitter constant.', tokens: 940_000 });
@@ -186,13 +214,17 @@ ws.onmessage = (m) => { const d = JSON.parse(m.data); if (d.id && waiting.has(d.
 const send = (method, params = {}) => new Promise((r) => { const i = ++n; waiting.set(i, r); ws.send(JSON.stringify({ id: i, method, params })); });
 const evaluate = (expression) => send('Runtime.evaluate', { expression });
 
-async function shot(file, { hash = '', height = 900, click, wait = 2200 }) {
+const OPEN_CARD = "[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()";
+// Opens the Changes section and its second file, and scrolls that file into view.
+const SHOW_DIFF = "(() => { const h = [...document.querySelectorAll('button[aria-expanded]')].find((b) => /^Changes/.test(b.textContent)); if (h?.getAttribute('aria-expanded') === 'false') h.click(); setTimeout(() => { const f = h?.closest('section')?.querySelectorAll('[data-slot=\"file-diff\"] > button')[1]; if (f?.getAttribute('aria-expanded') === 'false') f.click(); setTimeout(() => f?.scrollIntoView({ block: 'center' }), 500); }, 700); })()";
+async function shot(file, { hash = '', height = 900, click, wait = 2200, then, wait2 = 0 }) {
   await send('Page.enable');
   await send('Emulation.setDeviceMetricsOverride', { width: 1100, height, deviceScaleFactor: 1.5, mobile: false });
   await send('Page.navigate', { url: 'about:blank' });
   await send('Page.navigate', { url: `${url}${hash}` });
   await sleep(2600);
   if (click) { await evaluate(click); await sleep(wait); }
+  if (then) { await evaluate(then); await sleep(wait2 + 1800); }
   const data = (await send('Page.captureScreenshot', { format: 'png' })).data;
   fs.writeFileSync(path.join(root, 'docs', file), Buffer.from(data, 'base64'));
   console.log(`docs/${file}`);
@@ -203,7 +235,7 @@ await send('Page.navigate', { url });
 await sleep(1000);
 await evaluate("localStorage.setItem('pitroom-theme','dark')");
 await shot('dash-live.png', { height: 1020 });
-await shot('dash-card.png', { height: 1240, click: "[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()", wait: 3000 });
+await shot('dash-card.png', { height: 1240, click: OPEN_CARD, wait: 3000, then: SHOW_DIFF, wait2: 1200 });
 await shot('dash-history.png', { hash: '#history', height: 940 });
 await shot('dash-stats.png', { hash: '#stats', height: 980 });
 
@@ -228,8 +260,10 @@ if (hasFfmpeg) {
   await grab(22);                                        // the Live tab: spinners, mascots, timers
   await evaluate("[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()");
   await grab(20);                                        // the card opens
-  for (let i = 0; i < 12; i++) { await evaluate("document.querySelector('[data-slot=\"scroll-area-viewport\"]')?.scrollBy({ top: 70 })"); await grab(1); }
-  await grab(6);
+  for (let i = 0; i < 6; i++) { await evaluate("document.querySelector('[data-slot=\"scroll-area-viewport\"]')?.scrollBy({ top: 70 })"); await grab(1); }
+  await evaluate(SHOW_DIFF);                             // Changes → a file's diff
+  await grab(18);
+  await grab(4);
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await grab(10);
