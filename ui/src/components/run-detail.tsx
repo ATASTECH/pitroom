@@ -94,6 +94,9 @@ function Body({ d }: { d: RunDetail }) {
             return <div key={k} className="min-w-0"><dt className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{LABEL[k]}</dt><dd className="break-words text-[13px]">{value(k, v)}</dd></div>;
           })}
         </dl>
+        {d.audit && d.audit.state === 'done' && d.audit.verdict && d.audit.verdict !== 'agree' && (
+          <Note tone="bad">{d.card?.kind === 'audit' ? 'This audit disputes' : 'Audit by another worker:'} {d.audit.disputed.length ? d.audit.disputed.join(' · ') : (d.audit.verdict === 'unclear' ? 'no verdict in the expected form' : 'see the audit run')}</Note>
+        )}
         {d.refs && <Note tone={d.refs.valid < d.refs.total ? undefined : 'ok'}>References verified: {d.refs.valid} of {d.refs.total}{d.refs.invalid.length ? ` · not found: ${d.refs.invalid.join(', ')}` : ''}</Note>}
         {d.attempts.map((a, i) => <Note key={i}>Fell back from {a.target}: {a.error}</Note>)}
         {d.warnings.map((w, i) => <Note key={i}>{w}</Note>)}

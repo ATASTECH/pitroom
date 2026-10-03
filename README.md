@@ -359,6 +359,22 @@ Tiers map plan tasks to workers: `"tiers": {"cheap": "opencode", "standard": "co
 
 ---
 
+## Audits
+
+Pitroom checks every `path:line` a worker cites, which proves a line exists, not that the claim about it is true. An **audit** asks a second worker to verify an answer's key claims against your project and to say `AGREE`, `PARTIAL` or `DISAGREE`, with the claims it disputes.
+
+```bash
+pitroom audit <run>            # now: re-check one read run (-W picks the auditor)
+pitroom run --audit "…"        # re-check this run's answer when it finishes (--no-audit skips it)
+```
+
+or set `"audit": 0.1` in the config (or `PITROOM_AUDIT=0.1`) to have about one read run in ten audited, in the background, without your agent asking. The same run is always in or out of the sample.
+
+- **Cost:** off by default. An audit is a read run of the auditor, so about the rate times the worker's own tokens, on the `audit` tier (else `cheap`, i.e. a free model if that is your cheap tier). It never delays the run or fails it.
+- **Never itself:** the auditor is never the worker and model that gave the answer; with no other worker configured nothing is audited (`pitroom doctor` says so). Only read runs are audited: a change has `pitroom review`.
+- **Where it shows:** the answer's card and `pitroom show` carry the verdict and the disputed claims; the Stats tab counts, per worker, how many audited answers were confirmed. Audits are not counted as runs and save nothing.
+- **A sample, not a guarantee.** The auditor is a model too: it can share a blind spot, and a few audits say little about a worker. Treat `DISAGREE` as a reason to look, and `AGREE` as one more signal.
+
 ## Crews
 
 A real crew over this repository, four questions at once on a free OpenCode Zen model:
@@ -431,6 +447,7 @@ pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
+pitroom audit RUN [-W worker]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
 pitroom dash [--detach] [--port N] [--open] [--stop]   a live page of the runs on 127.0.0.1
@@ -563,12 +580,14 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
   "timeout": "20m",
   "primary": "opus",
   "link": ["node_modules"],
-  "maxParallel": 20
+  "maxParallel": 20,
+  "audit": 0.1
 }
 ```
 
 - `worker` and `fallback`: who runs a task when you name no one, and who takes over when it fails; `models`: the model each worker uses when a target names none.
 - `tiers`: `cheap`, `standard` and `capable` name the workers for plan tasks and `--tier`; an optional `review` tier names who reviews a run (by default another worker than the implementer's, `standard` first).
+- `audit`: the chance (0 to 1, default 0 = off) that a finished read run is re-checked in the background, see [Audits](#audits). The `audit` tier (else `cheap`) names who does it.
 - `costs`: your relative cost per `worker:model`, only compared with each other; `maxParallel`: workers at once (default 20, at most 30).
 
 

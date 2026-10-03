@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import type { Mode, Target, Usage } from '../backends/types.js';
 import { UserError } from './errors.js';
 import type { RefCheck } from './refs.js';
-import type { TaskStatus, Verdict } from './answers.js';
+import type { AuditVerdict, TaskStatus, Verdict } from './answers.js';
 
 export type State = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
 
@@ -67,6 +67,14 @@ export interface RunMeta {
   plan?: { file: string; step: number; title: string };
   /** The implementer's STATUS line. */
   taskStatus?: TaskStatus;
+  /** For an audit: the audited run's id. An audit re-checks a read run's answer with another worker. */
+  auditOf?: string;
+  auditVerdict?: AuditVerdict;
+  auditDisputed?: string[];
+  /** This run's own audit chance, 0 to 1 (--audit is 1, --no-audit 0); the config's `audit` applies when absent. */
+  auditRate?: number;
+  /** On an audited run: its audit, kept up to date when the audit ends. */
+  audit?: { id: string; state: State; verdict?: AuditVerdict; disputed?: string[] };
 }
 
 export const TERMINAL: State[] = ['done', 'failed', 'timeout', 'stopped'];

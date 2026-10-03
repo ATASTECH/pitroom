@@ -5,5 +5,5 @@ export type * from './backends/types.js';
 export { describeTarget, formatTarget, parseTarget } from './core/target.js';
 export { extractRefs, verifyRefs } from './core/refs.js';
 export { fill, loadTemplate } from './core/templates.js';
-export { parseStatus, parseVerdict } from './core/answers.js';
+export { parseAudit, parseStatus, parseVerdict } from './core/answers.js';
 export { brief, loadPlan, parsePlan, planName, planTask } from './core/plan.js';

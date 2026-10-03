@@ -12,7 +12,8 @@ import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { DeletionRefused, UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
-import { parseStatus, parseVerdict } from './answers.js';
+import { parseAudit, parseStatus, parseVerdict } from './answers.js';
+import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
@@ -48,6 +49,10 @@ export interface RunOptions {
   web: boolean;
   noFallback: boolean;
   group?: string;
+  /** Set when Pitroom audits a run's answer (see audit.ts). */
+  audit?: { of: string };
+  /** This run's own audit chance, 0 to 1: --audit is 1, --no-audit is 0. */
+  auditRate?: number;
   /** Set by `pitroom review`. */
   review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string; plan?: RunMeta['plan'] };
 }
@@ -151,6 +156,8 @@ export function prepareRun(o: RunOptions): RunMeta {
     baseTree: parent?.mode === 'isolate' ? parent.baseTree : undefined,
     worktree: parent?.mode === 'isolate' ? parent.worktree : undefined,
     reviewOf: o.review?.of,
+    auditOf: o.audit?.of,
+    auditRate: o.auditRate,
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
     packageFile: o.review?.packageFile,
@@ -260,7 +267,59 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
   } finally {
     releaseSlot(slot, meta.id);
   }
-  return finalize(meta, result);
+  const done = finalize(meta, result);
+  autoAudit(done);
+  return done;
+}
+
+/** Starts the audit of a finished run when the sample takes it. An audit is a bonus: it never fails or delays the run. */
+function autoAudit(meta: RunMeta): void {
+  try {
+    if (!auditable(meta, read(runFile(meta.id, 'summary.md'))) || !sampled(meta)) return;
+    startAudit(meta);
+  } catch {
+    // not audited
+  }
+}
+
+/**
+ * Starts an audit of a finished read run in the background: another worker re-checks the answer. `worker` names it
+ * (else `pickAuditor`); undefined when no other worker is configured to do it.
+ */
+export function startAudit(meta: RunMeta, worker?: string): RunMeta | undefined {
+  const answer = read(runFile(meta.id, 'summary.md'));
+  const auditor = worker ?? pickAuditor(meta);
+  if (!auditor) return undefined;
+  const a = prepareRun({
+    mode: 'read',
+    task: auditTask(meta, answer),
+    dir: meta.dir,
+    files: [],
+    link: [],
+    worker: auditor,
+    timeoutSec: Math.min(meta.timeoutSec, 15 * 60),
+    allowNonGit: true,
+    web: false,
+    // never fall back to the worker being audited
+    noFallback: true,
+    group: meta.group,
+    audit: { of: meta.id },
+  });
+  meta.audit = { id: a.id, state: 'running' };
+  writeMeta(meta);
+  startInBackground(a);
+  return a;
+}
+
+/** Puts an audit's outcome on the audited run, which the dashboard and `pitroom show` read it from. */
+function settleAudit(a: RunMeta): void {
+  try {
+    const target = readMeta(a.auditOf!);
+    target.audit = { id: a.id, state: a.state, verdict: a.state === 'done' ? a.auditVerdict : undefined, disputed: a.state === 'done' ? a.auditDisputed : undefined };
+    writeMeta(target);
+  } catch {
+    // the audited run is gone
+  }
 }
 
 function prepareTree(meta: RunMeta): void {
@@ -349,15 +408,22 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   }
 
   meta.state = res.timedOut ? 'timeout' : res.stopped ? 'stopped' : meta.error ? 'failed' : 'done';
+  if (meta.auditOf && meta.state === 'done') {
+    const found = parseAudit(run.finalText);
+    meta.auditVerdict = found.verdict;
+    meta.auditDisputed = found.disputed;
+  }
   if (meta.state === 'done' && !run.finalText) meta.warnings.push('worker finished without a written answer');
   if (meta.state === 'done' && meta.verify) meta.verifyResult = runVerify(meta);
   meta.endedAt = new Date().toISOString();
 
   meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
-  meta.savedUsd = savedUsd(meta.usage, meta.returnedTokens);
+  // An audit is overhead, not a delegation that saved anything.
+  meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
   if (meta.mode === 'write' && meta.repoRoot) releaseWriteLock(meta.repoRoot, meta.id);
   record(meta);
+  if (meta.auditOf) settleAudit(meta);
   return meta;
 }
 

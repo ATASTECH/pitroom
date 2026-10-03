@@ -21,6 +21,8 @@ Usage
   pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
                                         read-only review of a run's change (a follow-up: only its
                                         fix round) or of a commit range; by default on another worker
+  pitroom audit RUN [-W worker]         another worker re-checks a read run's answer (AGREE / PARTIAL / DISAGREE);
+                                        "audit" in the config (0 to 1) does it for a share of read runs
   pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
   pitroom plan note PLAN "Task N: …"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
@@ -68,6 +70,7 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, … (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
@@ -99,6 +102,7 @@ const COMMANDS: Record<string, Command> = {
   run: cmd.cmdRun,
   crew: cmd.cmdCrew,
   review: cmd.cmdReview,
+  audit: cmd.cmdAudit,
   plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,

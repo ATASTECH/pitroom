@@ -2,6 +2,7 @@
 // lines do not reach (the Claude Code and Codex apps). A small read-only HTTP server on
 // 127.0.0.1 only; it never starts, stops or changes a run. Open the address in any browser,
 // including the browser pane of an agent app.
+import { auditBadge } from './audit.js';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
@@ -41,6 +42,8 @@ export interface DashRun {
   tokens?: number;
   saved?: number;
   verdict?: string;
+  /** On an audited run: what its audit found (AGREE, PARTIAL, DISAGREE, UNCLEAR), PENDING while it runs, FAILED without a verdict. */
+  audit?: string;
   changes?: number;
   applied?: boolean;
   note: string;
@@ -83,10 +86,11 @@ function toRun(m: RunMeta): DashRun {
     steps: l ? l.steps : (m.usage?.steps ?? 0),
     tokens: m.usage?.total,
     saved: m.savedUsd || undefined,
-    verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} · QUALITY ${m.verdict.quality.toUpperCase()}` : undefined,
+    verdict: m.verdict ? `SPEC ${m.verdict.spec.toUpperCase()} · QUALITY ${m.verdict.quality.toUpperCase()}` : m.auditVerdict ? `AUDIT ${m.auditVerdict.toUpperCase()}` : undefined,
+    audit: auditBadge(m),
     changes: m.changes?.length || undefined,
     applied: m.applied || undefined,
-    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verdict ? findings(m) : headline(m, 200) || oneLine(m.error ?? '', 200),
+    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verdict ? findings(m) : m.auditOf && m.state === 'done' ? (m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : 'nothing disputed') : headline(m, 200) || oneLine(m.error ?? '', 200),
   };
 }
 
@@ -133,6 +137,8 @@ export interface RunDetail {
   refs?: { valid: number; total: number; invalid: string[] };
   verify?: { command: string; ok: boolean; tail: string };
   error?: string;
+  /** On an audited run: its audit; on an audit: the claims it disputes. */
+  audit?: { id?: string; state: string; verdict?: string; disputed: string[] };
   /** The same report `pitroom show` prints. */
   report: string;
 }
@@ -183,7 +189,7 @@ export function runDetail(id: string): RunDetail | undefined {
     id,
     state: m.state,
     card: toRun(m),
-    task: (m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : m.task).slice(0, TASK_MAX),
+    task: (m.auditOf ? `Audit of ${m.auditOf}` : m.reviewOf ? `Review of ${m.reviewOf.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : m.task).slice(0, TASK_MAX),
     steps,
     answer,
     changes: m.changes ?? [],
@@ -209,6 +215,7 @@ export function runDetail(id: string): RunDetail | undefined {
     refs: m.refs ? { valid: m.refs.valid, total: m.refs.total, invalid: m.refs.invalid.map((r) => `${r.ref} (${r.reason})`) } : undefined,
     verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail } : undefined,
     error: m.error,
+    audit: m.auditOf ? (m.state === 'done' ? { state: m.state, verdict: m.auditVerdict, disputed: m.auditDisputed ?? [] } : undefined) : m.audit && { id: m.audit.id, state: m.audit.state, verdict: m.audit.verdict, disputed: m.audit.disputed ?? [] },
     report: isActive(m.state) ? progress(m) : formatReport(m, undefined, 120),
   };
 }
