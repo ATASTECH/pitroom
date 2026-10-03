@@ -3,14 +3,7 @@
 
 import { ChevronDown } from "lucide-react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
-import {
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useId,
-  useRef,
-  useState,
-} from "react";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState, useMemo } from "react";
 import { ThinkingShimmer } from "@/components/agents/loading-states/thinking-shimmer";
 import { AgentDisclosure } from "@/components/agents/agent-disclosure";
 import { MessageScroller } from "@/components/agents/message-scroller";
@@ -166,11 +159,11 @@ export function AgentActivity({
 
   const liveLabel = activeLabel ?? getActiveLabel(contentType);
   const completedSummary = summary ?? getSummary(contentType, items, duration);
-  const navigationItems = items.map((item, index) => ({
+  const navigationItems = useMemo(() => items.map((item, index) => ({
     id: item.id,
     label: item.type === 'trace' ? item.navigationLabel ?? `Step ${index + 1}` : `Step ${index + 1}`,
     description: item.type === 'trace' && typeof item.detail === 'string' ? item.detail : undefined,
-  }));
+  })), [items]);
 
   return (
     <div
@@ -210,7 +203,8 @@ export function AgentActivity({
         aria-labelledby={triggerId}
         open={expanded}
       >
-        {expanded && <MessageScroller items={navigationItems} followOutput={working} maxHeight={maxHeight} className={contentClassName}>
+        {/* always mounted: the disclosure hides it when closed, and its close animation needs the content */}
+        <MessageScroller items={navigationItems} followOutput={working} maxHeight={maxHeight} className={contentClassName}>
             <AnimatePresence mode="popLayout">
               {items.map((item) => (
                 <motion.div
@@ -233,7 +227,7 @@ export function AgentActivity({
                 </motion.div>
               ))}
             </AnimatePresence>
-        </MessageScroller>}
+        </MessageScroller>
       </AgentDisclosure>
     </div>
   );

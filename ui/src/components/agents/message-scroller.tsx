@@ -55,6 +55,7 @@ export function MessageScroller({ children, items, followOutput, maxHeight, clas
         onScroll={() => { const node = viewport.current!; following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40; sync(); }}
         onWheel={(event) => { if (event.deltaY < 0) following.current = false; }}
         onTouchStart={() => { following.current = false; }}
+        onTouchEnd={() => { const node = viewport.current!; following.current = node.scrollHeight - node.scrollTop - node.clientHeight < 40; sync(); }}
         onKeyDown={(event) => { if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) following.current = false; }}
         style={{ maxHeight }} className={cn('min-w-0 overflow-y-auto py-1 pr-2 outline-none [overflow-anchor:none] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring', className)}>
         <div ref={content} role="list" className="min-w-0 space-y-1.5">{children}</div>

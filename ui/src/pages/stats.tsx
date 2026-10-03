@@ -1,5 +1,6 @@
 import { api } from '@/api';
 import { WorkerBadge } from '@/components/badges';
+import { WorkerIcon } from '@/components/worker-icon';
 import { Hint } from '@/components/hint';
 import { SavingsNote } from '@/components/savings-note';
 import { Segmented } from '@/components/segmented';
@@ -70,7 +71,7 @@ export function StatsPage() {
                 const pct = w.runs ? Math.round((100 * w.ok) / w.runs) : undefined;
                 return (
                   <TableRow key={`${w.backend}:${w.model}`}>
-                    <TableCell><WorkerBadge backend={w.backend} model={w.model} /></TableCell>
+                    <TableCell><div className="flex items-center gap-2"><WorkerIcon backend={w.backend} className="size-[18px] rounded-[5px]" /><WorkerBadge backend={w.backend} model={w.model} /></div></TableCell>
                     <TableCell className="text-right tabular-nums">{w.runs}</TableCell>
                     <TableCell>{pct === undefined ? <span className="text-muted-foreground">-</span> : <div className="flex items-center gap-2"><Progress value={pct} className="flex-1" /><span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span></div>}</TableCell>
                     <TableCell className="hidden text-right tabular-nums sm:table-cell">{w.avgSeconds != null ? clock(w.avgSeconds) : '-'}</TableCell>

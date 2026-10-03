@@ -51,10 +51,17 @@ export function useAgentCodeTokens(code: string, language: AgentCodeLanguage) {
   return result?.code === code && result.language === language ? result.lines : undefined;
 }
 
+/** A highlighted piece of code: the colour for each theme goes in a CSS variable, so light and dark switch without a re-render. */
+function Token({ token }: { token: CodeToken }) {
+  return (
+    <span style={{ '--agent-code-light': token.light ?? 'currentColor', '--agent-code-dark': token.dark ?? token.light ?? 'currentColor' } as CSSProperties}
+      className="text-[var(--agent-code-light)] dark:text-[var(--agent-code-dark)]">{token.content}</span>
+  );
+}
+
 export function AgentCodeLine({ code, tokens }: { code: string; tokens?: CodeToken[] }) {
   return <span className="whitespace-pre px-1.5">{tokens ? tokens.map((token) => (
-    <span key={token.offset} style={{ '--agent-code-light': token.light ?? 'currentColor', '--agent-code-dark': token.dark ?? token.light ?? 'currentColor' } as CSSProperties}
-      className="text-[var(--agent-code-light)] dark:text-[var(--agent-code-dark)]">{token.content}</span>
+    <Token key={token.offset} token={token} />
   )) : code || ' '}</span>;
 }
 
@@ -63,8 +70,7 @@ export function AgentCode({ code, language = 'text' }: { code: string; language?
   const rows = code.split('\n');
   return <pre className="m-0 min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-xs leading-5">{rows.map((line, i) => (
     <span key={i}>{lines?.[i] ? lines[i]!.map((token) => (
-      <span key={token.offset} style={{ '--agent-code-light': token.light ?? 'currentColor', '--agent-code-dark': token.dark ?? token.light ?? 'currentColor' } as CSSProperties}
-        className="text-[var(--agent-code-light)] dark:text-[var(--agent-code-dark)]">{token.content}</span>
+      <Token key={token.offset} token={token} />
     )) : line}{i < rows.length - 1 ? '\n' : ''}</span>
   ))}</pre>;
 }

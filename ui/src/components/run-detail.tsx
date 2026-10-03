@@ -1,7 +1,7 @@
 import { Check, ChevronDown, Copy } from 'lucide-react';
 import { motion, useReducedMotion } from 'motion/react';
-import { useId, useState } from 'react';
-import { type RunDetail, api } from '@/api';
+import { useId, useMemo, useState } from 'react';
+import { type RunDetail, api, type FileDiffData } from '@/api';
 import { Pill } from '@/components/badges';
 import { AgentActivity } from '@/components/agents/agent-activity';
 import { FileDiff } from '@/components/agents/file-diff';
@@ -66,12 +66,14 @@ function Body({ d }: { d: RunDetail }) {
   const [report, setReport] = useState(false);
   const [copied, setCopied] = useState(false);
   const running = d.state === 'running' || d.state === 'queued';
-  const diffs = d.fileDiffs ?? fileDiffs(d.patch ?? '', d.changes, /\n… \d+ more lines/.test(d.patch ?? ''));
+  // Fallback for a server that sends no fileDiffs: the patch's cut-off marker is the text dash.ts writes (`… N more lines`); keep the two in step.
+  const diffs = useMemo<FileDiffData[]>(() => d.fileDiffs ?? fileDiffs(d.patch ?? '', d.changes, /\n… \d+ more lines/.test(d.patch ?? '')), [d.fileDiffs, d.patch, d.changes]);
+  const items = useMemo(() => traceItems(d.steps, diffs), [d.steps, diffs]);
   return (
     <div className="space-y-5">
       {!/^Review of /.test(d.task) && <Section title="Task"><Block>{d.task}</Block></Section>}
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
-        {d.steps.length ? <AgentActivity key={d.id} items={traceItems(d.steps, diffs)} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={440} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
+        {d.steps.length ? <AgentActivity key={d.id} items={items} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={440} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
       </Section>
       {d.answer && <Section title="Result"><Block>{d.answer}</Block></Section>}
       {d.changes.length > 0 && (

@@ -316,10 +316,12 @@ function workerRows(rows: any[], ledger: LedgerEntry[]): Stats['byWorker'] {
   const key = (backend?: string, model?: string) => `${backend ?? ''}\0${model ?? ''}`;
   const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
   for (const e of ledger) {
-    let row = index.get(key(e.backend, e.model));
+    // Records from before pluggable workers have no backend (it was OpenCode) and a model without its provider.
+    const backend = e.backend ?? 'opencode';
+    let row = index.get(key(backend, e.model)) ?? (e.model ? out.find((r) => r.backend === backend && r.model?.endsWith(`/${e.model}`)) : undefined);
     if (!row) {
-      row = { backend: e.backend ?? 'unknown', model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0 };
-      index.set(key(e.backend, e.model), row);
+      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0 };
+      index.set(key(backend, e.model), row);
       out.push(row);
     }
     row.saved += e.saved;

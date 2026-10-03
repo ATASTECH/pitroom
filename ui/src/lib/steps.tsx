@@ -17,6 +17,11 @@ function describe(s: Step): { kind: string; label: string; icon: React.ReactNode
   return { kind: 'tool', label: s.name ?? 'Tool', icon: <Wrench className={cls} /> };
 }
 
+/** An edit step's text lists the files it touched, separated by commas or lines: a whole entry, so a path may itself contain ", ". */
+function touches(text: string, path: string): boolean {
+  return `, ${text.trim().replace(/\n/g, ', ')}, `.includes(`, ${path}, `);
+}
+
 /** The worker's steps as beUI's Agent Activity trace rows (icon, label with its time offset, the path or command). */
 export function traceItems(steps: Step[], diffs: FileDiffData[] = []): AgentActivityItem[] {
   return steps.map((s, i) => {
@@ -32,7 +37,7 @@ export function traceItems(steps: Step[], diffs: FileDiffData[] = []): AgentActi
       ok: s.ok,
       detail: s.text,
       tool: s.name ?? s.kind,
-      diffs: s.kind === 'edit' && s.ok !== false ? diffs.filter((diff) => s.text.trim() === diff.path || s.text.split(/, |\n/).some((path) => path.trim() === diff.path)) : undefined,
+      diffs: s.kind === 'edit' && s.ok !== false ? diffs.filter((diff) => touches(s.text, diff.path)) : undefined,
     };
   });
 }

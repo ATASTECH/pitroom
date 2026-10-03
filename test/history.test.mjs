@@ -56,6 +56,14 @@ test('stats: saved is the ledger\'s figure, the same one `pitroom savings` and t
   const stats = JSON.parse(s.run(['history', 'stats', '--json']).stdout);
   assert.ok(Math.abs(stats.totals.saved - sum) < 1e-9, `stats ${stats.totals.saved} equals the ledger ${sum}`);
   assert.ok(stats.totals.saved >= 2.5);
+  // an old record (no backend, a model without its provider) joins its worker instead of becoming "unknown"
+  fs.appendFileSync(ledger, `${JSON.stringify({ id: '20250101-000000-beef', at: new Date().toISOString(), mode: 'read', state: 'done', model: 'good-model', tokens: 10, returned: 1, workerCost: 0, saved: 1, price: 'Claude Sonnet' })}\n`);
+  const old = JSON.parse(s.run(['history', 'stats', '--json']).stdout);
+  assert.ok(!old.byWorker.some((w) => w.backend === 'unknown'));
+  assert.ok(old.byWorker.find((w) => w.model === 'mock/good-model').saved > 1, 'the old record counts for mock/good-model');
+  const sumWithOld = old.byWorker.reduce((a, w) => a + w.saved, 0);
+  assert.ok(Math.abs(sumWithOld - old.totals.saved) < 1e-9, 'the rows still add up to the total');
+  fs.writeFileSync(ledger, fs.readFileSync(ledger, 'utf8').split('\n').filter((l) => l && !l.includes('20250101-000000-beef')).join('\n') + '\n');
   const worker = stats.byWorker.find((w) => w.model === 'mock/good-model');
   assert.ok(Math.abs(worker.saved - sum) < 1e-9, 'the per-worker figure comes from the same ledger');
   assert.doesNotMatch(s.run(['history', 'stats']).stdout, /NaN/, 'a worker the history lacks a run for prints a dash, not NaN');
