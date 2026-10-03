@@ -15,6 +15,22 @@
       "denied": 1,
       "edits": 2,
       "finalTextStartsWith": "SUMMARY: Added exported divide(a, b)"
+    },
+    "read-real.jsonl": {
+      "sessionId": "42700b81-dece-477d-a49b-85ccbba9094b",
+      "steps": 2,
+      "total": 19982,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY: The `add` function is defined in `ap"
+    },
+    "write-real.jsonl": {
+      "sessionId": "85e41cd6-9162-4f13-8dce-4e3e2a9f479a",
+      "steps": 3,
+      "total": 30624,
+      "denied": 0,
+      "edits": 1,
+      "finalTextStartsWith": "Added the exported `sub(a, b)` function"
     }
   },
   "failures": {
@@ -32,6 +48,16 @@
       "exitCode": 1,
       "kind": "model-unavailable",
       "messageIncludes": "is not found"
+    },
+    "model-retired": {
+      "exitCode": 1,
+      "kind": "model-unavailable",
+      "messageIncludes": "no longer available"
+    },
+    "quota-daily": {
+      "exitCode": 173,
+      "kind": "rate-limited",
+      "messageIncludes": "exhausted your daily quota"
     }
   }
 }

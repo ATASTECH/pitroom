@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 
 const argv = process.argv.slice(2);
 if (process.env.MOCK_LOG) {
-  fs.appendFileSync(process.env.MOCK_LOG, JSON.stringify({ argv, backend: 'gemini', systemSettings: process.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH }) + '\n');
+  fs.appendFileSync(process.env.MOCK_LOG, JSON.stringify({ argv, backend: 'gemini', geminiHome: process.env.GEMINI_CLI_HOME }) + '\n');
 }
 if (argv[0] === '--version') {
   console.log('0.35.3');

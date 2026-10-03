@@ -99,18 +99,30 @@ Recorded v2 streams live in `test/fixtures/opencode/{events,failures}/v2-*`; the
 
 ## Gemini CLI notes
 
-Status: **beta**. The adapter is built from Gemini CLI 0.35's own sources (its `stream-json` event types, policy engine and settings schema) and its pieces were checked against the real CLI where that was possible: the policy files load without errors in Gemini's own TOML loader, the system settings switch the user's hooks off (a real run printed hook output before, none after), and one real failure is recorded. No full real run is recorded yet, because the Google sign-in this machine used (`oauth-personal`, Gemini Code Assist for individuals) now answers `IneligibleTierError`; the event fixtures under `test/fixtures/gemini/events` are therefore constructed from the CLI's event types, and should be replaced by recorded runs once a key works (`GEMINI_API_KEY`, Google AI Studio).
+Status: **beta**, tried against Gemini CLI 0.62 with a Google AI Studio API key (`gemini-api-key`). Real runs are recorded under `test/fixtures/gemini` (a read run, an edit run, a retired model, a daily quota); the two older fixtures there (`read-flash`, `write-edit`) are constructed from the CLI's event types and cover a denied tool call.
 
-- **Read-only is the CLI's `plan` approval mode.** Its default policy allows only `glob`, `grep_search`, `list_directory`, `read_file`, `google_web_search` and a few built-ins, denies the shell, and lets file writes through only to its own plans folder under `~/.gemini`, not to the project.
-- **`policies/gemini/*.toml`** are passed with `--policy` (user tier, outranking the CLI's defaults): `base.toml` (secret files unreadable, MCP tools refused), `no-web.toml` (no web search or fetch unless `--web`), `shell.toml` for write and isolate (shell is allowed, since a headless run cannot answer "ask the user", minus history-changing git, bulk deletes and other agents). The files are validated with Gemini's own loader.
-- **`GEMINI_CLI_SYSTEM_SETTINGS_PATH`** points at `policies/gemini/system-settings.json`, which outranks the user's settings: hooks off (the user's hooks run on every worker and print into stdout), no MCP servers, no skills, no user `GEMINI.md`, no auto-update, YOLO mode disabled. `-e none` turns extensions off.
-- **Limits of the rules.** Shell deny rules are prefix based (`git push` is refused, an unusual spelling of the same action may not be), and the secret-file rules cover the file tools: a shell `cat .env`, `grep_search` over a secrets file or `web_fetch` of a local path are not caught by them. Use `read` mode (no shell) when that matters.
-- **MCP is off by an allow list that names no server**: Gemini CLI treats an empty `mcp.allowed` as "no restriction", so the system settings list a name nothing has.
-- **Never `--yolo`.** The contract tests reject it, and the system settings disable it too.
-- **Stream**: `message` events carry the answer in `delta` chunks, merged per model turn; a turn ends at a `tool_result`; the final answer is the text after the last tool call. `result.stats` gives tokens (`cached` is part of `input_tokens`), not dollars. Lines that are not JSON are skipped.
-- **Models**: Gemini CLI cannot list models; the catalogue is its built-in names. Its own default may be a Pro model (`doctor` warns), so a worker should pin `-W gemini:gemini-2.5-flash`. There is no effort option: `#level` is dropped.
+What was checked live:
+
+- **Read** runs (`--approval-mode plan`): files are read, and a write (`write_file`) is refused by the CLI ("Plan Mode").
+- **Isolate / write** runs: edits land in the isolated copy only; the original is untouched. Shell commands matching `policies/gemini/shell.toml` (`git commit`, `git push`, `rm -rf`, `sudo`, other agents) are refused with Pitroom's message, others run.
+- **Fallback**: a quota or retired-model failure is classified (`rate-limited`, `model-unavailable`) and the chain moves to the next worker.
+
+What is **not** enforced, so do not rely on it:
+
+- **Secret files.** `policies/gemini/base.toml` has deny rules for `.env`, `*.pem` and SSH keys, and the CLI loads them without errors, but in live tests Gemini 0.62 still read `server.pem` and `prod.env` (even a plain deny-all `read_file` rule was ignored). It does refuse a bare `.env`. The worker is also told not to read secrets, and Pitroom warns when secret-looking files sit in the directory: use `--isolate` (git-ignored files are left out) or a clean checkout.
+- **Shell rules are prefix based** (an unusual spelling of a forbidden command may pass), and a shell `cat .env` is not caught. Use read mode (no shell) when that matters.
+- **Web**: `no-web.toml` denies `google_web_search` and `web_fetch` unless `--web`; this was not verified live.
+
+How a worker is started:
+
+- **`--approval-mode plan`** is the read-only mode; write and isolate use `auto_edit`. Never `--yolo` (the contract tests reject it and the worker settings disable it).
+- **`--policy policies/gemini/*.toml`**: `base.toml` (secret rules above, MCP refused), `no-web.toml`, and `shell.toml` for write and isolate (shell is allowed, since a headless run cannot answer "ask the user", minus the forbidden commands). Gemini's loader rejects a rule without `toolName` and any regex it thinks could be slow (nested quantifiers), which skips the whole file: `npm test` checks the patterns, and a live run with the file is the final check.
+- **A private `GEMINI_CLI_HOME`** (`<pitroom home>/gemini-home`): its settings come from `policies/gemini/worker-settings.json` plus your sign-in method (`security.auth`), with links to your `oauth_creds.json`. Your hooks, MCP servers, skills and global `GEMINI.md` are therefore not loaded (hooks would run on every worker; a worker also starts with ~20k fewer tokens). An API key kept in the keychain keeps working. A system settings file would be the usual place, but Gemini CLI 0.62 ignores one that root does not own. `-e none` turns extensions off, and the MCP allow list names a server nothing has (an empty list means "no restriction" there).
+- **Folder trust**: a headless run in a folder Gemini does not trust fails. Folders you trusted in Gemini stay trusted. `PITROOM_GEMINI_TRUST=1` adds `--skip-trust`, which also lets that folder's own `.gemini` settings (hooks included) load.
+- **Stream**: `message` events carry the answer in `delta` chunks, merged per model turn; the answer is the text after the last tool call. `result.stats` gives tokens (`cached` is part of `input_tokens`), not dollars. Lines that are not JSON are skipped.
+- **Models**: Gemini CLI cannot list models; the catalogue is its built-in names (`gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, …). The 2.5 models are no longer served to new API keys. Its own default (`auto`) may be a larger model, so pin a worker, e.g. `-W gemini:gemini-3.8-flash`. The free tier has a small daily quota per model. No effort option: `#level` is dropped.
 - **Resume**: sessions are chosen by index or `latest` per project, which is not safe with parallel workers, so `--continue` is not supported (`resume: 'none'`).
-- **Errors**: they arrive on stderr and in the `result` event. Classified as `auth` (`IneligibleTierError`, sign-in, API key), `rate-limited` (`429`, `RESOURCE_EXHAUSTED`, quota) or `model-unavailable` (`404`), so the fallback chain can move on.
+- **Sign-in**: a Google account sign-in (`oauth-personal`, Code Assist for individuals) is refused by Google for this client (`IneligibleTierError`); use an API key from Google AI Studio (`gemini` stores it, or set `GEMINI_API_KEY`).
 
 ## Adding a worker
 

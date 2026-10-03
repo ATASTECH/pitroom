@@ -486,15 +486,16 @@ const GEMINI_MOCK = path.join(path.dirname(new URL(import.meta.url).pathname), '
 test('a Gemini CLI worker runs in plan mode and its answer comes back with the model it used', () => {
   const s = sandbox();
   const before = s.status();
-  const r = s.run(['run', '-W', 'gemini:gemini-2.5-flash', 'where is app.txt?'], { PITROOM_GEMINI_BIN: GEMINI_MOCK });
+  const r = s.run(['run', '-W', 'gemini:gemini-3.8-flash', 'where is app.txt?'], { PITROOM_GEMINI_BIN: GEMINI_MOCK });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.match(r.stdout, /worker gemini · model gemini-2\.5-flash/);
   assert.match(r.stdout, /SUMMARY: app\.txt contains a greeting\./);
   assert.match(r.stdout, /refs: 1\/1 verified/);
   const call = s.calls().find((c) => c.backend === 'gemini' && c.argv.includes('--output-format'));
   assert.equal(call.argv[call.argv.indexOf('--approval-mode') + 1], 'plan');
-  assert.equal(call.argv[call.argv.indexOf('--model') + 1], 'gemini-2.5-flash');
-  assert.match(call.systemSettings, /policies[\\/]gemini[\\/]system-settings\.json$/);
+  assert.equal(call.argv[call.argv.indexOf('--model') + 1], 'gemini-3.8-flash');
+  const worker = JSON.parse(fs.readFileSync(path.join(call.geminiHome, '.gemini', 'settings.json'), 'utf8'));
+  assert.equal(worker.hooksConfig.enabled, false, 'the worker runs in a home without the user\'s hooks');
   assert.equal(s.status(), before, 'a read run touches nothing');
 });
 
@@ -518,12 +519,12 @@ test('a Gemini CLI isolated run auto-approves edits and loads the shell rules; a
 
 test('doctor checks a Gemini CLI worker: version, sign-in and a model hint', () => {
   const s = sandbox();
-  s.config({ worker: 'gemini:gemini-2.5-pro' });
+  s.config({ worker: 'gemini:gemini-3.1-pro-preview' });
   const out = s.run(['doctor'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, GEMINI_API_KEY: 'test-key' }).stdout;
   assert.match(out, /^Gemini CLI$/m);
   assert.match(out, /✔ Gemini CLI 0\.35\.3 at/);
   assert.match(out, /Gemini CLI: an API key is set/);
-  assert.match(out, /! Gemini model: gemini-2\.5-pro is the largest tier for a worker; consider -W gemini:gemini-2\.5-flash/);
+  assert.match(out, /! Gemini model: gemini-3\.1-pro-preview is the largest tier for a worker; consider -W gemini:gemini-3\.8-flash/);
   assert.match(out, /Gemini CLI: read-only runs enforced by the CLI's read-only approval mode/);
 });
 

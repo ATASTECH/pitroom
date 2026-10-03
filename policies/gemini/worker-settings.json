@@ -3,7 +3,6 @@
   "hooksConfig": { "enabled": false },
   "mcp": { "allowed": ["pitroom-no-mcp-servers"] },
   "skills": { "enabled": false },
-  "context": { "fileName": ["PITROOM-NO-CONTEXT.md"] },
   "security": { "disableYoloMode": true, "disableAlwaysAllow": true },
   "privacy": { "usageStatisticsEnabled": false },
   "telemetry": { "enabled": false }

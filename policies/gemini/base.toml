@@ -1,12 +1,14 @@
 # Pitroom's rules for Gemini CLI workers, every mode. Passed with --policy: user tier, so they outrank the CLI's
 # own defaults (priority 900 here is 4.900 there). The read-only mode itself is Gemini's `--approval-mode plan`.
 
-# A worker is told not to read secrets; this makes the file tools refuse too.
+# A worker is told not to read secrets; these rules are meant to make the file tools refuse too. Gemini CLI 0.62 loads
+# them without errors but did not apply them to read_file in live tests (docs/backends.md), so they are a second line
+# at best. Patterns must avoid nested quantifiers: Gemini's loader skips the whole file for a "ReDoS" regex.
 [[rule]]
 toolName = "read_file"
 decision = "deny"
 priority = 950
-argsPattern = '[\\/]\.env[^\\/"]*"|"\.env[^\\/"]*"|[\\/][^\\/"]*\.pem"|[\\/]id_rsa[^\\/"]*"|[\\/]id_ed25519[^\\/"]*"'
+argsPattern = '(?:[\\/]|")[^\\/"]*\.env"|(?:[\\/]|")[^\\/"]*\.env\.[^\\/"]*"|(?:[\\/]|")[^\\/"]*\.pem"|(?:[\\/]|")id_(?:rsa|ed25519|ecdsa|dsa)[^\\/"]*"'
 deny_message = "Pitroom: secret files (.env, keys) are not for workers."
 
 [[rule]]
@@ -18,6 +20,7 @@ deny_message = "Pitroom: secret files (.env, keys) are not for workers."
 
 # No other tool servers: MCP tools are refused (the system settings also allow no MCP server).
 [[rule]]
+toolName = "*"
 mcpName = "*"
 decision = "deny"
 priority = 950

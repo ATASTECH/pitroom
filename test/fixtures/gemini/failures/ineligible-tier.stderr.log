@@ -1,0 +1,19 @@
+Loaded cached credentials.
+Error authenticating: IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google
+    at throwIneligibleOrProjectIdError (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/setup.js:202:15)
+    at _doSetupUser (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/setup.js:191:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5) {
+  ineligibleTiers: [
+    {
+      reasonCode: 'UNSUPPORTED_CLIENT',
+      reasonMessage: 'This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google',
+      tierId: 'free-tier',
+      tierName: 'Gemini Code Assist for individuals'
+    }
+  ]
+}
+Skill "skill-creator" from "/home/user/.agents/skills/skill-creator/SKILL.md" is overriding the built-in skill.
+An unexpected critical error occurred:Error: This client is no longer supported for Gemini Code Assist for individuals. To continue using Gemini, please migrate to the Antigravity suite of products: https://antigravity.google
+    at throwIneligibleOrProjectIdError (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/setup.js:202:15)
+    at _doSetupUser (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/node_modules/@google/gemini-cli-core/dist/src/code_assist/setup.js:191:9)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)

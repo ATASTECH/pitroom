@@ -3,10 +3,14 @@
 // Adding a backend = implement it, record fixtures, and this suite covers it.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { allBackends, getBackend, parseTarget } from '../dist/lib.mjs';
+
+// Adapters may keep private files under Pitroom's home: tests must not write to the real one.
+process.env.PITROOM_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-backends-'));
 
 const FIXTURES = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -209,14 +213,15 @@ test('gemini: read is the CLI\'s plan mode; write and isolate auto-approve edits
   for (const mode of ['read', 'write', 'isolate']) {
     const inv = b.invocation(request({ mode }));
     assert.equal(after(inv, '-e'), 'none', 'no extensions');
-    assert.match(inv.env.GEMINI_CLI_SYSTEM_SETTINGS_PATH, /policies[\\/]gemini[\\/]system-settings\.json$/, 'the isolating settings outrank the user\'s');
+    assert.equal(inv.env.GEMINI_CLI_HOME, path.join(process.env.PITROOM_HOME, 'gemini-home'), 'workers run in a private Gemini home');
+    assert.ok(!inv.args.includes('--skip-trust'), 'folder trust is opt-in');
     assert.ok(!inv.args.includes('yolo') && !inv.args.some((a) => /yolo/i.test(a)));
   }
 });
 
 test('gemini: the shipped settings and rules close off hooks, MCP and unsafe shell', () => {
   const dir = path.resolve(FIXTURES, '..', '..', 'policies', 'gemini');
-  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'system-settings.json'), 'utf8'));
+  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'worker-settings.json'), 'utf8'));
   assert.equal(settings.hooksConfig.enabled, false, 'the user\'s hooks would run on every worker');
   // An empty allow list means "no restriction" in Gemini CLI; a name no server has blocks them all.
   assert.ok(settings.mcp.allowed.length > 0, 'MCP allow list is not empty');
@@ -224,14 +229,50 @@ test('gemini: the shipped settings and rules close off hooks, MCP and unsafe she
   assert.equal(settings.general.enableAutoUpdate, false);
   const shell = fs.readFileSync(path.join(dir, 'shell.toml'), 'utf8');
   for (const cmd of ['git commit', 'git push', 'rm -rf', 'sudo', 'pitroom', 'gemini']) assert.ok(shell.includes(`"${cmd}"`), cmd);
-  assert.match(fs.readFileSync(path.join(dir, 'base.toml'), 'utf8'), /mcpName = "\*"\ndecision = "deny"/);
+  // Gemini CLI 0.62 requires toolName in every rule, MCP rules included.
+  assert.match(fs.readFileSync(path.join(dir, 'base.toml'), 'utf8'), /toolName = "\*"\nmcpName = "\*"\ndecision = "deny"/);
   assert.match(fs.readFileSync(path.join(dir, 'no-web.toml'), 'utf8'), /google_web_search/);
+  // The secret-file rule matches the JSON of the tool's arguments: relative and absolute paths alike.
+  const base = fs.readFileSync(path.join(dir, 'base.toml'), 'utf8');
+  const secret = new RegExp(base.match(/toolName = "read_file"[\s\S]*?argsPattern = '(.*)'/)[1]);
+  const hit = (p) => secret.test(JSON.stringify({ file_path: p }));
+  for (const p of ['.env', '/a/.env', 'prod.env', '/x/.env.local', 'server.pem', '/k/server.pem', 'id_rsa', '/h/.ssh/id_ed25519.pub']) assert.ok(hit(p), `${p} is refused`);
+  for (const p of ['environment.ts', '/src/environment.ts', 'env.md', 'app.txt', '/a/pemfile.md']) assert.ok(!hit(p), `${p} stays readable`);
+});
+
+test('gemini: the private home carries the user\'s sign-in method, switches hooks off, and trust is opt-in', () => {
+  const b = getBackend('gemini');
+  const userHome = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-gemuser-'));
+  fs.mkdirSync(path.join(userHome, '.gemini'));
+  fs.writeFileSync(path.join(userHome, '.gemini', 'settings.json'), JSON.stringify({ security: { auth: { selectedType: 'gemini-api-key' } }, hooksConfig: { enabled: true }, model: { name: 'x' } }));
+  fs.writeFileSync(path.join(userHome, '.gemini', 'trustedFolders.json'), '{}');
+  fs.writeFileSync(path.join(userHome, '.gemini', 'oauth_creds.json'), '{}');
+  const saved = { home: process.env.GEMINI_CLI_HOME, trust: process.env.PITROOM_GEMINI_TRUST, ph: process.env.PITROOM_HOME };
+  process.env.GEMINI_CLI_HOME = userHome;
+  process.env.PITROOM_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-gemhome-'));
+  try {
+    const inv = b.invocation(request({}));
+    const written = JSON.parse(fs.readFileSync(path.join(inv.env.GEMINI_CLI_HOME, '.gemini', 'settings.json'), 'utf8'));
+    assert.equal(written.security.auth.selectedType, 'gemini-api-key', 'the sign-in method is carried over');
+    assert.equal(written.hooksConfig.enabled, false, 'the user\'s hooks are not');
+    assert.equal(written.model, undefined, 'nor the rest of their settings');
+    assert.ok(fs.existsSync(path.join(inv.env.GEMINI_CLI_HOME, '.gemini', 'oauth_creds.json')), 'sign-in files are linked');
+    assert.equal(inv.env.GEMINI_CLI_TRUSTED_FOLDERS_PATH, path.join(userHome, '.gemini', 'trustedFolders.json'), 'folders trusted in Gemini stay trusted');
+    process.env.PITROOM_GEMINI_TRUST = '1';
+    assert.ok(b.invocation(request({})).args.includes('--skip-trust'));
+    const f = b.failure(b.parse(''), 'Gemini CLI is not running in a trusted directory. To proceed, either use `--skip-trust`', 1);
+    assert.match(f.message, /PITROOM_GEMINI_TRUST=1/);
+  } finally {
+    for (const [k, v] of [['GEMINI_CLI_HOME', saved.home], ['PITROOM_GEMINI_TRUST', saved.trust], ['PITROOM_HOME', saved.ph]]) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+  }
 });
 
 test('gemini: "model#level" drops the level (no effort option); a prompt starting with "-" stays a value', () => {
   const b = getBackend('gemini');
-  const inv = b.invocation(request({ model: 'gemini-2.5-flash#high' }));
-  assert.equal(inv.args[inv.args.indexOf('--model') + 1], 'gemini-2.5-flash');
+  const inv = b.invocation(request({ model: 'gemini-3.8-flash#high' }));
+  assert.equal(inv.args[inv.args.indexOf('--model') + 1], 'gemini-3.8-flash');
   assert.equal(b.invocation(request({})).args.includes('--model'), false);
   const dash = b.invocation(request({ prompt: '--help me' }));
   assert.equal(dash.args[dash.args.indexOf('--prompt') + 1], ' --help me');
@@ -241,7 +282,7 @@ test('gemini: the stream is merged into steps and an answer; hook noise and warn
   const b = getBackend('gemini');
   const stream = [
     'Created execution plan for SessionEnd: 2 hook(s) to execute in parallel', // a user's hook printing into stdout
-    '{"type":"init","timestamp":"t","session_id":"S1","model":"gemini-2.5-flash"}',
+    '{"type":"init","timestamp":"t","session_id":"S1","model":"gemini-3.8-flash"}',
     '{"type":"message","timestamp":"t","role":"assistant","content":"Look","delta":true}',
     '{"type":"message","timestamp":"t","role":"assistant","content":"ing.","delta":true}',
     '{"type":"tool_use","timestamp":"t","tool_name":"glob","tool_id":"g1","parameters":{"pattern":"**/*.ts"}}',
@@ -252,7 +293,7 @@ test('gemini: the stream is merged into steps and an answer; hook noise and warn
     '{"type":"result","timestamp":"t","status":"success","stats":{"total_tokens":100,"input_tokens":80,"output_tokens":20,"cached":30,"input":50,"tool_calls":1,"models":{}}}',
   ].join('\n');
   const run = b.parse(stream);
-  assert.equal(run.model, 'gemini-2.5-flash');
+  assert.equal(run.model, 'gemini-3.8-flash');
   assert.equal(run.finalText, 'Done: two files.', 'only the answer after the last tool call');
   assert.equal(run.error, undefined, 'a warning is not an error');
   assert.equal(run.usage.steps, 2);

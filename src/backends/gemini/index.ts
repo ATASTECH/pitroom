@@ -1,18 +1,22 @@
-// Gemini CLI adapter: `gemini --prompt=… --output-format stream-json`, locked down with Gemini CLI's own mechanisms:
+// Gemini CLI adapter: `gemini --prompt … --output-format stream-json`, locked down with Gemini CLI's own mechanisms:
 //   --approval-mode plan       read mode: the CLI's policy engine allows only read tools (no shell, no edits, writes
 //                              only to its own plans folder); write and isolate use auto_edit (edits are approved)
-//   --policy <files>           Pitroom's rules (policies/gemini): secret files unreadable, no MCP, no web unless asked,
-//                              and in write modes shell commands allowed minus history-changing git and the like
+//   --policy <files>           Pitroom's rules (policies/gemini): shell commands allowed in write modes minus
+//                              history-changing git and the like (verified live), no MCP, no web unless asked, and
+//                              deny rules for secret files, which Gemini CLI 0.62 loads but does not apply to read_file
 //   -e none                    no extensions
-//   GEMINI_CLI_SYSTEM_SETTINGS_PATH   policies/gemini/system-settings.json, which outranks the user's own settings:
-//                              hooks off (they would run on every worker and print into the stream), no MCP servers,
-//                              no skills, no user GEMINI.md, no auto-update, YOLO mode disabled
-// Never --yolo / --approval-mode yolo. The user's sign-in (~/.gemini or an API key) is used as it is.
+//   GEMINI_CLI_HOME            a private home for workers (<pitroom home>/gemini-home) whose settings come from
+//                              policies/gemini/worker-settings.json: the user's hooks, MCP servers, skills and
+//                              GEMINI.md are not loaded (hooks would run on every worker), no auto-update, no YOLO.
+//                              Gemini CLI 0.62 ignores a system settings file that root does not own, so the user
+//                              settings of a private home are the way to do this without sudo.
+// Never --yolo / --approval-mode yolo. The user's sign-in (an API key in the keychain, or oauth files) is carried over.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { home } from '../../core/store.js';
 import { findBinary, resolveCommand } from '../exec.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
@@ -33,6 +37,36 @@ function gem(args: string[], timeout = 60_000) {
 /** Pitroom's own rule files ship in the package: policies/ sits next to dist/ (package.json "files"). */
 const policyDir = () => path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'policies', 'gemini');
 
+/**
+ * The private GEMINI_CLI_HOME of workers: Pitroom's isolating settings plus the user's chosen sign-in method, and
+ * links to their sign-in files. Written only when it changed, so invoking stays cheap and repeatable.
+ */
+function workerHome(): string {
+  const root = path.join(home(), 'gemini-home');
+  const dir = path.join(root, '.gemini');
+  const base = JSON.parse(fs.readFileSync(path.join(policyDir(), 'worker-settings.json'), 'utf8'));
+  const auth = settings().security?.auth;
+  const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}\n`;
+  const file = path.join(dir, 'settings.json');
+  try {
+    if (fs.readFileSync(file, 'utf8') === body) return root;
+  } catch {
+    // not written yet
+  }
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(file, body);
+  for (const name of ['oauth_creds.json', 'google_accounts.json']) {
+    const from = path.join(geminiHome(), name);
+    const to = path.join(dir, name);
+    try {
+      if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to);
+    } catch {
+      // no link: the worker then asks to sign in, which fails with an auth error that doctor explains
+    }
+  }
+  return root;
+}
+
 function invocation(req: WorkerRequest) {
   const dir = policyDir();
   const policies = ['base.toml', ...(req.web ? [] : ['no-web.toml']), ...(req.mode === 'read' ? [] : ['shell.toml'])];
@@ -44,11 +78,17 @@ function invocation(req: WorkerRequest) {
     '-e', 'none',
   ];
   for (const p of policies) args.push('--policy', path.join(dir, p));
+  // A headless run in a folder Gemini CLI does not trust fails; trusting makes it load that project's own Gemini
+  // settings (hooks, MCP), so this is opt-in. Folders the user already trusted in Gemini stay trusted.
+  if (process.env.PITROOM_GEMINI_TRUST === '1') args.push('--skip-trust');
   // Gemini has no reasoning-effort option; a "#level" suffix is dropped.
   const [model] = (req.model ?? '').split('#');
   if (model) args.push('--model', model);
   const { command, prefix } = resolveCommand(binary());
-  return { command, args: [...prefix, ...args], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path.join(dir, 'system-settings.json') } };
+  const env: Record<string, string> = { GEMINI_CLI_HOME: workerHome() };
+  const trusted = path.join(geminiHome(), 'trustedFolders.json');
+  if (fs.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  return { command, args: [...prefix, ...args], env };
 }
 
 export function classify(message: string): FailureKind {
@@ -56,20 +96,25 @@ export function classify(message: string): FailureKind {
     return 'auth';
   }
   if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return 'rate-limited';
-  if (/model[^.]*(not found|not available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return 'model-unavailable';
+  if (/model.{0,80}(not found|not available|no longer available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return 'model-unavailable';
   return 'other';
 }
+
+const UNTRUSTED = 'Gemini CLI does not trust this folder: open `gemini` in it once and trust it, or set PITROOM_GEMINI_TRUST=1 (the folder\'s own Gemini settings, hooks included, then load)';
 
 function failure(run: ParsedRun, stderr: string, exitCode: number | null): Failure | undefined {
   if (exitCode === 0 && !run.error) return undefined;
   // Gemini prints a stack trace on stderr: the first line that says what went wrong is the message.
   const lines = stderr.trim().split('\n').map((l) => l.trim()).filter(Boolean);
   const detail = lines.find((l) => /error|failed|exceeded|quota|exhausted|unsupported/i.test(l) && !/^at /.test(l)) ?? lines.at(-1);
-  const message = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const raw = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const message = /not running in a trusted directory/i.test(`${stderr} ${raw}`) ? UNTRUSTED : raw;
   return { kind: classify(message), message };
 }
 
-const geminiHome = () => path.join(process.env.GEMINI_CLI_HOME ?? os.homedir(), '.gemini');
+function geminiHome(): string {
+  return path.join(process.env.GEMINI_CLI_HOME ?? os.homedir(), '.gemini');
+}
 
 function settings(): any {
   try {
@@ -114,10 +159,10 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
     checks.push({
       level: pricey ? 'warn' : 'ok',
       message: pricey
-        ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-2.5-flash`
+        ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-3.8-flash`
         : model
         ? `Gemini model: ${model}`
-        : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-2.5-flash)",
+        : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-3.8-flash)",
     });
   }
   if (!hasFallback) checks.push({ level: 'warn', message: 'no fallback workers configured for Gemini runs' });
@@ -127,7 +172,7 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
 /** Gemini CLI has no command that lists models: these are the names it knows (config/models in Gemini CLI 0.35). */
 function catalog(): ModelCatalog {
   const def = defaultModel();
-  const models = ['gemini-3-pro-preview', 'gemini-3-flash-preview', 'gemini-2.5-pro', 'gemini-2.5-flash', 'gemini-2.5-flash-lite'].map((id) => ({ id }));
+  const models = ['gemini-3.8-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview', 'gemini-3-flash-preview'].map((id) => ({ id }));
   if (def && !models.some((m) => m.id === def)) models.push({ id: def });
   return { models, source: "Gemini CLI's built-in model names (it cannot list models); the effort suffix is not used" };
 }

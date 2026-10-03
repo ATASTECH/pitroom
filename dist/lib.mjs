@@ -545,9 +545,20 @@ var codex = {
 // src/backends/gemini/index.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
 import fs4 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
+import { fileURLToPath } from "node:url";
+
+// src/core/store.ts
 import os4 from "node:os";
 import path4 from "node:path";
-import { fileURLToPath } from "node:url";
+function home() {
+  if (process.env.PITROOM_HOME) return path4.resolve(process.env.PITROOM_HOME);
+  if (process.platform === "win32") {
+    return path4.join(process.env.LOCALAPPDATA ?? path4.join(os4.homedir(), "AppData", "Local"), "pitroom");
+  }
+  return path4.join(process.env.XDG_STATE_HOME ?? path4.join(os4.homedir(), ".local", "state"), "pitroom");
+}
 
 // src/backends/gemini/events.ts
 var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
@@ -669,7 +680,31 @@ function gem(args, timeout = 6e4) {
   });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var policyDir = () => path4.resolve(path4.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+var policyDir = () => path5.resolve(path5.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+function workerHome() {
+  const root = path5.join(home(), "gemini-home");
+  const dir = path5.join(root, ".gemini");
+  const base = JSON.parse(fs4.readFileSync(path5.join(policyDir(), "worker-settings.json"), "utf8"));
+  const auth = settings().security?.auth;
+  const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}
+`;
+  const file = path5.join(dir, "settings.json");
+  try {
+    if (fs4.readFileSync(file, "utf8") === body) return root;
+  } catch {
+  }
+  fs4.mkdirSync(dir, { recursive: true });
+  fs4.writeFileSync(file, body);
+  for (const name of ["oauth_creds.json", "google_accounts.json"]) {
+    const from = path5.join(geminiHome(), name);
+    const to = path5.join(dir, name);
+    try {
+      if (fs4.existsSync(from) && !fs4.existsSync(to)) fs4.symlinkSync(from, to);
+    } catch {
+    }
+  }
+  return root;
+}
 function invocation3(req) {
   const dir = policyDir();
   const policies = ["base.toml", ...req.web ? [] : ["no-web.toml"], ...req.mode === "read" ? [] : ["shell.toml"]];
@@ -684,31 +719,39 @@ function invocation3(req) {
     "-e",
     "none"
   ];
-  for (const p of policies) args.push("--policy", path4.join(dir, p));
+  for (const p of policies) args.push("--policy", path5.join(dir, p));
+  if (process.env.PITROOM_GEMINI_TRUST === "1") args.push("--skip-trust");
   const [model] = (req.model ?? "").split("#");
   if (model) args.push("--model", model);
   const { command, prefix } = resolveCommand(binary3());
-  return { command, args: [...prefix, ...args], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path4.join(dir, "system-settings.json") } };
+  const env = { GEMINI_CLI_HOME: workerHome() };
+  const trusted = path5.join(geminiHome(), "trustedFolders.json");
+  if (fs4.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  return { command, args: [...prefix, ...args], env };
 }
 function classify3(message) {
   if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
   if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
-  if (/model[^.]*(not found|not available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
+  if (/model.{0,80}(not found|not available|no longer available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
   return "other";
 }
+var UNTRUSTED = "Gemini CLI does not trust this folder: open `gemini` in it once and trust it, or set PITROOM_GEMINI_TRUST=1 (the folder's own Gemini settings, hooks included, then load)";
 function failure3(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
   const detail = lines.find((l) => /error|failed|exceeded|quota|exhausted|unsupported/i.test(l) && !/^at /.test(l)) ?? lines.at(-1);
-  const message = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const raw = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const message = /not running in a trusted directory/i.test(`${stderr} ${raw}`) ? UNTRUSTED : raw;
   return { kind: classify3(message), message };
 }
-var geminiHome = () => path4.join(process.env.GEMINI_CLI_HOME ?? os4.homedir(), ".gemini");
+function geminiHome() {
+  return path5.join(process.env.GEMINI_CLI_HOME ?? os5.homedir(), ".gemini");
+}
 function settings() {
   try {
-    return JSON.parse(fs4.readFileSync(path4.join(geminiHome(), "settings.json"), "utf8"));
+    return JSON.parse(fs4.readFileSync(path5.join(geminiHome(), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -727,7 +770,7 @@ function doctor3({ models, hasFallback }) {
   const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary3()}` }];
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
-  const signedIn = fs4.existsSync(path4.join(geminiHome(), "oauth_creds.json"));
+  const signedIn = fs4.existsSync(path5.join(geminiHome(), "oauth_creds.json"));
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
@@ -746,7 +789,7 @@ function doctor3({ models, hasFallback }) {
     const pricey = model && /pro/i.test(model);
     checks.push({
       level: pricey ? "warn" : "ok",
-      message: pricey ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-2.5-flash` : model ? `Gemini model: ${model}` : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-2.5-flash)"
+      message: pricey ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-3.8-flash` : model ? `Gemini model: ${model}` : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-3.8-flash)"
     });
   }
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Gemini runs" });
@@ -754,7 +797,7 @@ function doctor3({ models, hasFallback }) {
 }
 function catalog3() {
   const def = defaultModel2();
-  const models = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"].map((id) => ({ id }));
+  const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview"].map((id) => ({ id }));
   if (def && !models.some((m) => m.id === def)) models.push({ id: def });
   return { models, source: "Gemini CLI's built-in model names (it cannot list models); the effort suffix is not used" };
 }
@@ -885,8 +928,8 @@ function describe2(input) {
 
 // src/backends/opencode/profiles.ts
 import fs5 from "node:fs";
-import os5 from "node:os";
-import path5 from "node:path";
+import os6 from "node:os";
+import path6 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
 var READ_FILES = {
   "*": "allow",
@@ -984,13 +1027,13 @@ var FORBIDDEN_BASH = [
   "*pitroom*"
 ];
 function scratchDirs() {
-  const data = process.env.XDG_DATA_HOME ?? path5.join(os5.homedir(), ".local", "share");
+  const data = process.env.XDG_DATA_HOME ?? path6.join(os6.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path5.join(data, "opencode", "tool-output", "*")]: "allow",
-    [path5.join(data, "opencode", "shell", "*", "*")]: "allow"
+    [path6.join(data, "opencode", "tool-output", "*")]: "allow",
+    [path6.join(data, "opencode", "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os5.tmpdir(), realpath(os5.tmpdir())])) rules[path5.join(tmp, "opencode", "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os6.tmpdir(), realpath(os6.tmpdir())])) rules[path6.join(tmp, "opencode", "*")] = "allow";
   return rules;
 }
 function realpath(p) {
@@ -1269,7 +1312,7 @@ var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default m
 
 // src/core/refs.ts
 import fs6 from "node:fs";
-import path6 from "node:path";
+import path7 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -1320,7 +1363,7 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path6.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path7.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
@@ -1337,9 +1380,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path6.isAbsolute(ref.file)) return [];
+    if (path7.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path6.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path6.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path7.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path7.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -1354,7 +1397,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path6.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path7.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -1375,7 +1418,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path6.basename(name);
+  const base = path7.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -1391,12 +1434,12 @@ function indexFiles(roots) {
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path6.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path7.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list = index.get(e.name);
-        if (list) list.push(path6.join(dir, e.name));
-        else index.set(e.name, [path6.join(dir, e.name)]);
+        if (list) list.push(path7.join(dir, e.name));
+        else index.set(e.name, [path7.join(dir, e.name)]);
       }
     }
   };
@@ -1404,7 +1447,7 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path6.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path6.join(r, ref));
+  const candidates = path7.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path7.join(r, ref));
   return candidates.find((c) => {
     try {
       return fs6.statSync(c).isFile() && inside(c, roots);
@@ -1415,21 +1458,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path6.relative(r, path6.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path6.isAbsolute(rel);
+    const rel = path7.relative(r, path7.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path7.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
 import fs7 from "node:fs";
-import path8 from "node:path";
+import path9 from "node:path";
 
 // src/core/install.ts
-import path7 from "node:path";
+import path8 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 function packageRoot() {
-  return path7.resolve(path7.dirname(fileURLToPath2(import.meta.url)), "..");
+  return path8.resolve(path8.dirname(fileURLToPath2(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -1440,7 +1483,7 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path8.join(root, "skills", FILES[name]);
+  const file = path9.join(root, "skills", FILES[name]);
   if (!fs7.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
   return fs7.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
@@ -1472,7 +1515,7 @@ function parseVerdict(text) {
 
 // src/core/plan.ts
 import fs8 from "node:fs";
-import path9 from "node:path";
+import path10 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -1519,7 +1562,7 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path9.resolve(file);
+  const abs = path10.resolve(file);
   if (!fs8.existsSync(abs) || !fs8.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
   const plan = parsePlan(fs8.readFileSync(abs, "utf8"), fs8.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
@@ -1540,7 +1583,7 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path9.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path10.basename(file).replace(/\.md$/i, "");
 export {
   DEFAULT_BACKEND,
   allBackends,

@@ -1,0 +1,13 @@
+Error when talking to Gemini API Full report available at: /tmp/gemini-client-error.json ModelNotFoundError: This model models/gemini-2.5-flash is no longer available to new users. Please update your code to use models/gemini-3.8-flash for the latest features and improvements. We recommend you to use the Interactions API (https://ai.google.dev/gemini-api/docs/get-started).
+    at classifyGoogleError (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:307404:12)
+    at retryWithBackoff (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:308174:29)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async GeminiChat.makeApiCallAndProcessStream (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:332718:28)
+    at async GeminiChat.streamWithRetries (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:332471:29)
+    at async Turn.run (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:333393:24)
+    at async GeminiClient.processTurn (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:347067:22)
+    at async GeminiClient.sendMessageStream (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/chunk-MLY4WQFO.js:347164:14)
+    at async file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/gemini-J6X2T2ZI.js:12198:26
+    at async main (file:///home/user/.nvm/versions/node/v24.14.0/lib/node_modules/@google/gemini-cli/bundle/gemini-J6X2T2ZI.js:17726:5) {
+  code: 404
+}

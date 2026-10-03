@@ -552,10 +552,113 @@ var codex = {
 
 // src/backends/gemini/index.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
+import fs5 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
+import { fileURLToPath } from "node:url";
+
+// src/core/store.ts
 import fs4 from "node:fs";
 import os4 from "node:os";
 import path4 from "node:path";
-import { fileURLToPath } from "node:url";
+import crypto from "node:crypto";
+var TERMINAL = ["done", "failed", "timeout", "stopped"];
+var isActive = (s) => !TERMINAL.includes(s);
+function home() {
+  if (process.env.PITROOM_HOME) return path4.resolve(process.env.PITROOM_HOME);
+  if (process.platform === "win32") {
+    return path4.join(process.env.LOCALAPPDATA ?? path4.join(os4.homedir(), "AppData", "Local"), "pitroom");
+  }
+  return path4.join(process.env.XDG_STATE_HOME ?? path4.join(os4.homedir(), ".local", "state"), "pitroom");
+}
+var runsDir = () => path4.join(home(), "runs");
+var worktreesDir = () => path4.join(home(), "worktrees");
+var ledgerFile = () => path4.join(home(), "ledger.jsonl");
+var runDir = (id) => path4.join(runsDir(), id);
+var runFile = (id, name) => path4.join(runDir(id), name);
+function newRunId(now = /* @__PURE__ */ new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp2 = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${stamp2}-${crypto.randomBytes(2).toString("hex")}`;
+}
+var onFinished;
+var archive;
+function useArchive(hooks) {
+  onFinished = hooks.onFinished;
+  archive = { meta: hooks.meta, id: hooks.id };
+}
+function writeMeta(meta) {
+  fs4.mkdirSync(runDir(meta.id), { recursive: true });
+  const file = runFile(meta.id, "meta.json");
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs4.writeFileSync(tmp, JSON.stringify(meta, null, 2));
+  fs4.renameSync(tmp, file);
+  if (TERMINAL.includes(meta.state)) {
+    try {
+      onFinished?.(meta);
+    } catch {
+    }
+  }
+}
+function readMeta(id) {
+  const file = runFile(id, "meta.json");
+  if (!fs4.existsSync(file)) {
+    const kept = archive?.meta(id);
+    if (kept) return upgrade(kept);
+  }
+  return upgrade(JSON.parse(fs4.readFileSync(file, "utf8")));
+}
+function upgrade(raw) {
+  if (!raw.worker) raw.worker = raw.model ? { backend: "opencode", model: raw.model } : { backend: "opencode" };
+  if (!Array.isArray(raw.fallback)) {
+    raw.fallback = (raw.fallbackModels ?? []).map((m) => ({ backend: "opencode", model: m }));
+  }
+  raw.warnings ??= [];
+  raw.files ??= [];
+  raw.link ??= [];
+  return raw;
+}
+function listRunIds() {
+  if (!fs4.existsSync(runsDir())) return [];
+  return fs4.readdirSync(runsDir()).filter((d) => fs4.existsSync(runFile(d, "meta.json"))).sort();
+}
+function resolveRun(ref) {
+  const ids = listRunIds();
+  if (!ref || ref === "latest" || ref === "last") {
+    if (!ids.length) throw new UserError("no runs yet");
+    return ids[ids.length - 1];
+  }
+  if (ids.includes(ref)) return ref;
+  const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
+  if (hits.length === 1) return hits[0];
+  if (!hits.length) {
+    const kept = archive?.id(ref);
+    if (kept) return kept;
+  }
+  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(", ")}` : ids.length ? `unknown run "${ref}"` : "no runs yet");
+}
+function isAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+function freshMeta(id) {
+  const meta = readMeta(id);
+  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
+    const latest = readMeta(id);
+    if (TERMINAL.includes(latest.state)) return latest;
+    latest.state = "failed";
+    latest.error ??= "worker process exited unexpectedly";
+    latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
+    writeMeta(latest);
+    return latest;
+  }
+  return meta;
+}
 
 // src/backends/gemini/events.ts
 var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
@@ -677,7 +780,31 @@ function gem(args, timeout = 6e4) {
   });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var policyDir = () => path4.resolve(path4.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+var policyDir = () => path5.resolve(path5.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+function workerHome() {
+  const root = path5.join(home(), "gemini-home");
+  const dir = path5.join(root, ".gemini");
+  const base2 = JSON.parse(fs5.readFileSync(path5.join(policyDir(), "worker-settings.json"), "utf8"));
+  const auth = settings().security?.auth;
+  const body = `${JSON.stringify(auth ? { ...base2, security: { ...base2.security, auth } } : base2, null, 2)}
+`;
+  const file = path5.join(dir, "settings.json");
+  try {
+    if (fs5.readFileSync(file, "utf8") === body) return root;
+  } catch {
+  }
+  fs5.mkdirSync(dir, { recursive: true });
+  fs5.writeFileSync(file, body);
+  for (const name of ["oauth_creds.json", "google_accounts.json"]) {
+    const from = path5.join(geminiHome(), name);
+    const to = path5.join(dir, name);
+    try {
+      if (fs5.existsSync(from) && !fs5.existsSync(to)) fs5.symlinkSync(from, to);
+    } catch {
+    }
+  }
+  return root;
+}
 function invocation3(req) {
   const dir = policyDir();
   const policies = ["base.toml", ...req.web ? [] : ["no-web.toml"], ...req.mode === "read" ? [] : ["shell.toml"]];
@@ -692,31 +819,39 @@ function invocation3(req) {
     "-e",
     "none"
   ];
-  for (const p of policies) args.push("--policy", path4.join(dir, p));
+  for (const p of policies) args.push("--policy", path5.join(dir, p));
+  if (process.env.PITROOM_GEMINI_TRUST === "1") args.push("--skip-trust");
   const [model] = (req.model ?? "").split("#");
   if (model) args.push("--model", model);
   const { command, prefix } = resolveCommand(binary3());
-  return { command, args: [...prefix, ...args], env: { GEMINI_CLI_SYSTEM_SETTINGS_PATH: path4.join(dir, "system-settings.json") } };
+  const env = { GEMINI_CLI_HOME: workerHome() };
+  const trusted = path5.join(geminiHome(), "trustedFolders.json");
+  if (fs5.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  return { command, args: [...prefix, ...args], env };
 }
 function classify3(message) {
   if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
   if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
-  if (/model[^.]*(not found|not available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
+  if (/model.{0,80}(not found|not available|no longer available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
   return "other";
 }
+var UNTRUSTED = "Gemini CLI does not trust this folder: open `gemini` in it once and trust it, or set PITROOM_GEMINI_TRUST=1 (the folder's own Gemini settings, hooks included, then load)";
 function failure3(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
   const detail = lines.find((l) => /error|failed|exceeded|quota|exhausted|unsupported/i.test(l) && !/^at /.test(l)) ?? lines.at(-1);
-  const message = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const raw = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
+  const message = /not running in a trusted directory/i.test(`${stderr} ${raw}`) ? UNTRUSTED : raw;
   return { kind: classify3(message), message };
 }
-var geminiHome = () => path4.join(process.env.GEMINI_CLI_HOME ?? os4.homedir(), ".gemini");
+function geminiHome() {
+  return path5.join(process.env.GEMINI_CLI_HOME ?? os5.homedir(), ".gemini");
+}
 function settings() {
   try {
-    return JSON.parse(fs4.readFileSync(path4.join(geminiHome(), "settings.json"), "utf8"));
+    return JSON.parse(fs5.readFileSync(path5.join(geminiHome(), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -735,7 +870,7 @@ function doctor3({ models, hasFallback }) {
   const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary3()}` }];
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
-  const signedIn = fs4.existsSync(path4.join(geminiHome(), "oauth_creds.json"));
+  const signedIn = fs5.existsSync(path5.join(geminiHome(), "oauth_creds.json"));
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
@@ -754,7 +889,7 @@ function doctor3({ models, hasFallback }) {
     const pricey = model && /pro/i.test(model);
     checks.push({
       level: pricey ? "warn" : "ok",
-      message: pricey ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-2.5-flash` : model ? `Gemini model: ${model}` : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-2.5-flash)"
+      message: pricey ? `Gemini model: ${model} is the largest tier for a worker; consider -W gemini:gemini-3.8-flash` : model ? `Gemini model: ${model}` : "Gemini model: Gemini CLI's own choice (it may pick a Pro model; a cheaper worker is -W gemini:gemini-3.8-flash)"
     });
   }
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Gemini runs" });
@@ -762,7 +897,7 @@ function doctor3({ models, hasFallback }) {
 }
 function catalog3() {
   const def = defaultModel2();
-  const models = ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"].map((id) => ({ id }));
+  const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview"].map((id) => ({ id }));
   if (def && !models.some((m) => m.id === def)) models.push({ id: def });
   return { models, source: "Gemini CLI's built-in model names (it cannot list models); the effort suffix is not used" };
 }
@@ -892,9 +1027,9 @@ function describe2(input) {
 }
 
 // src/backends/opencode/profiles.ts
-import fs5 from "node:fs";
-import os5 from "node:os";
-import path5 from "node:path";
+import fs6 from "node:fs";
+import os6 from "node:os";
+import path6 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
 var READ_FILES = {
   "*": "allow",
@@ -992,18 +1127,18 @@ var FORBIDDEN_BASH = [
   "*pitroom*"
 ];
 function scratchDirs() {
-  const data = process.env.XDG_DATA_HOME ?? path5.join(os5.homedir(), ".local", "share");
+  const data = process.env.XDG_DATA_HOME ?? path6.join(os6.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path5.join(data, "opencode", "tool-output", "*")]: "allow",
-    [path5.join(data, "opencode", "shell", "*", "*")]: "allow"
+    [path6.join(data, "opencode", "tool-output", "*")]: "allow",
+    [path6.join(data, "opencode", "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os5.tmpdir(), realpath(os5.tmpdir())])) rules[path5.join(tmp, "opencode", "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os6.tmpdir(), realpath(os6.tmpdir())])) rules[path6.join(tmp, "opencode", "*")] = "allow";
   return rules;
 }
 function realpath(p) {
   try {
-    return fs5.realpathSync(p);
+    return fs6.realpathSync(p);
   } catch {
     return p;
   }
@@ -1264,9 +1399,9 @@ function getBackend(id) {
 import fs8 from "node:fs";
 
 // src/core/config.ts
-import fs6 from "node:fs";
-import os6 from "node:os";
-import path6 from "node:path";
+import fs7 from "node:fs";
+import os7 from "node:os";
+import path7 from "node:path";
 var SCHEMA = {
   worker: "string",
   fallback: "string[]",
@@ -1281,9 +1416,9 @@ var SCHEMA = {
   costs: "numbers"
 };
 function configPath() {
-  if (process.env.PITROOM_CONFIG) return path6.resolve(process.env.PITROOM_CONFIG);
-  const base2 = process.platform === "win32" ? process.env.APPDATA ?? path6.join(os6.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path6.join(os6.homedir(), ".config");
-  return path6.join(base2, "pitroom", "config.json");
+  if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
+  const base2 = process.platform === "win32" ? process.env.APPDATA ?? path7.join(os7.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path7.join(os7.homedir(), ".config");
+  return path7.join(base2, "pitroom", "config.json");
 }
 var cached;
 function loadConfig() {
@@ -1291,10 +1426,10 @@ function loadConfig() {
   const file = configPath();
   const config = {};
   const warnings = [];
-  if (fs6.existsSync(file)) {
+  if (fs7.existsSync(file)) {
     let raw;
     try {
-      raw = JSON.parse(fs6.readFileSync(file, "utf8"));
+      raw = JSON.parse(fs7.readFileSync(file, "utf8"));
     } catch (e) {
       warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
     }
@@ -1356,109 +1491,6 @@ function effective(flags = {}) {
     tiers: setting(void 0, void 0, c.tiers, {}),
     costs: setting(void 0, void 0, c.costs, {})
   };
-}
-
-// src/core/store.ts
-import fs7 from "node:fs";
-import os7 from "node:os";
-import path7 from "node:path";
-import crypto from "node:crypto";
-var TERMINAL = ["done", "failed", "timeout", "stopped"];
-var isActive = (s) => !TERMINAL.includes(s);
-function home() {
-  if (process.env.PITROOM_HOME) return path7.resolve(process.env.PITROOM_HOME);
-  if (process.platform === "win32") {
-    return path7.join(process.env.LOCALAPPDATA ?? path7.join(os7.homedir(), "AppData", "Local"), "pitroom");
-  }
-  return path7.join(process.env.XDG_STATE_HOME ?? path7.join(os7.homedir(), ".local", "state"), "pitroom");
-}
-var runsDir = () => path7.join(home(), "runs");
-var worktreesDir = () => path7.join(home(), "worktrees");
-var ledgerFile = () => path7.join(home(), "ledger.jsonl");
-var runDir = (id) => path7.join(runsDir(), id);
-var runFile = (id, name) => path7.join(runDir(id), name);
-function newRunId(now = /* @__PURE__ */ new Date()) {
-  const p = (n) => String(n).padStart(2, "0");
-  const stamp2 = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-  return `${stamp2}-${crypto.randomBytes(2).toString("hex")}`;
-}
-var onFinished;
-var archive;
-function useArchive(hooks) {
-  onFinished = hooks.onFinished;
-  archive = { meta: hooks.meta, id: hooks.id };
-}
-function writeMeta(meta) {
-  fs7.mkdirSync(runDir(meta.id), { recursive: true });
-  const file = runFile(meta.id, "meta.json");
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs7.writeFileSync(tmp, JSON.stringify(meta, null, 2));
-  fs7.renameSync(tmp, file);
-  if (TERMINAL.includes(meta.state)) {
-    try {
-      onFinished?.(meta);
-    } catch {
-    }
-  }
-}
-function readMeta(id) {
-  const file = runFile(id, "meta.json");
-  if (!fs7.existsSync(file)) {
-    const kept = archive?.meta(id);
-    if (kept) return upgrade(kept);
-  }
-  return upgrade(JSON.parse(fs7.readFileSync(file, "utf8")));
-}
-function upgrade(raw) {
-  if (!raw.worker) raw.worker = raw.model ? { backend: "opencode", model: raw.model } : { backend: "opencode" };
-  if (!Array.isArray(raw.fallback)) {
-    raw.fallback = (raw.fallbackModels ?? []).map((m) => ({ backend: "opencode", model: m }));
-  }
-  raw.warnings ??= [];
-  raw.files ??= [];
-  raw.link ??= [];
-  return raw;
-}
-function listRunIds() {
-  if (!fs7.existsSync(runsDir())) return [];
-  return fs7.readdirSync(runsDir()).filter((d) => fs7.existsSync(runFile(d, "meta.json"))).sort();
-}
-function resolveRun(ref) {
-  const ids = listRunIds();
-  if (!ref || ref === "latest" || ref === "last") {
-    if (!ids.length) throw new UserError("no runs yet");
-    return ids[ids.length - 1];
-  }
-  if (ids.includes(ref)) return ref;
-  const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
-  if (hits.length === 1) return hits[0];
-  if (!hits.length) {
-    const kept = archive?.id(ref);
-    if (kept) return kept;
-  }
-  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(", ")}` : ids.length ? `unknown run "${ref}"` : "no runs yet");
-}
-function isAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-}
-function freshMeta(id) {
-  const meta = readMeta(id);
-  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
-    const latest = readMeta(id);
-    if (TERMINAL.includes(latest.state)) return latest;
-    latest.state = "failed";
-    latest.error ??= "worker process exited unexpectedly";
-    latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
-    writeMeta(latest);
-    return latest;
-  }
-  return meta;
 }
 
 // src/cli/args.ts
