@@ -1737,16 +1737,16 @@ function repoRoot(dir) {
   const r = git(dir, ["rev-parse", "--show-toplevel"]);
   return r.code === 0 ? path8.resolve(r.stdout.trim()) : void 0;
 }
-function snapshotTree(root, exclude = [], drop = []) {
+function snapshotTree(root, exclude = [], drop2 = []) {
   const tmp = path8.join(os8.tmpdir(), `pitroom-index-${process.pid}-${crypto2.randomBytes(4).toString("hex")}`);
   const real = path8.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
   const env = { ...process.env, GIT_INDEX_FILE: tmp };
   try {
     if (fs9.existsSync(real)) fs9.copyFileSync(real, tmp);
     else must(root, ["read-tree", "--empty"], env);
-    must(root, ["add", "-A", "--", ":/", ...exclude.map((p) => `:(top,exclude)${p}`), ...drop.map((p) => `:(top,literal,exclude)${p}`)], env);
-    if (drop.length) {
-      const r = spawnSync5("git", ["update-index", "--force-remove", "-z", "--stdin"], { cwd: root, env, input: `${drop.join("\0")}\0`, encoding: "utf8" });
+    must(root, ["add", "-A", "--", ":/", ...exclude.map((p) => `:(top,exclude)${p}`), ...drop2.map((p) => `:(top,literal,exclude)${p}`)], env);
+    if (drop2.length) {
+      const r = spawnSync5("git", ["update-index", "--force-remove", "-z", "--stdin"], { cwd: root, env, input: `${drop2.join("\0")}\0`, encoding: "utf8" });
       if (r.status !== 0) throw new Error(`git update-index failed: ${r.stderr.trim()}`);
     }
     return must(root, ["write-tree"], env).trim();
@@ -2056,7 +2056,7 @@ async function spawnWorker(inv, opts) {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   let killer;
-  const timer = setTimeout(() => {
+  const timer2 = setTimeout(() => {
     res.timedOut = true;
     child.kill("SIGTERM");
     killer = setTimeout(() => child.kill("SIGKILL"), 1e4);
@@ -2068,7 +2068,7 @@ async function spawnWorker(inv, opts) {
     });
     child.on("close", (c) => resolve2(c));
   });
-  clearTimeout(timer);
+  clearTimeout(timer2);
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
@@ -2241,8 +2241,8 @@ function wantSnapshot(readIn2, root, dir) {
   return readIn2 === "snapshot" || secrets.length ? { secrets } : void 0;
 }
 function readSnapshot(root) {
-  const drop = findSecretFilesInTree(root, root);
-  const tree = snapshotTree(root, [], drop);
+  const drop2 = findSecretFilesInTree(root, root);
+  const tree = snapshotTree(root, [], drop2);
   const dest = path12.join(snapshotsDir(), tree);
   if (fs14.existsSync(path12.join(dest, ".git"))) {
     touch(dest);
@@ -4256,12 +4256,12 @@ function pit(args, timeoutMs = 60 * 6e4, signal) {
     child.stdout.on("data", (d) => out += d);
     child.stderr.on("data", (d) => err += d);
     const stop = () => child.kill("SIGTERM");
-    const timer = setTimeout(stop, timeoutMs);
+    const timer2 = setTimeout(stop, timeoutMs);
     signal?.addEventListener("abort", stop, { once: true });
     if (signal?.aborted) stop();
     child.on("error", (e) => resolve2({ code: 1, out, err: err || String(e.message) }));
     child.on("close", (code) => {
-      clearTimeout(timer);
+      clearTimeout(timer2);
       signal?.removeEventListener("abort", stop);
       resolve2({ code, out: strip(out).trim(), err: strip(err).trim() });
     });
@@ -4276,7 +4276,7 @@ ${still}`) };
 }
 var plain = async (args, ctx, timeoutMs = 6e4) => asResult(await pit(args, timeoutMs, ctx.signal));
 function trackProgress(ctx, ids) {
-  const tick = () => {
+  const tick2 = () => {
     try {
       const lines = ids().map((id) => freshMeta(id)).filter((m) => isActive(m.state)).map((m) => progress(m).replace(/^pitroom\s+/, ""));
       if (lines.length) ctx.progress(lines.slice(0, 3).join("\n") + (lines.length > 3 ? `
@@ -4284,11 +4284,11 @@ function trackProgress(ctx, ids) {
     } catch {
     }
   };
-  const first = setTimeout(tick, 800);
-  const timer = setInterval(tick, PROGRESS_EVERY_MS);
+  const first = setTimeout(tick2, 800);
+  const timer2 = setInterval(tick2, PROGRESS_EVERY_MS);
   return () => {
     clearTimeout(first);
-    clearInterval(timer);
+    clearInterval(timer2);
   };
 }
 async function waitFor(ids, seconds, ctx, group) {
@@ -4349,6 +4349,7 @@ var RpcError = class extends Error {
 };
 var RUN = /^pitroom:\/\/run\/(\d{8}-\d{6}-[0-9a-f]{4})(\/patch)?$/;
 var LISTED = 30;
+var runOfUri = (uri) => RUN.exec(uri)?.[1];
 var oneLine6 = (text, n) => {
   const flat = text.replace(/\s+/g, " ").trim();
   return flat.length > n ? `${flat.slice(0, n - 1)}\u2026` : flat;
@@ -4679,6 +4680,69 @@ var TOOLS2 = [
   }
 ];
 
+// src/cli/mcp-watch.ts
+var EVERY_MS = 2e3;
+var watched = /* @__PURE__ */ new Set();
+var timer;
+var stateOf = (id) => {
+  try {
+    return freshMeta(id).state;
+  } catch {
+    return void 0;
+  }
+};
+var newestRun = () => {
+  try {
+    return listRunIds().at(-1);
+  } catch {
+    return void 0;
+  }
+};
+function subscribe(session, uri) {
+  if (typeof uri !== "string") throw new RpcError(-32602, '"uri" is required');
+  const id = runOfUri(uri);
+  if (!id) throw new RpcError(-32602, `only runs can be subscribed to (pitroom://run/<id>): ${uri}`);
+  const state = stateOf(id);
+  if (state === void 0) throw new RpcError(-32002, `unknown resource: ${uri}`);
+  session.subscriptions.set(uri, state);
+}
+function unsubscribe(session, uri) {
+  if (typeof uri !== "string") throw new RpcError(-32602, '"uri" is required');
+  session.subscriptions.delete(uri);
+}
+function tick() {
+  const newest = newestRun();
+  for (const s of watched) {
+    if (!s.push) continue;
+    if (newest !== s.newestRun) {
+      s.newestRun = newest;
+      s.push({ jsonrpc: "2.0", method: "notifications/resources/list_changed" });
+    }
+    for (const [uri, last] of s.subscriptions) {
+      const now = stateOf(runOfUri(uri));
+      if (now === void 0 || now === last) continue;
+      s.subscriptions.set(uri, now);
+      s.push({ jsonrpc: "2.0", method: "notifications/resources/updated", params: { uri } });
+    }
+  }
+}
+function watch2(session) {
+  session.newestRun = newestRun();
+  watched.add(session);
+  if (!timer) {
+    timer = setInterval(tick, EVERY_MS);
+    timer.unref();
+  }
+}
+function unwatch(session) {
+  watched.delete(session);
+  session.subscriptions.clear();
+  if (!watched.size && timer) {
+    clearInterval(timer);
+    timer = void 0;
+  }
+}
+
 // src/cli/mcp.ts
 var PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 var INSTRUCTIONS = [
@@ -4689,9 +4753,15 @@ var INSTRUCTIONS = [
 ].join(" ");
 var log = (msg) => void process.stderr.write(`pitroom mcp: ${msg}
 `);
-var newSession = () => ({ inflight: /* @__PURE__ */ new Map() });
+function newSession() {
+  const session = { inflight: /* @__PURE__ */ new Map(), subscriptions: /* @__PURE__ */ new Map() };
+  watch2(session);
+  return session;
+}
 function endSession(session) {
   for (const { abort } of session.inflight.values()) abort.abort("closed");
+  unwatch(session);
+  session.push = void 0;
 }
 function progressToken(params) {
   const meta = params && typeof params === "object" ? params._meta : void 0;
@@ -4709,13 +4779,13 @@ function contextFor(params, abort, notify) {
     }
   };
 }
-async function dispatch(method, params, ctx) {
+async function dispatch(method, params, ctx, session) {
   switch (method) {
     case "initialize": {
       const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
       return {
         protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
-        capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, resources: { listChanged: true, subscribe: true }, prompts: { listChanged: false } },
         serverInfo: { name: "pitroom", title: "Pitroom", version: VERSION2 },
         instructions: INSTRUCTIONS
       };
@@ -4744,6 +4814,12 @@ async function dispatch(method, params, ctx) {
     case "resources/read":
       if (typeof params.uri !== "string") throw new RpcError(-32602, '"uri" is required');
       return readResource(params.uri, ctx);
+    case "resources/subscribe":
+      subscribe(session, params.uri);
+      return {};
+    case "resources/unsubscribe":
+      unsubscribe(session, params.uri);
+      return {};
     case "prompts/list":
       return listPrompts();
     case "prompts/get":
@@ -4771,7 +4847,7 @@ async function handle(session, msg, notify) {
   const entry = { abort, ctx: contextFor(params, abort, notify) };
   if (isRequest) session.inflight.set(m.id, entry);
   try {
-    const result = await dispatch(m.method, params, entry.ctx);
+    const result = await dispatch(m.method, params, entry.ctx, session);
     if (abort.signal.aborted && abort.signal.reason === "cancelled") return void 0;
     return isRequest ? { jsonrpc: "2.0", id: m.id, result } : void 0;
   } catch (e) {
@@ -4796,6 +4872,7 @@ async function serveMcp() {
   const send = (msg) => void process.stdout.write(`${JSON.stringify(msg)}
 `);
   const session = newSession();
+  session.push = send;
   const rl = readline.createInterface({ input: process.stdin });
   const pending = /* @__PURE__ */ new Set();
   const handleLine = async (line) => {
@@ -4816,6 +4893,7 @@ async function serveMcp() {
     void p.finally(() => pending.delete(p));
   });
   await new Promise((resolve2) => rl.once("close", resolve2));
+  unwatch(session);
   await Promise.allSettled([...pending]);
   return 0;
 }
@@ -5165,15 +5243,15 @@ function startDash(opts) {
       const port = server.address().port;
       let done;
       const closed = new Promise((r) => done = r);
-      let timer;
+      let timer2;
       const close = () => {
-        if (timer) clearInterval(timer);
+        if (timer2) clearInterval(timer2);
         server.closeAllConnections?.();
         return new Promise((r) => server.close(() => (done(), r())));
       };
       if (opts.idleMs && opts.idleMs > 0) {
-        timer = setInterval(() => Date.now() - lastRequest > opts.idleMs && void close(), Math.min(6e4, opts.idleMs));
-        timer.unref();
+        timer2 = setInterval(() => Date.now() - lastRequest > opts.idleMs && void close(), Math.min(6e4, opts.idleMs));
+        timer2.unref();
       }
       resolve2({ port, url: `http://127.0.0.1:${port}/`, closed, close });
     });
@@ -5309,6 +5387,14 @@ var sameSecret = (given, token) => {
   const b = crypto7.createHash("sha256").update(token).digest();
   return crypto7.timingSafeEqual(a, b);
 };
+function drop(sessions, id) {
+  const k = sessions.get(id);
+  if (!k) return;
+  k.closeStream?.();
+  endSession(k.session);
+  sessions.delete(id);
+}
+var PING_MS = 25e3;
 function reply(res, status, body, headers = {}) {
   if (res.headersSent) return void res.end();
   const text = body === void 0 ? "" : JSON.stringify(body);
@@ -5334,9 +5420,9 @@ var wantsStream = (parsed) => {
 };
 function evictIdle(sessions) {
   let oldest;
-  for (const entry of sessions) if (!entry[1].session.inflight.size && (!oldest || entry[1].lastSeen < oldest[1].lastSeen)) oldest = entry;
+  for (const entry of sessions) if (!entry[1].session.inflight.size && !entry[1].closeStream && (!oldest || entry[1].lastSeen < oldest[1].lastSeen)) oldest = entry;
   if (!oldest) return false;
-  sessions.delete(oldest[0]);
+  drop(sessions, oldest[0]);
   return true;
 }
 function makeHandler(token, sessions) {
@@ -5350,13 +5436,37 @@ function makeHandler(token, sessions) {
     if (!auth || !sameSecret(auth, token)) return reply(res, 401, failure5(-32001, "a bearer token is needed"), { "WWW-Authenticate": "Bearer" });
     const sid = typeof req.headers["mcp-session-id"] === "string" ? req.headers["mcp-session-id"] : void 0;
     if (req.method === "DELETE") {
-      const kept2 = sid ? sessions.get(sid) : void 0;
-      if (!kept2) return reply(res, 404, failure5(-32600, "no such session"));
-      endSession(kept2.session);
-      sessions.delete(sid);
+      if (!sid || !sessions.has(sid)) return reply(res, 404, failure5(-32600, "no such session"));
+      drop(sessions, sid);
       return reply(res, 204);
     }
-    if (req.method !== "POST") return reply(res, 405, failure5(-32600, "POST requests only"), { Allow: "POST, DELETE" });
+    if (req.method === "GET") {
+      if (!/text\/event-stream/.test(req.headers.accept ?? "")) return reply(res, 406, failure5(-32600, "a GET opens the event stream: send Accept: text/event-stream"));
+      if (!sid) return reply(res, 400, failure5(-32600, "Mcp-Session-Id is missing: initialize first"));
+      const kept2 = sessions.get(sid);
+      if (!kept2) return reply(res, 404, failure5(-32600, "no such session: initialize again"));
+      kept2.closeStream?.();
+      res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
+      res.write(": open\n\n");
+      const push = (msg) => {
+        if (!res.writableEnded && !res.destroyed) res.write(`event: message
+data: ${JSON.stringify(msg)}
+
+`);
+      };
+      const ping2 = setInterval(() => !res.writableEnded && res.write(": ping\n\n"), PING_MS);
+      const close = () => {
+        clearInterval(ping2);
+        if (kept2.session.push === push) kept2.session.push = void 0;
+        if (kept2.closeStream === close) kept2.closeStream = void 0;
+        if (!res.writableEnded) res.end();
+      };
+      kept2.session.push = push;
+      kept2.closeStream = close;
+      res.on("close", close);
+      return;
+    }
+    if (req.method !== "POST") return reply(res, 405, failure5(-32600, "GET, POST or DELETE"), { Allow: "GET, POST, DELETE" });
     const body = await readBody(req);
     if (body === "too-big") return reply(res, 413, failure5(-32600, `a request body is at most ${MAX_BODY} bytes`));
     let parsed;
@@ -5369,11 +5479,7 @@ function makeHandler(token, sessions) {
     let kept;
     const single = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : void 0;
     if (single?.method === "initialize") {
-      const old = sid ? sessions.get(sid) : void 0;
-      if (old) {
-        endSession(old.session);
-        sessions.delete(sid);
-      }
+      if (sid) drop(sessions, sid);
       if (sessions.size >= MAX_SESSIONS && !evictIdle(sessions)) return reply(res, 503, failure5(-32e3, "too many sessions with requests in flight"));
       const id = crypto7.randomUUID();
       kept = { session: newSession(), lastSeen: Date.now() };
@@ -5416,7 +5522,7 @@ async function serveMcpHttp(opts) {
     });
   });
   const sweep = setInterval(() => {
-    for (const [id, k] of sessions) if (Date.now() - k.lastSeen > IDLE_MS && !k.session.inflight.size) sessions.delete(id);
+    for (const [id, k] of sessions) if (Date.now() - k.lastSeen > IDLE_MS && !k.session.inflight.size && !k.closeStream) drop(sessions, id);
   }, 6e4);
   sweep.unref();
   const port = await new Promise((resolve2, reject) => {
@@ -5436,7 +5542,7 @@ async function serveMcpHttp(opts) {
     process.once("SIGTERM", stop);
   });
   clearInterval(sweep);
-  for (const k of sessions.values()) endSession(k.session);
+  for (const id of [...sessions.keys()]) drop(sessions, id);
   server.closeAllConnections();
   await new Promise((resolve2) => server.close(() => resolve2()));
   return 0;

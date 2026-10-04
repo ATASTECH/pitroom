@@ -57,7 +57,7 @@ test('mcp: the handshake negotiates a version, tools are listed with schemas and
     assert.equal(init.result.protocolVersion, '2025-06-18');
     assert.equal(init.result.serverInfo.name, 'pitroom');
     assert.match(init.result.instructions, /pitroom_run/);
-    assert.deepEqual(init.result.capabilities, { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } });
+    assert.deepEqual(init.result.capabilities, { tools: { listChanged: false }, resources: { listChanged: true, subscribe: true }, prompts: { listChanged: false } });
     assert.equal((await c.rpc('initialize', { protocolVersion: '2024-11-05' })).result.protocolVersion, '2024-11-05', 'an older version it knows');
     assert.equal((await c.rpc('initialize', { protocolVersion: '1999-01-01' })).result.protocolVersion, '2025-06-18', 'an unknown one gets the latest');
 
@@ -428,6 +428,42 @@ test('mcp: pitroom_apply with a group applies the patches in order and stops at 
     assert.match(fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8'), /from a worker/);
     assert.equal((await c.call('pitroom_apply', { group: 'edits', run: 'last' })).isError, true, 'run and group together are refused');
     assert.equal((await c.call('pitroom_stop', { group: 'edits', run: 'last' })).isError, true);
+  } finally {
+    await c.close();
+  }
+});
+
+const until = async (f, ms = 30_000) => {
+  for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 200))) if (f()) return true;
+  return false;
+};
+
+test('mcp: a new run is announced, a subscribed run tells when it ends, and unsubscribing stops that', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'sleep:4;answer:SUMMARY: done' });
+  const notes = (method) => c.lines.map((l) => JSON.parse(l)).filter((m) => m.method === method);
+  try {
+    await handshake(c);
+    const first = await c.call('pitroom_run', { task: 'slow', waitSeconds: 1 });
+    const id = RUN_ID.exec(first.text)[0];
+    assert.ok(await until(() => notes('notifications/resources/list_changed').length >= 1), 'the new run was announced');
+    const uri = `pitroom://run/${id}`;
+    assert.deepEqual((await c.rpc('resources/subscribe', { uri })).result, {});
+    assert.ok(await until(() => notes('notifications/resources/updated').some((n) => n.params.uri === uri)), 'told when it changed');
+    assert.ok(await until(() => /done/.test(s.run(['status', id]).stdout), 10_000));
+
+    // a second run, subscribed and then unsubscribed: nothing more about it
+    const second = RUN_ID.exec((await c.call('pitroom_run', { task: 'slow two', waitSeconds: 1 })).text)[0];
+    const uri2 = `pitroom://run/${second}/patch`;
+    await c.rpc('resources/subscribe', { uri: uri2 });
+    await c.rpc('resources/unsubscribe', { uri: uri2 });
+    await until(() => /done/.test(s.run(['status', second]).stdout), 20_000);
+    await new Promise((r) => setTimeout(r, 2500));
+    assert.ok(!notes('notifications/resources/updated').some((n) => n.params.uri === uri2), 'not after unsubscribing');
+
+    assert.equal((await c.rpc('resources/subscribe', { uri: 'file:///etc/passwd' })).error.code, -32602);
+    assert.equal((await c.rpc('resources/subscribe', { uri: 'pitroom://run/19990101-000000-0000' })).error.code, -32002);
+    assert.equal((await c.rpc('resources/subscribe', {})).error.code, -32602);
   } finally {
     await c.close();
   }

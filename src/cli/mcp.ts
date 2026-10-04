@@ -14,6 +14,7 @@ import { VERSION } from '../core/run.js';
 import { RpcError, getPrompt, listPrompts, listResources, readResource, resourceTemplates } from './mcp-extras.js';
 import { type Ctx, type Json, ToolError } from './mcp-support.js';
 import { TOOLS } from './mcp-tools.js';
+import { subscribe, unsubscribe, unwatch, watch } from './mcp-watch.js';
 
 const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
@@ -38,12 +39,25 @@ interface Inflight {
 /** One client's connection: the requests it has in flight (a cancel names a request id, which is only unique per client). */
 export interface Session {
   inflight: Map<string | number, Inflight>;
+  /** Runs the client subscribed to, with the state it last heard of (see mcp-watch.ts). */
+  subscriptions: Map<string, string>;
+  /** The newest run the client heard of. */
+  newestRun?: string;
+  /** Where messages the client did not ask for go: stdout, or an HTTP client's open event stream. */
+  push?: Notify;
 }
-export const newSession = (): Session => ({ inflight: new Map() });
+/** A new session, told about runs from now on. */
+export function newSession(): Session {
+  const session: Session = { inflight: new Map(), subscriptions: new Map() };
+  watch(session);
+  return session;
+}
 
 /** Ends the waiting of what a session has in flight (its client ended it, or the server stops); the runs go on. */
 export function endSession(session: Session): void {
   for (const { abort } of session.inflight.values()) abort.abort('closed');
+  unwatch(session);
+  session.push = undefined;
 }
 
 /** Progress for one request, only when the client sent a progress token with it. */
@@ -65,13 +79,13 @@ function contextFor(params: Json, abort: AbortController, notify: Notify): Ctx {
   };
 }
 
-async function dispatch(method: string, params: Json, ctx: Ctx): Promise<Json> {
+async function dispatch(method: string, params: Json, ctx: Ctx, session: Session): Promise<Json> {
   switch (method) {
     case 'initialize': {
       const asked = typeof params.protocolVersion === 'string' ? params.protocolVersion : '';
       return {
         protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
-        capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
+        capabilities: { tools: { listChanged: false }, resources: { listChanged: true, subscribe: true }, prompts: { listChanged: false } },
         serverInfo: { name: 'pitroom', title: 'Pitroom', version: VERSION },
         instructions: INSTRUCTIONS,
       };
@@ -100,6 +114,12 @@ async function dispatch(method: string, params: Json, ctx: Ctx): Promise<Json> {
     case 'resources/read':
       if (typeof params.uri !== 'string') throw new RpcError(-32602, '"uri" is required');
       return readResource(params.uri, ctx);
+    case 'resources/subscribe':
+      subscribe(session, params.uri);
+      return {};
+    case 'resources/unsubscribe':
+      unsubscribe(session, params.uri);
+      return {};
     case 'prompts/list':
       return listPrompts();
     case 'prompts/get':
@@ -132,7 +152,7 @@ async function handle(session: Session, msg: unknown, notify: Notify): Promise<J
   const entry: Inflight = { abort, ctx: contextFor(params, abort, notify) };
   if (isRequest) session.inflight.set(m.id as string | number, entry);
   try {
-    const result = await dispatch(m.method, params, entry.ctx);
+    const result = await dispatch(m.method, params, entry.ctx, session);
     if (abort.signal.aborted && abort.signal.reason === 'cancelled') return undefined;
     return isRequest ? { jsonrpc: '2.0', id: m.id, result } : undefined;
   } catch (e) {
@@ -161,6 +181,7 @@ export async function serveMcp(): Promise<number> {
   process.stdout.on('error', () => {});
   const send: Notify = (msg) => void process.stdout.write(`${JSON.stringify(msg)}\n`);
   const session = newSession();
+  session.push = send;
   const rl = readline.createInterface({ input: process.stdin });
   const pending = new Set<Promise<void>>();
   const handleLine = async (line: string): Promise<void> => {
@@ -181,6 +202,7 @@ export async function serveMcp(): Promise<number> {
     void p.finally(() => pending.delete(p));
   });
   await new Promise<void>((resolve) => rl.once('close', resolve));
+  unwatch(session);
   // a client that sent its requests and closed the pipe (`printf … | pitroom mcp`) still gets the answers
   await Promise.allSettled([...pending]);
   return 0;
