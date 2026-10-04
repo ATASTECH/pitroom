@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.14.0
+
+### MCP server
+- `pitroom mcp` serves Pitroom as a [Model Context Protocol](https://modelcontextprotocol.io) server on stdio, so any agent that speaks MCP (Cursor, Claude Desktop, Claude Code, Codex, Gemini CLI, …) can use it as tools instead of shell commands and skills: `pitroom_run` (read, isolate or write), `pitroom_wait`, `pitroom_status`, `pitroom_show`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard` and `pitroom_stop`, each with a JSON schema and hints (`apply` is marked destructive). Set it up with `claude mcp add pitroom -- pitroom mcp`, `codex mcp add pitroom -- pitroom mcp`, `gemini mcp add pitroom pitroom mcp`, or an `mcpServers` entry for Cursor and Claude Desktop (see the README).
+- Each tool runs the matching `pitroom` command, so every rule of the CLI applies unchanged (permission profiles, git guard, isolation, read snapshots, cooldowns, audits) and the tools cannot drift from the CLI. A run is waited for up to `waitSeconds` (default 50, at most 540), then comes back as "still running" with its id for `pitroom_wait`. No new dependency: a small JSON-RPC implementation (protocol versions 2025-06-18, 2025-03-26 and 2024-11-05, batches, the standard error codes); only JSON reaches stdout.
+- Tested against the protocol with a real server process, and with a real client: Gemini CLI connected, called `pitroom_run` for a question, got the worker's answer with its references verified and collected an audit. Limits: stdio only, no MCP resources, prompts or progress notifications yet (the agent polls with `pitroom_wait`).
+
+### Fixes
+- `pitroom stop` on a run whose process is still starting: the process has no signal handler yet and died on the signal, and the run showed "failed: worker process exited unexpectedly". `stop` now says first that a stop was asked for, and such a run is "stopped". This was the cause of a flaky test (`stop -g …`).
+
 ## 0.13.0
 
 ### Read snapshots

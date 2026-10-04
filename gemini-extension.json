@@ -1,6 +1,6 @@
 {
   "name": "pitroom",
-  "version": "0.13.0",
+  "version": "0.14.0",
   "description": "A free pit crew for your expensive coding agent: hand reading, fixes, tests and reviews to cheap worker agents and get back the answer, the exact diff and a receipt. Fourteen skills adapt a full development workflow. Needs the pitroom command (npm i -g pitroom).",
   "contextFileName": "gemini-context.md"
 }
