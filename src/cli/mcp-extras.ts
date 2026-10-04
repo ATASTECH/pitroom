@@ -97,7 +97,7 @@ const PROMPTS: Prompt[] = [
     description: 'Independent tasks run in parallel as one group of workers.',
     arguments: [{ name: 'tasks', description: 'The tasks, one per line.', required: true }],
     text: (a) =>
-      `Run these independent tasks in parallel with pitroom_crew (one worker each):\n\n${a.tasks}\n\n` +
+      `Run these independent tasks in parallel: call pitroom_run with "tasks" (one worker each):\n\n${a.tasks}\n\n` +
       'Make each task self-contained. Use mode "isolate" if they change files, then read every patch (pitroom_show, patch: true) and apply them with pitroom_apply (group). Only split work that does not depend on each other.',
   },
 ];

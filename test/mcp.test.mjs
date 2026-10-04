@@ -65,20 +65,19 @@ test('mcp: the handshake negotiates a version, tools are listed with schemas and
     assert.deepEqual((await c.rpc('ping', {})).result, {});
 
     const { tools } = (await c.rpc('tools/list', {})).result;
-    assert.deepEqual(tools.map((t) => t.name), [
-      'pitroom_run', 'pitroom_crew', 'pitroom_wait', 'pitroom_status', 'pitroom_list', 'pitroom_show', 'pitroom_history', 'pitroom_stats', 'pitroom_savings', 'pitroom_models',
-      'pitroom_cooldown', 'pitroom_doctor', 'pitroom_review', 'pitroom_audit', 'pitroom_apply', 'pitroom_discard', 'pitroom_revert', 'pitroom_stop',
-    ]);
+    assert.deepEqual(tools.map((t) => t.name), ['pitroom_run', 'pitroom_wait', 'pitroom_show', 'pitroom_info', 'pitroom_review', 'pitroom_audit', 'pitroom_apply', 'pitroom_discard', 'pitroom_revert', 'pitroom_stop']);
+    assert.ok(JSON.stringify(tools).length < 8000, `the definitions stay small (they sit in the client's context): ${JSON.stringify(tools).length} characters`);
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name);
       assert.ok(t.description.length > 20 && t.title, t.name);
       assert.equal(typeof t.annotations.readOnlyHint, 'boolean', t.name);
     }
     const run = tools.find((t) => t.name === 'pitroom_run');
-    assert.deepEqual(run.inputSchema.required, ['task']);
+    assert.equal(run.inputSchema.required, undefined, 'task or tasks');
+    assert.equal(run.inputSchema.properties.tasks.type, 'array');
     assert.deepEqual(run.inputSchema.properties.mode.enum, ['read', 'isolate', 'write']);
     assert.equal(tools.find((t) => t.name === 'pitroom_apply').annotations.destructiveHint, true);
-    assert.equal(tools.find((t) => t.name === 'pitroom_status').annotations.readOnlyHint, true);
+    assert.equal(tools.find((t) => t.name === 'pitroom_info').annotations.readOnlyHint, true);
 
     assert.equal((await c.rpc('no/such/method', {})).error.code, -32601);
     assert.equal((await c.rpc('tools/call', { name: 'nope', arguments: {} })).error.code, -32602);
@@ -112,7 +111,7 @@ test('mcp: pitroom_run reads, answers with a receipt, and its run is the CLI\'s 
     assert.match(r.text, /receipt: worker processed/);
     assert.doesNotMatch(r.text, /\x1b/, 'no colour codes');
     const id = RUN_ID.exec(r.text)[0];
-    assert.match((await c.call('pitroom_status', { run: id })).text, /done/);
+    assert.match((await c.call('pitroom_show', {})).text, /done/, 'the latest run by default');
     assert.match((await c.call('pitroom_show', { run: id })).text, /SUMMARY: app\.txt holds line1/);
     assert.match(s.run(['status', id]).stdout, /done/, 'the CLI sees the same run');
   } finally {
@@ -131,7 +130,8 @@ test('mcp: a task that starts with a dash is a task, and bad arguments are tool 
     const run = s.calls().filter((x) => x.argv[0] === 'run').at(-1);
     assert.match(run.argv.at(-1), /--help me with this/, 'the worker got the task text');
     for (const [args, message] of [
-      [{}, /"task" is required/],
+      [{}, /give "task" \(or "tasks"/],
+      [{ task: 'x', tasks: ['y'] }, /not both/],
       [{ task: 'x', mode: 'banana' }, /"mode" must be one of: read, isolate, write/],
       [{ task: 'x', files: 'a.txt' }, /"files" must be a list of strings/],
       [{ task: 'x', waitSeconds: 0 }, /"waitSeconds" must be a number/],
@@ -322,38 +322,46 @@ test('mcp: prompts say how to use Pitroom, with their arguments checked', async 
   }
 });
 
-test('mcp: pitroom_crew runs tasks in parallel as one group and returns every report', async () => {
+test('mcp: pitroom_run with tasks runs them in parallel as one group and returns every report', async () => {
   const s = sandbox();
   const c = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: done here' });
   try {
     await handshake(c);
-    const r = await c.call('pitroom_crew', { tasks: ['first job', 'second job'], group: 'pair', waitSeconds: 90 });
+    const r = await c.call('pitroom_run', { tasks: ['first job', 'second job'], group: 'pair', waitSeconds: 90 });
     assert.equal(r.isError, false, r.text);
     assert.equal(r.text.match(/pitroom ✔ done/g).length, 2, r.text);
     assert.equal(s.run(['ls', '-g', 'pair']).stdout.match(/\d{8}-\d{6}-[0-9a-f]{4}/g).length, 2, 'both runs are in the group');
-    assert.equal((await c.call('pitroom_crew', { tasks: [] })).isError, true);
-    assert.equal((await c.call('pitroom_crew', { tasks: ['x'], mode: 'write' })).isError, true, 'parallel workers never write in place');
+    assert.equal((await c.call('pitroom_run', { tasks: [] })).isError, true);
+    assert.match((await c.call('pitroom_run', { tasks: ['x'], continue: 'last' })).text, /follows up one run/);
+    assert.equal((await c.call('pitroom_run', { tasks: ['x'], mode: 'write' })).isError, true, 'parallel workers never write in place');
   } finally {
     await c.close();
   }
 });
 
-test('mcp: the read-only tools show what the CLI shows, a follow-up continues a run, and a written change is reverted', async () => {
+test('mcp: pitroom_info shows what the CLI shows, a follow-up continues a run, and a written change is reverted', async () => {
   const s = sandbox();
   const c = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: app.txt holds line1' });
   try {
     await handshake(c);
     const id = RUN_ID.exec((await c.call('pitroom_run', { task: 'where is app.txt?' })).text)[0];
-    assert.match((await c.call('pitroom_list', {})).text, new RegExp(id));
-    assert.equal((await c.call('pitroom_list', { running: true })).text, 'nothing is running');
-    assert.match((await c.call('pitroom_history', { text: 'app.txt' })).text, new RegExp(id));
-    assert.match((await c.call('pitroom_stats', {})).text, /1 runs/);
-    assert.equal((await c.call('pitroom_stats', { since: 'last week' })).isError, true);
-    assert.match((await c.call('pitroom_history', { limit: 0 })).text, /"limit" must be/);
-    assert.equal((await c.call('pitroom_savings', {})).isError, false);
-    assert.equal((await c.call('pitroom_models', {})).isError, false);
-    assert.match((await c.call('pitroom_cooldown', {})).text, /no model is cooling down/);
-    assert.ok((await c.call('pitroom_doctor', {})).text.length > 0);
+    const info = (args) => c.call('pitroom_info', args);
+    assert.match((await info({ topic: 'runs' })).text, new RegExp(id));
+    assert.equal((await info({ topic: 'runs', running: true })).text, 'nothing is running');
+    assert.match((await info({ topic: 'history', text: 'app.txt' })).text, new RegExp(id));
+    assert.match((await info({ topic: 'stats' })).text, /1 runs/);
+    assert.equal((await info({ topic: 'stats', since: 'last week' })).isError, true);
+    assert.match((await info({ topic: 'history', limit: 0 })).text, /"limit" must be/);
+    assert.equal((await info({ topic: 'savings', perModel: true })).isError, false);
+    assert.equal((await info({ topic: 'models' })).isError, false);
+    assert.match((await info({ topic: 'cooldown' })).text, /no model is cooling down/);
+    assert.match((await info({ topic: 'config' })).text, /worker/);
+    assert.ok((await info({ topic: 'doctor' })).text.length > 0);
+    assert.match((await info({})).text, /"topic" is required/);
+    assert.match((await info({ topic: 'weather' })).text, /"topic" must be one of/);
+    assert.match((await info({ topic: 'stats', text: 'x' })).text, /"text" does not go with topic "stats" \(it takes since\)/);
+    assert.match((await c.call('pitroom_stop', { cooldowns: true })).text, /no cooldowns/);
+    assert.equal((await c.call('pitroom_stop', { cooldowns: true, run: 'last' })).isError, true);
 
     const follow = await c.call('pitroom_run', { task: 'and the second line?', continue: id });
     assert.equal(follow.isError, false, follow.text);
@@ -404,7 +412,7 @@ test('mcp: pitroom_apply with a group applies the patches in order and stops at 
   const c = connect(s, { MOCK_ACTIONS: 'append:app.txt:from a worker;answer:SUMMARY: extended' });
   try {
     await handshake(c);
-    const r = await c.call('pitroom_crew', { tasks: ['one', 'two'], mode: 'isolate', group: 'edits', waitSeconds: 90 });
+    const r = await c.call('pitroom_run', { tasks: ['one', 'two'], mode: 'isolate', group: 'edits', waitSeconds: 90 });
     assert.equal(r.isError, false, r.text);
     assert.equal(r.text.match(/pitroom ✔ done · isolate/g).length, 2, r.text);
     const applied = await c.call('pitroom_apply', { group: 'edits' });
