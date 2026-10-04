@@ -352,8 +352,15 @@ test('mcp: pitroom_info shows what the CLI shows, a follow-up continues a run, a
     assert.match((await info({ topic: 'stats' })).text, /1 runs/);
     assert.equal((await info({ topic: 'stats', since: 'last week' })).isError, true);
     assert.match((await info({ topic: 'history', limit: 0 })).text, /"limit" must be/);
-    assert.equal((await info({ topic: 'savings', perModel: true })).isError, false);
+    assert.equal((await info({ topic: 'savings' })).isError, false);
+    assert.equal((await info({ topic: 'savings', since: '30d', perModel: true })).isError, false);
     assert.equal((await info({ topic: 'models' })).isError, false);
+    assert.equal((await info({ topic: 'models', worker: 'opencode', all: true })).isError, false);
+    assert.match((await info({ topic: 'history', state: 'done', since: '7d' })).text, new RegExp(id));
+    assert.match((await info({ topic: 'history', state: 'failed' })).text, /no matching runs/);
+    assert.match((await info({ topic: 'runs', group: 'nope' })).text, /no runs in group "nope"/);
+    assert.match((await info({ topic: '' })).text, /"topic" is required/);
+    assert.match((await info({ topic: 'doctor', since: '7d', all: true })).text, /"since", "all" do not go with topic "doctor" \(it takes no options\)/);
     assert.match((await info({ topic: 'cooldown' })).text, /no model is cooling down/);
     assert.match((await info({ topic: 'config' })).text, /worker/);
     assert.ok((await info({ topic: 'doctor' })).text.length > 0);

@@ -4423,7 +4423,7 @@ function getPrompt(name, given) {
 // src/cli/mcp-tools.ts
 var WORKER_PROPS = {
   worker: { type: "string", description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku". Default: configured.' },
-  model: { type: "string" },
+  model: { type: "string", description: "Model for that worker." },
   tier: { type: "string", description: "cheap, standard or capable (from the config)." },
   effort: { type: "string", description: "low, medium, high, xhigh." },
   dir: { type: "string", description: "Project directory (default: the server's)." },
@@ -4449,12 +4449,12 @@ var TOPICS = {
 function infoArgs(topic, a) {
   const allowed = TOPICS[topic];
   const stray = Object.keys(a).filter((k) => k !== "topic" && a[k] !== void 0 && a[k] !== null && !allowed.includes(k));
-  if (stray.length) throw new ToolError(`${stray.map((k) => `"${k}"`).join(", ")} does not go with topic "${topic}"${allowed.length ? ` (it takes ${allowed.join(", ")})` : ""}`);
+  if (stray.length) throw new ToolError(`${stray.map((k) => `"${k}"`).join(", ")} ${stray.length > 1 ? "do" : "does"} not go with topic "${topic}" (${allowed.length ? `it takes ${allowed.join(", ")}` : "it takes no options"})`);
   const group = str(a, "group");
   const worker = str(a, "worker");
   switch (topic) {
     case "runs":
-      return { args: ["ls", ...bool(a, "running") ? ["--running"] : [], ...group ? ["-g", group] : []] };
+      return { args: group ? ["status", "-g", group] : ["ls", ...bool(a, "running") ? ["--running"] : []] };
     case "history": {
       const limit = a.limit;
       if (limit !== void 0 && (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 200)) throw new ToolError('"limit" must be a whole number from 1 to 200');
@@ -4471,8 +4471,11 @@ function infoArgs(topic, a) {
       return { args: ["models", ...worker ? [worker] : [], ...bool(a, "all") ? ["--all"] : []] };
     case "doctor":
       return { args: ["doctor"], timeoutMs: 12e4 };
-    default:
+    case "cooldown":
+    case "config":
       return { args: [topic] };
+    default:
+      throw new Error(`topic "${topic}" has no command`);
   }
 }
 var TOOLS2 = [
@@ -4484,11 +4487,11 @@ var TOOLS2 = [
       type: "object",
       properties: {
         task: { type: "string", description: "What to do, with the context the worker needs." },
-        tasks: { type: "array", items: { type: "string" }, maxItems: MAX_TASKS, description: "Or several independent tasks, one worker each." },
+        tasks: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_TASKS, description: "Or several independent tasks, one worker each." },
         mode: { type: "string", enum: ["read", "isolate", "write"] },
         continue: { type: "string", description: "A finished run to follow up in the same worker session." },
         inPlace: { type: "boolean", description: "Read: read the directory itself, not a snapshot without secret-looking files." },
-        audit: { type: "boolean", description: "Read: have another worker re-check the answer." },
+        audit: { type: "boolean", description: "Read: have another worker re-check the answer (each one, with tasks)." },
         ...WORKER_PROPS,
         ...WAIT_PROP
       }
@@ -4563,8 +4566,8 @@ var TOOLS2 = [
     },
     annotations: READ_ONLY,
     async call(a, ctx) {
+      if (str(a, "topic") === void 0) throw new ToolError(`"topic" is required: one of ${Object.keys(TOPICS).join(", ")}`);
       const topic = oneOf(a, "topic", Object.keys(TOPICS), "runs");
-      if (a.topic === void 0) throw new ToolError(`"topic" is required: one of ${Object.keys(TOPICS).join(", ")}`);
       const { args, timeoutMs } = infoArgs(topic, a);
       return plain(args, ctx, timeoutMs);
     }
