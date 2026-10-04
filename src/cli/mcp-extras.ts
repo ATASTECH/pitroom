@@ -15,6 +15,9 @@ export class RpcError extends Error {
 const RUN = /^pitroom:\/\/run\/(\d{8}-\d{6}-[0-9a-f]{4})(\/patch)?$/;
 const LISTED = 30;
 
+/** The run id a resource URI names, or undefined. */
+export const runOfUri = (uri: string): string | undefined => RUN.exec(uri)?.[1];
+
 const oneLine = (text: string, n: number) => {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > n ? `${flat.slice(0, n - 1)}…` : flat;

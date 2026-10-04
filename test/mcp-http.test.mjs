@@ -83,7 +83,9 @@ test('mcp http: a bearer token is needed, and only local hosts and origins are s
     });
     assert.equal(status, 403, 'a foreign Host header is refused');
     assert.equal((await fetch(h.url.replace('/mcp', '/other'), { headers: h.base })).status, 404);
-    assert.equal((await fetch(h.url, { method: 'GET', headers: h.base })).status, 405);
+    assert.equal((await fetch(h.url, { method: 'GET', headers: h.base })).status, 400, 'a GET stream needs a session');
+    assert.equal((await fetch(h.url, { method: 'GET', headers: { ...h.base, Accept: 'application/json' } })).status, 406, 'and asks for an event stream');
+    assert.equal((await fetch(h.url, { method: 'PUT', headers: h.base })).status, 405);
     const big = await fetch(h.url, { method: 'POST', headers: h.base, body: 'x'.repeat(4_100_000) });
     assert.equal(big.status, 413, 'the answer reaches the client');
     assert.match((await big.json()).error.message, /at most 4000000 bytes/);
@@ -278,4 +280,72 @@ test('mcp http: stopping the server ends the waiting, not the runs', async () =>
   await pending;
   assert.match(s.run(['status', id]).stdout, /running/, 'the run goes on');
   s.run(['stop', id]);
+});
+
+test('mcp http: a GET opens the session\'s event stream, where a subscribed run tells when it ends', async () => {
+  const s = sandbox();
+  const h = await serve(s, { MOCK_ACTIONS: 'sleep:4;answer:SUMMARY: done' });
+  try {
+    const { sid } = await h.open();
+    const ctl = new AbortController();
+    const stream = await fetch(h.url, { method: 'GET', headers: { ...h.base, Accept: 'text/event-stream', 'Mcp-Session-Id': sid }, signal: ctl.signal });
+    assert.equal(stream.status, 200);
+    assert.match(stream.headers.get('content-type'), /text\/event-stream/);
+    let text = '';
+    const reader = stream.body.getReader();
+    const decoder = new TextDecoder();
+    void (async () => {
+      try {
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += decoder.decode(value);
+        }
+      } catch {
+        // aborted at the end
+      }
+    })();
+    const events = () => text.split('\n\n').map((e) => /^data: (.*)$/m.exec(e)?.[1]).filter(Boolean).map((d) => JSON.parse(d));
+    const r = await h.rpc(sid, 'tools/call', { name: 'pitroom_run', arguments: { task: 'slow', waitSeconds: 1 } });
+    const id = RUN_ID.exec(r.result.content[0].text)[0];
+    const uri = `pitroom://run/${id}`;
+    assert.deepEqual((await h.rpc(sid, 'resources/subscribe', { uri })).result, {});
+    const until = async (f) => {
+      for (let i = 0; i < 150 && !f(); i++) await sleep(200);
+      return f();
+    };
+    assert.ok(await until(() => events().some((m) => m.method === 'notifications/resources/list_changed')), text);
+    assert.ok(await until(() => events().some((m) => m.method === 'notifications/resources/updated' && m.params.uri === uri)), text);
+    ctl.abort();
+  } finally {
+    await h.close();
+  }
+});
+
+test('mcp http: a second GET replaces the first stream, and DELETE closes the open one', async () => {
+  const s = sandbox();
+  const h = await serve(s);
+  try {
+    const { sid } = await h.open();
+    const get = () => fetch(h.url, { method: 'GET', headers: { ...h.base, Accept: '*/*', 'Mcp-Session-Id': sid } });
+    const ended = async (res) => {
+      const reader = res.body.getReader();
+      try {
+        for (;;) if ((await reader.read()).done) return true;
+      } catch {
+        return true;
+      }
+    };
+    const first = await get();
+    assert.equal(first.status, 200, 'Accept */* is fine');
+    const firstEnded = ended(first);
+    const second = await get();
+    assert.equal(second.status, 200);
+    assert.equal(await Promise.race([firstEnded, sleep(5000).then(() => false)]), true, 'the first stream ended');
+    const secondEnded = ended(second);
+    assert.equal((await fetch(h.url, { method: 'DELETE', headers: { ...h.base, 'Mcp-Session-Id': sid } })).status, 204);
+    assert.equal(await Promise.race([secondEnded, sleep(5000).then(() => false)]), true, 'DELETE closed the open stream');
+  } finally {
+    await h.close();
+  }
 });

@@ -3,8 +3,9 @@
 // a bearer token (anyone who has it can run workers as you), and refuses requests whose Host or Origin is not
 // local (a web page in your browser cannot use it). Sessions are kept per client, because a cancel names a request
 // id that is only unique within one client. A call that asks for progress is answered as an event stream (progress
-// events, then the result); every other call is answered with plain JSON. Ending a session (DELETE, or stopping the
-// server) ends the waiting, not the runs: they go on, and pitroom_wait or the CLI collects them.
+// events, then the result); every other call is answered with plain JSON. A GET opens the session's event stream, for
+// what the server says on its own (a subscribed run changed, a run started; see mcp-watch.ts). Ending a session
+// (DELETE, or stopping the server) ends the waiting, not the runs: they go on, and pitroom_wait or the CLI collects them.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import http from 'node:http';
@@ -12,7 +13,7 @@ import path from 'node:path';
 import { LOCAL_HOST } from '../core/dash.js';
 import { UserError } from '../core/errors.js';
 import { home } from '../core/store.js';
-import { type Session, endSession, handlePayload, newSession, parseError, progressToken } from './mcp.js';
+import { type Notify, type Session, endSession, handlePayload, newSession, parseError, progressToken } from './mcp.js';
 import type { Json } from './mcp-support.js';
 
 export const DEFAULT_PORT = 7117;
@@ -73,7 +74,24 @@ const sameSecret = (given: string, token: string): boolean => {
 interface Kept {
   session: Session;
   lastSeen: number;
+  /** Ends the open event stream, if there is one. */
+  closeStream?: () => void;
+  /** When the stream opened or last carried an event: a stream nobody uses is not kept forever. */
+  streamSeen?: number;
 }
+
+const idleSince = (k: Kept) => Math.max(k.lastSeen, k.closeStream ? (k.streamSeen ?? 0) : 0);
+
+/** Forgets a session: its waits end (the runs go on), its event stream closes. */
+function drop(sessions: Map<string, Kept>, id: string): void {
+  const k = sessions.get(id);
+  if (!k) return;
+  k.closeStream?.();
+  endSession(k.session);
+  sessions.delete(id);
+}
+
+const PING_MS = 25_000;
 
 function reply(res: http.ServerResponse, status: number, body?: Json | Json[], headers: Record<string, string> = {}): void {
   if (res.headersSent) return void res.end();
@@ -106,9 +124,9 @@ const wantsStream = (parsed: unknown): boolean => {
 /** Makes room for a new session by dropping the one unused longest, if one has nothing in flight. */
 function evictIdle(sessions: Map<string, Kept>): boolean {
   let oldest: [string, Kept] | undefined;
-  for (const entry of sessions) if (!entry[1].session.inflight.size && (!oldest || entry[1].lastSeen < oldest[1].lastSeen)) oldest = entry;
+  for (const entry of sessions) if (!entry[1].session.inflight.size && (!oldest || idleSince(entry[1]) < idleSince(oldest[1]))) oldest = entry;
   if (!oldest) return false;
-  sessions.delete(oldest[0]);
+  drop(sessions, oldest[0]);
   return true;
 }
 
@@ -124,13 +142,40 @@ function makeHandler(token: string, sessions: Map<string, Kept>) {
 
     const sid = typeof req.headers['mcp-session-id'] === 'string' ? req.headers['mcp-session-id'] : undefined;
     if (req.method === 'DELETE') {
-      const kept = sid ? sessions.get(sid) : undefined;
-      if (!kept) return reply(res, 404, failure(-32600, 'no such session'));
-      endSession(kept.session);
-      sessions.delete(sid!);
+      if (!sid || !sessions.has(sid)) return reply(res, 404, failure(-32600, 'no such session'));
+      drop(sessions, sid);
       return reply(res, 204);
     }
-    if (req.method !== 'POST') return reply(res, 405, failure(-32600, 'POST requests only'), { Allow: 'POST, DELETE' });
+    if (req.method === 'GET') {
+      if (!/text\/event-stream|\*\/\*/.test(req.headers.accept ?? '')) return reply(res, 406, failure(-32600, 'a GET opens the event stream: send Accept: text/event-stream'));
+      if (!sid) return reply(res, 400, failure(-32600, 'Mcp-Session-Id is missing: initialize first'));
+      const kept = sessions.get(sid);
+      if (!kept) return reply(res, 404, failure(-32600, 'no such session: initialize again'));
+      kept.closeStream?.(); // one stream per session: a new one replaces the old
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+      res.write(': open\n\n');
+      const open = () => !res.writableEnded && !res.destroyed;
+      const push: Notify = (msg) => {
+        if (!open()) return;
+        kept.streamSeen = Date.now();
+        res.write(`event: message\ndata: ${JSON.stringify(msg)}\n\n`);
+      };
+      const ping = setInterval(() => open() && res.write(': ping\n\n'), PING_MS);
+      ping.unref();
+      res.on('error', () => {});
+      kept.streamSeen = Date.now();
+      const close = () => {
+        clearInterval(ping);
+        if (kept.session.push === push) kept.session.push = undefined;
+        if (kept.closeStream === close) kept.closeStream = undefined;
+        if (!res.writableEnded) res.end();
+      };
+      kept.session.push = push;
+      kept.closeStream = close;
+      res.on('close', close);
+      return;
+    }
+    if (req.method !== 'POST') return reply(res, 405, failure(-32600, 'GET, POST or DELETE'), { Allow: 'GET, POST, DELETE' });
 
     const body = await readBody(req);
     if (body === 'too-big') return reply(res, 413, failure(-32600, `a request body is at most ${MAX_BODY} bytes`));
@@ -146,12 +191,8 @@ function makeHandler(token: string, sessions: Map<string, Kept>) {
     const single = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Json) : undefined;
     if (single?.method === 'initialize') {
       // a client that starts over and still sends its old session id: that one is done
-      const old = sid ? sessions.get(sid) : undefined;
-      if (old) {
-        endSession(old.session);
-        sessions.delete(sid!);
-      }
-      if (sessions.size >= MAX_SESSIONS && !evictIdle(sessions)) return reply(res, 503, failure(-32000, 'too many sessions with requests in flight'));
+      if (sid) drop(sessions, sid);
+      if (sessions.size >= MAX_SESSIONS && !evictIdle(sessions)) return reply(res, 503, failure(-32000, `${MAX_SESSIONS} sessions are busy with requests: try again when one ends`));
       const id = crypto.randomUUID();
       kept = { session: newSession(), lastSeen: Date.now() };
       sessions.set(id, kept);
@@ -191,7 +232,7 @@ export async function serveMcpHttp(opts: { port: number }): Promise<number> {
     });
   });
   const sweep = setInterval(() => {
-    for (const [id, k] of sessions) if (Date.now() - k.lastSeen > IDLE_MS && !k.session.inflight.size) sessions.delete(id);
+    for (const [id, k] of [...sessions]) if (Date.now() - idleSince(k) > IDLE_MS && !k.session.inflight.size) drop(sessions, id);
   }, 60_000);
   sweep.unref();
 
@@ -214,7 +255,7 @@ export async function serveMcpHttp(opts: { port: number }): Promise<number> {
   });
   clearInterval(sweep);
   // the waits end; the runs go on and can be collected later
-  for (const k of sessions.values()) endSession(k.session);
+  for (const id of [...sessions.keys()]) drop(sessions, id);
   server.closeAllConnections();
   await new Promise<void>((resolve) => server.close(() => resolve()));
   return 0;
