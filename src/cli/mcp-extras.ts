@@ -1,6 +1,6 @@
 // What `pitroom mcp` offers besides tools: the runs as resources (a client can attach a report or a patch to a
 // conversation), and a few prompts (the way to use Pitroom for research, a change, a review, parallel work).
-import { type Json, type Ctx, pit } from './mcp-support.js';
+import { type Json, type Ctx, clip, pit } from './mcp-support.js';
 import { freshMeta, listRunIds } from '../core/store.js';
 
 /** A protocol error with its JSON-RPC code. */
@@ -47,8 +47,9 @@ export async function readResource(uri: string, ctx: Ctx): Promise<{ contents: J
   if (!m) throw new RpcError(-32002, `unknown resource: ${uri}`);
   const patch = m[2] !== undefined;
   const r = await pit(['show', m[1]!, patch ? '--patch' : '--full'], 60_000, ctx.signal);
-  if (r.code !== 0) throw new RpcError(-32002, r.err || r.out || `run ${m[1]} cannot be read`);
-  return { contents: [{ uri, mimeType: patch ? 'text/x-diff' : 'text/plain', text: r.out }] };
+  // exit 3 is the CLI's "no such run"; anything else (a timeout, a failing disk) is an error of ours, not a missing resource
+  if (r.code !== 0) throw new RpcError(r.code === 3 || r.code === 2 ? -32002 : -32603, r.err || r.out || `run ${m[1]} cannot be read`);
+  return { contents: [{ uri, mimeType: patch ? 'text/x-diff' : 'text/plain', text: clip(r.out) }] };
 }
 
 // ── prompts ───────────────────────────────────────────────────────────────────────────────────────

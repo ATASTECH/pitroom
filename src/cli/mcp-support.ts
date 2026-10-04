@@ -31,6 +31,7 @@ export interface Tool {
 export const MAX_OUTPUT = 120_000;
 export const DEFAULT_WAIT = 50;
 export const MAX_WAIT = 540;
+export const MAX_TASKS = 20;
 const PROGRESS_EVERY_MS = 5000;
 
 export class ToolError extends Error {}
@@ -175,10 +176,17 @@ export async function waitFor(ids: string[], seconds: number, ctx: Ctx, group?: 
 /** The client cancelled the request (it did not just close the pipe): what it started should not go on unseen. */
 const cancelled = (ctx: Ctx) => ctx.signal.aborted && ctx.signal.reason === 'cancelled';
 
+/** Stops what a cancelled request started; nobody can be told if it fails, so it goes to the log. */
+async function stopQuietly(args: string[]): Promise<void> {
+  const r = await pit(args, 30_000);
+  if (r.code !== 0) process.stderr.write(`pitroom mcp: ${args.join(' ')} failed: ${r.err || r.out}\n`);
+}
+
 /** Starts a run (or review, audit) in the background and waits for it a while. */
 export async function startAndWait(start: string[], seconds: number, ctx: Ctx, task?: string): Promise<ToolResult> {
   // the task goes last, after "--", so that it can start with a dash
-  const started = await pit([...start, '--bg', '--json', ...(task === undefined ? [] : ['--', task])], undefined, ctx.signal);
+  // not cancellable: it is over in a moment, and ending it half way could leave a worker running that nobody knows the id of
+  const started = await pit([...start, '--bg', '--json', ...(task === undefined ? [] : ['--', task])]);
   if (started.code !== 0) return asResult(started);
   let id: string;
   try {
@@ -187,13 +195,13 @@ export async function startAndWait(start: string[], seconds: number, ctx: Ctx, t
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([id], seconds, ctx);
-  if (cancelled(ctx)) await pit(['stop', id], 30_000);
+  if (cancelled(ctx)) await stopQuietly(['stop', id]);
   return result;
 }
 
 /** Starts several tasks as one group of background workers and waits for the group a while. */
 export async function startCrew(flags: string[], tasks: string[], seconds: number, ctx: Ctx): Promise<ToolResult> {
-  const started = await pit(['crew', ...flags, '--json', '--', ...tasks], undefined, ctx.signal);
+  const started = await pit(['crew', ...flags, '--json', '--', ...tasks]); // not cancellable, as in startAndWait
   if (started.code !== 0) return asResult(started);
   let group: string;
   try {
@@ -202,6 +210,6 @@ export async function startCrew(flags: string[], tasks: string[], seconds: numbe
     return { text: `could not read the group from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([], seconds, ctx, group);
-  if (cancelled(ctx)) await pit(['stop', '-g', group], 30_000);
+  if (cancelled(ctx)) await stopQuietly(['stop', '-g', group]);
   return result;
 }

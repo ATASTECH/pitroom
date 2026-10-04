@@ -1,6 +1,6 @@
 // The tools `pitroom mcp` offers. Each one runs the matching `pitroom` command (see mcp-support.ts), so they cannot
 // drift from the CLI and every rule of the CLI applies unchanged.
-import { DEFAULT_WAIT, MAX_WAIT, type Tool, ToolError, bool, oneOf, plain, since, startAndWait, startCrew, str, strs, waitFor, waitSeconds, workerFlags } from './mcp-support.js';
+import { DEFAULT_WAIT, MAX_TASKS, MAX_WAIT, type Tool, ToolError, bool, oneOf, plain, since, startAndWait, startCrew, str, strs, waitFor, waitSeconds, workerFlags } from './mcp-support.js';
 
 const WORKER_PROPS = {
   worker: { type: 'string', description: 'Worker target "backend[:model]", e.g. "opencode", "codex", "claude:haiku", "gemini:gemini-3.8-flash". Default: the configured worker.' },
@@ -61,7 +61,7 @@ export const TOOLS: Tool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        tasks: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'One self-contained task per worker.' },
+        tasks: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: MAX_TASKS, description: 'One self-contained task per worker.' },
         mode: { type: 'string', enum: ['read', 'isolate'], description: 'read (default) or isolate.' },
         ...WORKER_PROPS,
         ...WAIT_PROP,
@@ -72,6 +72,7 @@ export const TOOLS: Tool[] = [
     async call(a, ctx) {
       const tasks = strs(a, 'tasks').filter((t) => t.trim());
       if (!tasks.length) throw new ToolError('"tasks" needs at least one task');
+      if (tasks.length > MAX_TASKS) throw new ToolError(`at most ${MAX_TASKS} tasks at once: start the rest when these are done`);
       const mode = oneOf(a, 'mode', ['read', 'isolate'], 'read');
       return startCrew([...(mode === 'isolate' ? ['-i'] : []), ...workerFlags(a)], tasks, waitSeconds(a), ctx);
     },
@@ -101,6 +102,7 @@ export const TOOLS: Tool[] = [
     async call(a, ctx) {
       const group = str(a, 'group');
       const run = str(a, 'run');
+      if (group && run) throw new ToolError('give "run" or "group", not both');
       return plain(['status', ...(group ? ['-g', group] : run ? [run] : [])], ctx);
     },
   },
@@ -250,6 +252,7 @@ export const TOOLS: Tool[] = [
       const group = str(a, 'group');
       const run = str(a, 'run');
       if (!run && !group) throw new ToolError('give "run" or "group"');
+      if (run && group) throw new ToolError('give "run" or "group", not both');
       return plain(['apply', ...(group && !run ? ['-g', group] : [run!]), ...(bool(a, 'allowDelete') ? ['--allow-delete'] : [])], ctx, 120_000);
     },
   },
@@ -283,6 +286,7 @@ export const TOOLS: Tool[] = [
       const run = str(a, 'run');
       const group = str(a, 'group');
       if (!run && !group) throw new ToolError('give "run" or "group"');
+      if (run && group) throw new ToolError('give "run" or "group", not both');
       return plain(['stop', ...(run ? [run] : ['-g', group!])], ctx);
     },
   },

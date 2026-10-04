@@ -24,6 +24,8 @@ const INSTRUCTIONS = [
 ].join(' ');
 
 const log = (msg: string): void => void process.stderr.write(`pitroom mcp: ${msg}\n`);
+// a client that went away mid-run leaves a closed pipe: the writes then fail, which is not worth a crash
+process.stdout.on('error', () => {});
 const send = (msg: Json): void => void process.stdout.write(`${JSON.stringify(msg)}\n`);
 
 /** One request being served: its cancel switch and the progress it may report. */
@@ -108,11 +110,13 @@ async function handle(msg: unknown): Promise<Json | undefined> {
     cancel(params);
     return undefined;
   }
-  const isRequest = (typeof m.id === 'string' || typeof m.id === 'number');
+  // a request has a string or number id; a null id is treated like a notification (JSON-RPC discourages it)
+  const isRequest = typeof m.id === 'string' || typeof m.id === 'number';
   const abort = new AbortController();
-  if (isRequest) inflight.set(m.id as string | number, { abort, ctx: contextFor(params, abort) });
+  const entry: Inflight = { abort, ctx: contextFor(params, abort) };
+  if (isRequest) inflight.set(m.id as string | number, entry);
   try {
-    const result = await dispatch(m.method, params, isRequest ? inflight.get(m.id as string | number)!.ctx : contextFor(params, abort));
+    const result = await dispatch(m.method, params, entry.ctx);
     if (abort.signal.aborted && abort.signal.reason === 'cancelled') return undefined;
     return isRequest ? { jsonrpc: '2.0', id: m.id, result } : undefined;
   } catch (e) {
@@ -120,7 +124,7 @@ async function handle(msg: unknown): Promise<Json | undefined> {
     const code = e instanceof RpcError ? e.code : -32603;
     return { jsonrpc: '2.0', id: m.id, error: { code, message: (e as Error).message } };
   } finally {
-    if (isRequest) inflight.delete(m.id as string | number);
+    if (isRequest && inflight.get(m.id as string | number) === entry) inflight.delete(m.id as string | number);
   }
 }
 

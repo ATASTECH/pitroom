@@ -4174,6 +4174,7 @@ ${(/* @__PURE__ */ new Date()).toLocaleTimeString()} \xB7 Ctrl-C to stop watchin
 var MAX_OUTPUT = 12e4;
 var DEFAULT_WAIT = 50;
 var MAX_WAIT = 540;
+var MAX_TASKS = 20;
 var PROGRESS_EVERY_MS = 5e3;
 var ToolError = class extends Error {
 };
@@ -4291,8 +4292,13 @@ async function waitFor(ids, seconds, ctx, group) {
   return asResult(r, `Not finished yet: call pitroom_wait with ${again} (waitSeconds up to ${MAX_WAIT}); pitroom_stop ends it.`);
 }
 var cancelled = (ctx) => ctx.signal.aborted && ctx.signal.reason === "cancelled";
+async function stopQuietly(args) {
+  const r = await pit(args, 3e4);
+  if (r.code !== 0) process.stderr.write(`pitroom mcp: ${args.join(" ")} failed: ${r.err || r.out}
+`);
+}
 async function startAndWait(start, seconds, ctx, task) {
-  const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]], void 0, ctx.signal);
+  const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]]);
   if (started.code !== 0) return asResult(started);
   let id;
   try {
@@ -4301,11 +4307,11 @@ async function startAndWait(start, seconds, ctx, task) {
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([id], seconds, ctx);
-  if (cancelled(ctx)) await pit(["stop", id], 3e4);
+  if (cancelled(ctx)) await stopQuietly(["stop", id]);
   return result;
 }
 async function startCrew(flags, tasks, seconds, ctx) {
-  const started = await pit(["crew", ...flags, "--json", "--", ...tasks], void 0, ctx.signal);
+  const started = await pit(["crew", ...flags, "--json", "--", ...tasks]);
   if (started.code !== 0) return asResult(started);
   let group;
   try {
@@ -4314,7 +4320,7 @@ async function startCrew(flags, tasks, seconds, ctx) {
     return { text: `could not read the group from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([], seconds, ctx, group);
-  if (cancelled(ctx)) await pit(["stop", "-g", group], 3e4);
+  if (cancelled(ctx)) await stopQuietly(["stop", "-g", group]);
   return result;
 }
 
@@ -4355,8 +4361,8 @@ async function readResource(uri, ctx) {
   if (!m) throw new RpcError(-32002, `unknown resource: ${uri}`);
   const patch = m[2] !== void 0;
   const r = await pit(["show", m[1], patch ? "--patch" : "--full"], 6e4, ctx.signal);
-  if (r.code !== 0) throw new RpcError(-32002, r.err || r.out || `run ${m[1]} cannot be read`);
-  return { contents: [{ uri, mimeType: patch ? "text/x-diff" : "text/plain", text: r.out }] };
+  if (r.code !== 0) throw new RpcError(r.code === 3 || r.code === 2 ? -32002 : -32603, r.err || r.out || `run ${m[1]} cannot be read`);
+  return { contents: [{ uri, mimeType: patch ? "text/x-diff" : "text/plain", text: clip6(r.out) }] };
 }
 var PROMPTS = [
   {
@@ -4466,7 +4472,7 @@ var TOOLS2 = [
     inputSchema: {
       type: "object",
       properties: {
-        tasks: { type: "array", items: { type: "string" }, minItems: 1, description: "One self-contained task per worker." },
+        tasks: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_TASKS, description: "One self-contained task per worker." },
         mode: { type: "string", enum: ["read", "isolate"], description: "read (default) or isolate." },
         ...WORKER_PROPS,
         ...WAIT_PROP
@@ -4477,6 +4483,7 @@ var TOOLS2 = [
     async call(a, ctx) {
       const tasks = strs(a, "tasks").filter((t) => t.trim());
       if (!tasks.length) throw new ToolError('"tasks" needs at least one task');
+      if (tasks.length > MAX_TASKS) throw new ToolError(`at most ${MAX_TASKS} tasks at once: start the rest when these are done`);
       const mode = oneOf(a, "mode", ["read", "isolate"], "read");
       return startCrew([...mode === "isolate" ? ["-i"] : [], ...workerFlags(a)], tasks, waitSeconds(a), ctx);
     }
@@ -4506,6 +4513,7 @@ var TOOLS2 = [
     async call(a, ctx) {
       const group = str(a, "group");
       const run2 = str(a, "run");
+      if (group && run2) throw new ToolError('give "run" or "group", not both');
       return plain(["status", ...group ? ["-g", group] : run2 ? [run2] : []], ctx);
     }
   },
@@ -4655,6 +4663,7 @@ var TOOLS2 = [
       const group = str(a, "group");
       const run2 = str(a, "run");
       if (!run2 && !group) throw new ToolError('give "run" or "group"');
+      if (run2 && group) throw new ToolError('give "run" or "group", not both');
       return plain(["apply", ...group && !run2 ? ["-g", group] : [run2], ...bool(a, "allowDelete") ? ["--allow-delete"] : []], ctx, 12e4);
     }
   },
@@ -4688,6 +4697,7 @@ var TOOLS2 = [
       const run2 = str(a, "run");
       const group = str(a, "group");
       if (!run2 && !group) throw new ToolError('give "run" or "group"');
+      if (run2 && group) throw new ToolError('give "run" or "group", not both');
       return plain(["stop", ...run2 ? [run2] : ["-g", group]], ctx);
     }
   }
@@ -4703,6 +4713,8 @@ var INSTRUCTIONS = [
 ].join(" ");
 var log = (msg) => void process.stderr.write(`pitroom mcp: ${msg}
 `);
+process.stdout.on("error", () => {
+});
 var send = (msg) => void process.stdout.write(`${JSON.stringify(msg)}
 `);
 var inflight = /* @__PURE__ */ new Map();
@@ -4777,9 +4789,10 @@ async function handle(msg) {
   }
   const isRequest = typeof m.id === "string" || typeof m.id === "number";
   const abort = new AbortController();
-  if (isRequest) inflight.set(m.id, { abort, ctx: contextFor(params, abort) });
+  const entry = { abort, ctx: contextFor(params, abort) };
+  if (isRequest) inflight.set(m.id, entry);
   try {
-    const result = await dispatch(m.method, params, isRequest ? inflight.get(m.id).ctx : contextFor(params, abort));
+    const result = await dispatch(m.method, params, entry.ctx);
     if (abort.signal.aborted && abort.signal.reason === "cancelled") return void 0;
     return isRequest ? { jsonrpc: "2.0", id: m.id, result } : void 0;
   } catch (e) {
@@ -4787,7 +4800,7 @@ async function handle(msg) {
     const code = e instanceof RpcError ? e.code : -32603;
     return { jsonrpc: "2.0", id: m.id, error: { code, message: e.message } };
   } finally {
-    if (isRequest) inflight.delete(m.id);
+    if (isRequest && inflight.get(m.id) === entry) inflight.delete(m.id);
   }
 }
 async function handleLine(line) {

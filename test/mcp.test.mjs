@@ -378,3 +378,42 @@ test('mcp: the read-only tools show what the CLI shows, a follow-up continues a 
     await c2.close();
   }
 });
+
+test('mcp: cancelling a pitroom_wait only stops the waiting, the run goes on', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'sleep:20;answer:late' });
+  try {
+    await handshake(c);
+    const first = await c.call('pitroom_run', { task: 'long one', waitSeconds: 1 });
+    const id = RUN_ID.exec(first.text)[0];
+    c.raw(JSON.stringify({ jsonrpc: '2.0', id: 888, method: 'tools/call', params: { name: 'pitroom_wait', arguments: { runs: [id], waitSeconds: 120 } } }));
+    await new Promise((r) => setTimeout(r, 1500));
+    c.raw(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 888 } }));
+    await new Promise((r) => setTimeout(r, 1500));
+    assert.deepEqual((await c.rpc('ping', {})).result, {});
+    assert.ok(!c.lines.some((l) => JSON.parse(l).id === 888), 'no answer to the cancelled wait');
+    assert.match(s.run(['status', id]).stdout, /running/, 'the run was not stopped');
+    await c.call('pitroom_stop', { run: id });
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: pitroom_apply with a group applies the patches in order and stops at the first that no longer fits', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'append:app.txt:from a worker;answer:SUMMARY: extended' });
+  try {
+    await handshake(c);
+    const r = await c.call('pitroom_crew', { tasks: ['one', 'two'], mode: 'isolate', group: 'edits', waitSeconds: 90 });
+    assert.equal(r.isError, false, r.text);
+    assert.equal(r.text.match(/pitroom ✔ done · isolate/g).length, 2, r.text);
+    const applied = await c.call('pitroom_apply', { group: 'edits' });
+    assert.match(applied.text, /applied 1 file/, 'the first patch landed');
+    assert.match(applied.text, /✘/, 'the second no longer fits the changed file');
+    assert.match(fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8'), /from a worker/);
+    assert.equal((await c.call('pitroom_apply', { group: 'edits', run: 'last' })).isError, true, 'run and group together are refused');
+    assert.equal((await c.call('pitroom_stop', { group: 'edits', run: 'last' })).isError, true);
+  } finally {
+    await c.close();
+  }
+});
