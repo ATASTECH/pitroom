@@ -301,6 +301,7 @@ Each tool runs the matching `pitroom` command, so every rule of the CLI applies 
 - **Resources.** The latest runs are listed as `pitroom://run/<id>` (the report) and, for runs that changed files, `pitroom://run/<id>/patch` (the exact diff), so a client can attach one to a conversation.
 - **Prompts.** `research`, `implement`, `review` and `crew` say how to use Pitroom for that job (in Claude Code they appear as `/mcp__pitroom__research`, …).
 - **Also as tools:** `pitroom_crew` (independent tasks in parallel), `pitroom_list`, `pitroom_history` (find an earlier answer), `pitroom_stats` and `pitroom_models` (pick a worker), `pitroom_savings`, `pitroom_cooldown`, `pitroom_doctor`, `pitroom_revert`, and a `continue` option on `pitroom_run` for a follow-up.
+- **Over HTTP.** `pitroom mcp --http [--port N]` (default 7117) serves the same tools at `http://127.0.0.1:7117/mcp` for clients that connect to a URL, for example `claude mcp add --transport http pitroom http://127.0.0.1:7117/mcp --header "Authorization: Bearer $(cat ~/.local/state/pitroom/mcp-token)"` (the command is printed when it starts). It is a local service: it listens on 127.0.0.1 only, needs the bearer token (made on first start, kept at `<state dir>/mcp-token` with owner-only permissions, or set with `PITROOM_MCP_TOKEN`), and refuses a Host or Origin that is not local, so a web page cannot use it. Anyone who has the token can run workers as you, so keep it private. Each client has its own session; a call that asks for progress is answered as an event stream. `pitroom install --mcp` registers the stdio command, which needs no token and no running process.
 
 **Any other agent (a plain shell) or just the CLI**
 
@@ -495,7 +496,7 @@ pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- sep
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom audit RUN [-W worker]
-pitroom mcp                  # serve Pitroom as MCP tools on stdio
+pitroom mcp [--http [--port N]]   # serve Pitroom as MCP tools on stdio, or over HTTP on 127.0.0.1 (bearer token)
 pitroom cooldown [--clear]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
