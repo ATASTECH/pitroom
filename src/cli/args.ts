@@ -17,12 +17,12 @@ const VALUE_FLAGS: Record<string, string> = {
   '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
-  '--plan': 'plan', '--step': 'step', '--fallback': 'fallback',
+  '--plan': 'plan', '--step': 'step', '--fallback': 'fallback', '--client': 'client',
 };
 
 const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
-  '--bg': 'bg', '--in-place': 'in-place', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
+  '--bg': 'bg', '--mcp': 'mcp', '--no-skills': 'no-skills', '--dry-run': 'dry-run', '--in-place': 'in-place', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe', '--clear': 'clear',
   '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running', '--detach': 'detach', '--stop': 'stop', '--open': 'open', '--serve': 'serve',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',

@@ -13,6 +13,7 @@ import { activeCooldowns, untilText } from './cooldown.js';
 import { resolveChain } from './chain.js';
 import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
+import { mcpStatus } from './mcp-install.js';
 import { VERSION } from './run.js';
 import { type RunMeta, home } from './store.js';
 import { bold, cyan, dim, green, red, wrapText, yellow } from './style.js';
@@ -153,6 +154,13 @@ export function doctor(probe: boolean): number {
     for (const c of found) add('ok', c.message);
     add('ok', `use it with -W ${backend.id}[:model], or name it in "fallback" or "tiers" in the config`);
   }
+
+  // MCP: which clients have `pitroom mcp` (read from their config files; nothing is started)
+  section('MCP');
+  const have = mcpStatus().filter((m) => m.state !== 'absent');
+  const stale = have.filter((m) => m.state === 'different');
+  add('ok', have.length ? `pitroom mcp is registered in: ${have.map((m) => m.name).join(', ')}` : 'pitroom mcp is not registered in any client: `pitroom install --mcp` does it for the ones found (Cursor, Claude Desktop, Claude Code, Codex, Gemini CLI)');
+  for (const m of stale) add('warn', `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --force\` updates it`);
 
   section('Skills and agents');
   addAll(skillChecks());

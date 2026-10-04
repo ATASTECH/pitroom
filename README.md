@@ -273,7 +273,15 @@ npm i -g pitroom
 
 **Any agent that speaks MCP (Cursor, Claude Desktop, and the three above too)**
 
-Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: nine tools (`pitroom_run`, `pitroom_wait`, `pitroom_status`, `pitroom_show`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_stop`) instead of shell commands and skills. After `npm i -g pitroom`:
+Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: nine tools (`pitroom_run`, `pitroom_wait`, `pitroom_status`, `pitroom_show`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_stop`) instead of shell commands and skills. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
+
+```bash
+pitroom install --mcp               # also links the skills; add --no-skills to skip that
+pitroom install --mcp --dry-run     # only say what it would do
+pitroom install --mcp --client cursor,claude-desktop
+```
+
+It registers the launcher by its full path (apps like Claude Desktop start without your `PATH`), changes the three CLI clients with their own `mcp add` command at user scope, merges the JSON of Cursor and Claude Desktop without touching their other servers (keeping a `.bak-pitroom` backup, and leaving a file that is not valid JSON alone), skips what is already registered, and `pitroom uninstall` removes it again. `pitroom doctor` shows where it is registered. Restart the client afterwards. Or do it by hand:
 
 ```bash
 claude mcp add pitroom -- pitroom mcp

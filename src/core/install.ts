@@ -101,12 +101,12 @@ function place(src: string, dest: string, opts: { copy: boolean; force: boolean 
   return `✔ ${dest} → ${opts.copy ? 'copied' : src}`;
 }
 
-export function install(opts: { copy: boolean; force: boolean }): string[] {
+export function install(opts: { copy: boolean; force: boolean; skills?: boolean }): string[] {
   const root = packageRoot();
-  const skills = skillNames(root);
-  if (!skills.length) throw new Error(`no skills found under ${path.join(root, 'skills')}`);
+  const skills = opts.skills === false ? [] : skillNames(root);
+  if (opts.skills !== false && !skills.length) throw new Error(`no skills found under ${path.join(root, 'skills')}`);
   const out: string[] = [];
-  for (const base of skillTargets()) {
+  for (const base of opts.skills === false ? [] : skillTargets()) {
     for (const legacy of LEGACY) {
       const l = path.join(base, legacy);
       if (!skills.includes(legacy) && linksInto(l, root)) {
