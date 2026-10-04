@@ -4682,11 +4682,15 @@ var TOOLS2 = [
 
 // src/cli/mcp-watch.ts
 var EVERY_MS = 2e3;
+var MAX_SUBSCRIPTIONS = 100;
 var watched = /* @__PURE__ */ new Set();
 var timer;
-var stateOf = (id) => {
+var signature = (uri) => {
+  const id = runOfUri(uri);
+  if (!id) return void 0;
   try {
-    return freshMeta(id).state;
+    const m = freshMeta(id);
+    return uri.endsWith("/patch") ? `${m.state}:${m.changes?.length ?? 0}` : m.state;
   } catch {
     return void 0;
   }
@@ -4700,29 +4704,34 @@ var newestRun = () => {
 };
 function subscribe(session, uri) {
   if (typeof uri !== "string") throw new RpcError(-32602, '"uri" is required');
-  const id = runOfUri(uri);
-  if (!id) throw new RpcError(-32602, `only runs can be subscribed to (pitroom://run/<id>): ${uri}`);
-  const state = stateOf(id);
-  if (state === void 0) throw new RpcError(-32002, `unknown resource: ${uri}`);
-  session.subscriptions.set(uri, state);
+  if (!runOfUri(uri)) throw new RpcError(-32602, `only runs can be subscribed to (pitroom://run/<id>): ${uri}`);
+  if (!session.subscriptions.has(uri) && session.subscriptions.size >= MAX_SUBSCRIPTIONS) throw new RpcError(-32602, `at most ${MAX_SUBSCRIPTIONS} subscriptions: unsubscribe from finished runs first`);
+  const sig = signature(uri);
+  if (sig === void 0) throw new RpcError(-32002, `unknown resource: ${uri}`);
+  session.subscriptions.set(uri, sig);
 }
 function unsubscribe(session, uri) {
   if (typeof uri !== "string") throw new RpcError(-32602, '"uri" is required');
   session.subscriptions.delete(uri);
 }
 function tick() {
+  const listening = [...watched].filter((s) => s.push);
+  if (!listening.length) return;
   const newest = newestRun();
-  for (const s of watched) {
-    if (!s.push) continue;
+  const seen = /* @__PURE__ */ new Map();
+  for (const s of listening) {
+    const push = s.push;
     if (newest !== s.newestRun) {
       s.newestRun = newest;
-      s.push({ jsonrpc: "2.0", method: "notifications/resources/list_changed" });
+      push({ jsonrpc: "2.0", method: "notifications/resources/list_changed" });
     }
     for (const [uri, last] of s.subscriptions) {
-      const now = stateOf(runOfUri(uri));
-      if (now === void 0 || now === last) continue;
-      s.subscriptions.set(uri, now);
-      s.push({ jsonrpc: "2.0", method: "notifications/resources/updated", params: { uri } });
+      if (!seen.has(uri)) seen.set(uri, signature(uri));
+      const now = seen.get(uri);
+      if (now === last) continue;
+      if (now === void 0) s.subscriptions.delete(uri);
+      else s.subscriptions.set(uri, now);
+      push({ jsonrpc: "2.0", method: "notifications/resources/updated", params: { uri } });
     }
   }
 }
@@ -5387,6 +5396,7 @@ var sameSecret = (given, token) => {
   const b = crypto7.createHash("sha256").update(token).digest();
   return crypto7.timingSafeEqual(a, b);
 };
+var idleSince = (k) => Math.max(k.lastSeen, k.closeStream ? k.streamSeen ?? 0 : 0);
 function drop(sessions, id) {
   const k = sessions.get(id);
   if (!k) return;
@@ -5420,7 +5430,7 @@ var wantsStream = (parsed) => {
 };
 function evictIdle(sessions) {
   let oldest;
-  for (const entry of sessions) if (!entry[1].session.inflight.size && !entry[1].closeStream && (!oldest || entry[1].lastSeen < oldest[1].lastSeen)) oldest = entry;
+  for (const entry of sessions) if (!entry[1].session.inflight.size && (!oldest || idleSince(entry[1]) < idleSince(oldest[1]))) oldest = entry;
   if (!oldest) return false;
   drop(sessions, oldest[0]);
   return true;
@@ -5441,20 +5451,27 @@ function makeHandler(token, sessions) {
       return reply(res, 204);
     }
     if (req.method === "GET") {
-      if (!/text\/event-stream/.test(req.headers.accept ?? "")) return reply(res, 406, failure5(-32600, "a GET opens the event stream: send Accept: text/event-stream"));
+      if (!/text\/event-stream|\*\/\*/.test(req.headers.accept ?? "")) return reply(res, 406, failure5(-32600, "a GET opens the event stream: send Accept: text/event-stream"));
       if (!sid) return reply(res, 400, failure5(-32600, "Mcp-Session-Id is missing: initialize first"));
       const kept2 = sessions.get(sid);
       if (!kept2) return reply(res, 404, failure5(-32600, "no such session: initialize again"));
       kept2.closeStream?.();
       res.writeHead(200, { "Content-Type": "text/event-stream", "Cache-Control": "no-cache" });
       res.write(": open\n\n");
+      const open = () => !res.writableEnded && !res.destroyed;
       const push = (msg) => {
-        if (!res.writableEnded && !res.destroyed) res.write(`event: message
+        if (!open()) return;
+        kept2.streamSeen = Date.now();
+        res.write(`event: message
 data: ${JSON.stringify(msg)}
 
 `);
       };
-      const ping2 = setInterval(() => !res.writableEnded && res.write(": ping\n\n"), PING_MS);
+      const ping2 = setInterval(() => open() && res.write(": ping\n\n"), PING_MS);
+      ping2.unref();
+      res.on("error", () => {
+      });
+      kept2.streamSeen = Date.now();
       const close = () => {
         clearInterval(ping2);
         if (kept2.session.push === push) kept2.session.push = void 0;
@@ -5480,7 +5497,7 @@ data: ${JSON.stringify(msg)}
     const single = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : void 0;
     if (single?.method === "initialize") {
       if (sid) drop(sessions, sid);
-      if (sessions.size >= MAX_SESSIONS && !evictIdle(sessions)) return reply(res, 503, failure5(-32e3, "too many sessions with requests in flight"));
+      if (sessions.size >= MAX_SESSIONS && !evictIdle(sessions)) return reply(res, 503, failure5(-32e3, `${MAX_SESSIONS} sessions are busy with requests: try again when one ends`));
       const id = crypto7.randomUUID();
       kept = { session: newSession(), lastSeen: Date.now() };
       sessions.set(id, kept);
@@ -5522,7 +5539,7 @@ async function serveMcpHttp(opts) {
     });
   });
   const sweep = setInterval(() => {
-    for (const [id, k] of sessions) if (Date.now() - k.lastSeen > IDLE_MS && !k.session.inflight.size && !k.closeStream) drop(sessions, id);
+    for (const [id, k] of [...sessions]) if (Date.now() - idleSince(k) > IDLE_MS && !k.session.inflight.size) drop(sessions, id);
   }, 6e4);
   sweep.unref();
   const port = await new Promise((resolve2, reject) => {

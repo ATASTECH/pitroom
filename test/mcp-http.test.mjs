@@ -321,3 +321,31 @@ test('mcp http: a GET opens the session\'s event stream, where a subscribed run 
     await h.close();
   }
 });
+
+test('mcp http: a second GET replaces the first stream, and DELETE closes the open one', async () => {
+  const s = sandbox();
+  const h = await serve(s);
+  try {
+    const { sid } = await h.open();
+    const get = () => fetch(h.url, { method: 'GET', headers: { ...h.base, Accept: '*/*', 'Mcp-Session-Id': sid } });
+    const ended = async (res) => {
+      const reader = res.body.getReader();
+      try {
+        for (;;) if ((await reader.read()).done) return true;
+      } catch {
+        return true;
+      }
+    };
+    const first = await get();
+    assert.equal(first.status, 200, 'Accept */* is fine');
+    const firstEnded = ended(first);
+    const second = await get();
+    assert.equal(second.status, 200);
+    assert.equal(await Promise.race([firstEnded, sleep(5000).then(() => false)]), true, 'the first stream ended');
+    const secondEnded = ended(second);
+    assert.equal((await fetch(h.url, { method: 'DELETE', headers: { ...h.base, 'Mcp-Session-Id': sid } })).status, 204);
+    assert.equal(await Promise.race([secondEnded, sleep(5000).then(() => false)]), true, 'DELETE closed the open stream');
+  } finally {
+    await h.close();
+  }
+});
