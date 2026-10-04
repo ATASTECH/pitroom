@@ -4561,7 +4561,7 @@ function inside(file2, roots) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
-var VERSION2 = true ? "0.12.0" : "0.0.0-dev";
+var VERSION2 = true ? "0.13.0" : "0.0.0-dev";
 function planWork(o) {
   if (!o.plan) return { task: o.task.trim(), tier: o.tier };
   if (o.continueFrom) throw new UserError("a follow-up continues its parent's task; drop --plan/--step");

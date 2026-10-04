@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.0
+
+### Read snapshots
+- A read run in a directory that holds secret-looking files (`.env`, `prod.env`, private keys and keystores, `.netrc`, `credentials.json`, `secrets.json`) now reads a **clean snapshot** of your project instead of the directory, so those files are simply not there, whatever the worker CLI would have allowed. Before, the only protection was the worker's prompt and a warning (OpenCode and Claude Code refuse `.env` in their file tools, Codex does not, Gemini CLI 0.62 ignores our deny rules). Checked live with Gemini: `server.pem` in the snapshot came back "File not found".
+- The snapshot is your project's current state (uncommitted and untracked files included) minus git-ignored files and anything secret-looking, a tracked secret too. It is made from git objects, kept once per state and shared by every read run on it (twenty workers, one snapshot), and nothing is copied back: a read run has nothing to land. Its files are read-only. Unused ones are removed after three days, beyond the newest six, or by `pitroom clean`. On an 8,000-file repository the first snapshot took about 3 seconds (167 MB) and later runs 0.6 seconds.
+- With no secret-looking files nothing changes: the worker runs in place. `--in-place` (or `"readIn": "project"`, env `PITROOM_READ_IN`) reads the directory itself, for example when a task needs build output; `"readIn": "snapshot"` always uses one. The paths a worker cites are turned back into your project's, follow-ups stay in the snapshot, and edits (`-i`, `-w`) and reviews are not affected. If a snapshot cannot be made the run falls back to the directory and says so.
+- More names count as secret: names ending `.env`, `.key`, `.jks`, `.keystore`, and `secrets.json|yml|toml` (templates such as `.env.example` still do not).
+
+### Tests
+- The warning test covers both ways: a snapshot by default, the old heads-up when reading in place.
+
 ## 0.12.0
 
 ### Cooldowns
