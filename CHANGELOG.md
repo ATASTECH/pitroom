@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.16.0
 
 ### MCP server
 - **Progress notifications.** A call that waits for a run reports how it is doing every few seconds (`notifications/progress`, when the client sent a progress token), so the agent sees what the worker is doing; a client that resets its timeout when progress comes in (the protocol allows it, not every client does) does not give up on a long run.
