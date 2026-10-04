@@ -13,7 +13,8 @@ export interface ToolResult {
 
 /** What a tool call can do besides returning: say how far it is, and notice that the client gave up. */
 export interface Ctx {
-  /** Aborted (reason "cancelled") when the client cancels the request. */
+  /** Aborted when the client cancels the request (reason "cancelled": what it started is stopped), or when its
+   *  session ends (reason "closed": only the waiting ends, the runs go on). */
   signal: AbortSignal;
   /** A progress message; reaches the client only when it asked for progress on this request. */
   progress(message: string): void;

@@ -41,9 +41,9 @@ export interface Session {
 }
 export const newSession = (): Session => ({ inflight: new Map() });
 
-/** Ends everything a session has in flight, without answers: its client is gone. */
+/** Ends the waiting of what a session has in flight (its client ended it, or the server stops); the runs go on. */
 export function endSession(session: Session): void {
-  for (const { abort } of session.inflight.values()) abort.abort('cancelled');
+  for (const { abort } of session.inflight.values()) abort.abort('closed');
 }
 
 /** Progress for one request, only when the client sent a progress token with it. */

@@ -27,7 +27,8 @@ const WEEK_MS = 7 * 24 * 3600 * 1000;
 /** How many of the newest run records one request reads at most. */
 const SCAN = 400;
 const RUN_ID = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
-const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i;
+/** A Host header naming this machine (with its port); anything else may be DNS rebinding. Also used by `pitroom mcp --http`. */
+export const LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i;
 
 export interface DashRun {
   id: string;
