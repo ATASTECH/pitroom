@@ -50,8 +50,9 @@ async function launch(p: Parsed, meta: RunMeta): Promise<number> {
 export async function cmdRun(p: Parsed): Promise<number> {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
-  const cache = cacheKey({ ...opts, fresh: has(p, 'fresh') });
-  const hit = cache && findCached(cache);
+  const cache = cacheKey(opts);
+  // --fresh asks a worker, and its answer is the one found from then on
+  const hit = cache && !has(p, 'fresh') ? findCached(cache) : undefined;
   if (hit) {
     // the same question on the same code: the earlier answer, and no worker runs
     console.log(has(p, 'json') ? JSON.stringify({ ...hit, cached: true }, null, 2) : `${cachedNote(hit)}\n\n${formatReport(hit)}`);

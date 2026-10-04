@@ -144,3 +144,56 @@ test('cache: through MCP, a repeated question says it is a cached answer, and fr
     await new Promise((resolve) => { proc.once('close', resolve); proc.stdin.end(); });
   }
 });
+
+const metaPath = (s, id) => path.join(s.base, 'home', 'runs', id, 'meta.json');
+const editMeta = (s, id, f) => {
+  const m = JSON.parse(fs.readFileSync(metaPath(s, id), 'utf8'));
+  f(m);
+  fs.writeFileSync(metaPath(s, id), JSON.stringify(m));
+};
+
+test('cache: an answer an audit has not finished with, or disputes, is not reused; an agreed one is', () => {
+  const s = sandbox();
+  const id = RUN_ID.exec(ask(s, 'q').stdout)[0];
+  editMeta(s, id, (m) => (m.audit = { id: 'x', state: 'running' }));
+  assert.equal(ask(s, 'q', ['--no-audit']).status, 0);
+  assert.equal(workerRuns(s), 2, 'its audit is still running');
+  const all = () => fs.readdirSync(path.join(s.base, 'home', 'runs')).filter((d) => RUN_ID.test(d));
+  for (const verdict of ['disagree', 'partial']) {
+    for (const r of all()) editMeta(s, r, (m) => (m.audit = { id: 'x', state: 'done', verdict }));
+    const before = workerRuns(s);
+    assert.equal(ask(s, 'q', ['--no-audit']).status, 0);
+    assert.equal(workerRuns(s), before + 1, `an audit said ${verdict}`);
+  }
+  const agreed = RUN_ID.exec(ask(s, 'q', ['--fresh', '--no-audit']).stdout)[0];
+  editMeta(s, agreed, (m) => (m.audit = { id: 'z', state: 'done', verdict: 'agree' }));
+  const n = workerRuns(s);
+  assert.match(ask(s, 'q').stdout, new RegExp(`as run ${agreed}`));
+  assert.equal(workerRuns(s), n, 'an agreed answer is reused');
+});
+
+test('cache: no answer, a write in a read run, --verify and changed attachments mean a new run; --fresh replaces the answer', () => {
+  const s = sandbox();
+  assert.equal(ask(s, 'empty', [], { MOCK_ACTIONS: 'answer:' }).status, 0);
+  ask(s, 'empty', [], { MOCK_ACTIONS: 'answer:' });
+  assert.equal(workerRuns(s), 2, 'an empty answer is not an answer');
+  const same = fs.readFileSync(path.join(s.repo, 'app.txt'), 'utf8').trim();
+  ask(s, 'sneaky', [], { MOCK_ACTIONS: `write:app.txt:${same};answer:SUMMARY: ok` });
+  ask(s, 'sneaky', [], { MOCK_ACTIONS: `write:app.txt:${same};answer:SUMMARY: ok` });
+  assert.equal(workerRuns(s), 4, 'a read run that wrote is not reused');
+  assert.equal(ask(s, 'checked', ['--verify', 'true']).status, 0);
+  assert.equal(ask(s, 'checked', ['--verify', 'true']).status, 0);
+  assert.equal(workerRuns(s), 6, '--verify runs its command every time');
+  const note = path.join(s.base, 'note.txt');
+  fs.writeFileSync(note, 'one\n');
+  ask(s, 'see the note', ['-f', note]);
+  ask(s, 'see the note', ['-f', note]);
+  assert.equal(workerRuns(s), 7, 'the same attachment: cached');
+  fs.writeFileSync(note, 'two\n');
+  ask(s, 'see the note', ['-f', note]);
+  assert.equal(workerRuns(s), 8, 'a changed attachment: a new run');
+  const old = RUN_ID.exec(ask(s, 'q').stdout)[0];
+  const fresh = RUN_ID.exec(ask(s, 'q', ['--fresh']).stdout)[0];
+  assert.notEqual(fresh, old);
+  assert.match(ask(s, 'q').stdout, new RegExp(`as run ${fresh}`), 'the fresh answer is the one reused');
+});

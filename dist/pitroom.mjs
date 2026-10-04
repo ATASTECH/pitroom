@@ -4494,7 +4494,7 @@ var TOOLS2 = [
   {
     name: "pitroom_run",
     title: "Run a worker",
-    description: 'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt, or "still running" for pitroom_wait. Cancelling the call stops the run.',
+    description: 'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. Cancelling the call stops the run.',
     inputSchema: {
       type: "object",
       properties: {
@@ -5820,7 +5820,7 @@ import fs30 from "node:fs";
 import path26 from "node:path";
 var SCAN2 = 500;
 function cacheKey(o) {
-  if (o.fresh || o.mode !== "read" || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return void 0;
+  if (o.verify || o.mode !== "read" || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return void 0;
   if (!(effective().cacheDays.value > 0)) return void 0;
   const dir = path26.resolve(o.dir);
   const root = repoRoot(dir);
@@ -5841,10 +5841,21 @@ function cacheKey(o) {
     return void 0;
   }
 }
-var heldUp = (m) => m.state === "done" && m.mode === "read" && !m.reviewOf && !m.auditOf && (!m.refs || m.refs.invalid.length === 0) && m.audit?.verdict !== "disagree" && m.audit?.verdict !== "partial";
+function heldUp(m) {
+  if (m.state !== "done" || m.mode !== "read" || m.reviewOf || m.auditOf) return false;
+  if (m.refs && m.refs.invalid.length) return false;
+  if (m.warnings.some((w) => w.startsWith("READ-ONLY VIOLATION"))) return false;
+  if (m.audit && (isActive(m.audit.state) || m.audit.verdict === "disagree" || m.audit.verdict === "partial")) return false;
+  try {
+    return readSummary(m).trim() !== "";
+  } catch {
+    return false;
+  }
+}
 function findCached(k, now = Date.now()) {
   const maxAge = effective().cacheDays.value * 864e5;
-  for (const id of listRunIds().slice(-SCAN2).reverse()) {
+  let best;
+  for (const id of listRunIds().slice(-SCAN2)) {
     let m;
     try {
       m = readMeta(id);
@@ -5852,10 +5863,11 @@ function findCached(k, now = Date.now()) {
       continue;
     }
     if (m.cache?.key !== k.key || m.cache.state !== k.state) continue;
-    if (now - Date.parse(m.endedAt ?? m.startedAt) > maxAge) return void 0;
-    if (heldUp(m)) return m;
+    const at = Date.parse(m.endedAt ?? m.startedAt);
+    if (now - at > maxAge || best && at <= best.at || !heldUp(m)) continue;
+    best = { m, at };
   }
-  return void 0;
+  return best?.m;
 }
 function ago(iso, now = Date.now()) {
   const s = Math.max(0, (now - Date.parse(iso)) / 1e3);
@@ -6122,8 +6134,8 @@ warning: ${w}`).join("")
 async function cmdRun(p) {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
-  const cache = cacheKey({ ...opts, fresh: has(p, "fresh") });
-  const hit = cache && findCached(cache);
+  const cache = cacheKey(opts);
+  const hit = cache && !has(p, "fresh") ? findCached(cache) : void 0;
   if (hit) {
     console.log(has(p, "json") ? JSON.stringify({ ...hit, cached: true }, null, 2) : `${cachedNote(hit)}
 
