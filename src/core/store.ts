@@ -28,7 +28,8 @@ export interface RunMeta {
   fallback: Target[]; // tried in order on model/provider failures
   ran?: Target; // the target of the final attempt
   resolvedModel?: string; // what the worker CLI actually used
-  attempts?: { target: string; error: string }[];
+  /** Targets that did not give the answer: failed, or (skipped) left out while cooling down. */
+  attempts?: { target: string; error: string; skipped?: boolean }[];
   parent?: string;
   group?: string; // runs started together (`pitroom crew`, `--group`)
   sessionId?: string;

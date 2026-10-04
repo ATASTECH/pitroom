@@ -9,6 +9,7 @@
 //                          the output is logged to $MOCK_LOG as {exec, code, output}
 // MOCK_FAIL_MODELS=a,b     fail with "Model not found" when --model is one of these
 //                          ("default" = no --model given)
+// MOCK_RATE_LIMIT_MODELS=a,b  fail with a daily-quota error ("retry in 2h") when --model is one of these
 // Every invocation is appended to $MOCK_LOG as JSON (argv, cwd, config, stdin type).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -80,6 +81,11 @@ const step = (fn) => {
 const model = opt('--model') ?? 'default';
 if ((process.env.MOCK_FAIL_MODELS ?? '').split(',').includes(model)) {
   console.log(JSON.stringify({ type: 'error', sessionID: session, error: { type: 'provider.model', message: `ProviderModelNotFoundError: Model not found: ${model}.` } }));
+  process.exit(1);
+}
+
+if ((process.env.MOCK_RATE_LIMIT_MODELS ?? '').split(',').includes(model)) {
+  console.log(JSON.stringify({ type: 'error', sessionID: session, error: { type: 'provider.rate', message: 'Rate limit exceeded: free-models-per-day. Please retry in 2h.' } }));
   process.exit(1);
 }
 

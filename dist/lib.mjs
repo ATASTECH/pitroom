@@ -1495,6 +1495,27 @@ function fill(template, values) {
   return template.replace(/\{\{([A-Z_]+)\}\}/g, (_, key) => values[key]);
 }
 
+// src/core/cooldown.ts
+var MAX_MS = 24 * 36e5;
+var OVERLOAD_MS = 20 * 6e4;
+var DAILY_MS = 4 * 36e5;
+function retryAfterMs(message) {
+  const compact = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
+  const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
+  let ms = 0;
+  if (compact) {
+    for (const [, n, unit] of compact.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
+  } else if (words) {
+    ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
+  }
+  return ms > 0 ? ms : void 0;
+}
+function cooldownMs(message) {
+  const told = retryAfterMs(message);
+  if (told !== void 0) return Math.min(Math.max(told, 6e4), MAX_MS);
+  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
+}
+
 // src/core/answers.ts
 var TASK_STATUSES = ["DONE", "DONE_WITH_CONCERNS", "NEEDS_CONTEXT", "BLOCKED"];
 function parseStatus(text) {
@@ -1598,6 +1619,7 @@ export {
   allBackends,
   backendIds,
   brief,
+  cooldownMs,
   describeTarget,
   extractRefs,
   fill,
@@ -1612,5 +1634,6 @@ export {
   parseVerdict,
   planName,
   planTask,
+  retryAfterMs,
   verifyRefs
 };
