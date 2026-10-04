@@ -62,7 +62,10 @@ Usage
                                         writes it only with --yes (models are suggested, never chosen for you)
   pitroom install [--copy] [--force]    link the skills into ~/.agents/skills + ~/.claude/skills,
                                         and the CLI into ~/.local/bin
-  pitroom uninstall                     remove what install linked
+  pitroom install --mcp [--client A,B] [--no-skills] [--dry-run]
+                                        also register "pitroom mcp" in the MCP clients found (Claude Code, Codex,
+                                        Gemini CLI, Cursor, Claude Desktop); --dry-run only says what it would do
+  pitroom uninstall                     remove what install linked (and the MCP registrations)
   pitroom clean [--days 14] [--yes]
 
 Run options

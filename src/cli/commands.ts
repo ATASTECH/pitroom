@@ -8,6 +8,7 @@ import { formatInit, planInit, writeInit } from '../core/init.js';
 import { DeletionRefused, UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
+import { installMcp, parseClients, uninstallMcp } from '../core/mcp-install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
@@ -491,14 +492,37 @@ export function cmdSavings(p: Parsed): number {
   return 0;
 }
 
+const MCP_ICON: Record<string, string> = { added: '✔', updated: '✔', already: '·', removed: '✔', 'not-found': '·', failed: '✘', 'would-add': '→' };
+
 export function cmdInstall(p: Parsed): number {
-  for (const line of install({ copy: has(p, 'copy'), force: has(p, 'force') })) console.log(line);
-  return 0;
+  const mcp = has(p, 'mcp') || has(p, 'client');
+  if (has(p, 'dry-run') && !mcp) throw new UserError('--dry-run goes with --mcp');
+  if (has(p, 'no-skills') && !mcp) throw new UserError('--no-skills goes with --mcp: without it install links the skills');
+  let only;
+  try {
+    only = parseClients(flag(p, 'client'));
+  } catch (e) {
+    throw new UserError((e as Error).message);
+  }
+  // the launcher comes first: it is what the MCP clients are told to run
+  if (!has(p, 'dry-run')) for (const line of install({ copy: has(p, 'copy'), force: has(p, 'force'), skills: !has(p, 'no-skills') })) console.log(line);
+  if (!mcp) return 0;
+  const results = installMcp({ only, dryRun: has(p, 'dry-run'), force: has(p, 'force') });
+  console.log(`\nMCP clients (pitroom mcp):`);
+  for (const r of results) console.log(`${MCP_ICON[r.state] ?? '•'} ${r.name}: ${r.message}`);
+  if (results.every((r) => r.state === 'not-found')) {
+    console.log('no MCP client found: add the server by hand (see the README), or install a client first');
+  } else if (results.some((r) => r.state === 'added' || r.state === 'updated')) {
+    console.log('restart those clients (or start a new session) so they pick the server up');
+  }
+  return results.some((r) => r.state === 'failed') ? 1 : 0;
 }
 
 export function cmdUninstall(): number {
   for (const line of uninstall()) console.log(line);
-  return 0;
+  const mcp = uninstallMcp();
+  for (const r of mcp) console.log(`${MCP_ICON[r.state] ?? '•'} ${r.name}: ${r.message}`);
+  return mcp.some((r) => r.state === 'failed') ? 1 : 0;
 }
 
 export function cmdConfig(p: Parsed): number {
