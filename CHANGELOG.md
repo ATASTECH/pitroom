@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.15.0
+
+### `pitroom install --mcp`
+- Registers `pitroom mcp` in the MCP clients found on the machine, so setting it up is one command: Claude Code, Codex and Gemini CLI are changed with their own `mcp add` command (user scope where they have one), Cursor and Claude Desktop have their JSON config merged (other servers and settings kept, a `.bak-pitroom` backup the first time, a file that is not valid JSON left alone). `--dry-run` only says what it would do, `--client cursor,claude-desktop` limits it, `--no-skills` skips linking the skills, and `pitroom uninstall` removes the registrations again (a client whose command is gone cannot be asked to, which is reported and exits 1).
+- The command registered is the launcher by its full path (apps such as Claude Desktop start without your `PATH`), and only when that file really is a Pitroom launcher. Whether a client already has the server is read from its config file, never by starting the server; a client that runs a different command (a Codex entry included) is updated, and `--force` registers again.
+- `pitroom doctor` has an MCP section: where `pitroom mcp` is registered, and a warning for a client that runs another command.
+- Checked with the real `claude`, `codex` and `gemini` commands in a throwaway home: right entries written, a second run "already registered", `uninstall` removed exactly those. The change was reviewed by a free Pitroom worker before merging; its findings (a foreign file at the launcher path, unguarded writes, the Codex command not compared, uninstall failures, a few messages) are fixed.
+
 ## 0.14.1
 
 ### Docs
