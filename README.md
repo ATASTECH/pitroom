@@ -267,7 +267,25 @@ gemini extensions install https://github.com/ATASTECH/pitroom
 npm i -g pitroom
 ```
 
-**Any other agent (Cursor, a plain shell) or just the CLI**
+**Any agent that speaks MCP (Cursor, Claude Desktop, and the three above too)**
+
+Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: nine tools (`pitroom_run`, `pitroom_wait`, `pitroom_status`, `pitroom_show`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_stop`) instead of shell commands and skills. After `npm i -g pitroom`:
+
+```bash
+claude mcp add pitroom -- pitroom mcp
+codex mcp add pitroom -- pitroom mcp
+gemini mcp add pitroom pitroom mcp
+```
+
+or, for Cursor (`~/.cursor/mcp.json`), Claude Desktop (`claude_desktop_config.json`) and others:
+
+```json
+{ "mcpServers": { "pitroom": { "command": "pitroom", "args": ["mcp"] } } }
+```
+
+Each tool runs the matching `pitroom` command, so every rule of the CLI applies unchanged (permission profiles, git guard, isolation, read snapshots). A run is waited for up to `waitSeconds` (default 50), then comes back as "still running" with its id for `pitroom_wait`; keep it below your client's tool timeout. The server works in the directory the client starts it in.
+
+**Any other agent (a plain shell) or just the CLI**
 
 ```bash
 npm i -g pitroom
@@ -278,6 +296,7 @@ pitroom install
 |---|---|
 | Claude Code plugin | The 14 skills, the session-start hook that introduces Pitroom, and a card after each `pitroom` command. |
 | Gemini CLI extension | The 14 skills and a short context file that introduces Pitroom (Gemini asks you to confirm the extension). Gemini CLI also works as a *worker*, which is separate: see [Workers](#workers). |
+| MCP server | The nine tools above, for any agent that can use MCP servers. No skills: the tools describe themselves, and the server tells the agent how to start. |
 | Codex plugin | The 14 skills, a session-start hook that introduces Pitroom (so it is known even when Codex drops skill descriptions because many are installed), and a card after each `pitroom` command. Codex asks you to trust the plugin's hooks once. The hooks call `pitroom`, which comes from npm (`npm i -g pitroom`). |
 | npm + `pitroom install` | The CLI, and the skills linked into `~/.agents/skills` and `~/.claude/skills`. |
 
@@ -459,6 +478,7 @@ pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- sep
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom audit RUN [-W worker]
+pitroom mcp                  # serve Pitroom as MCP tools on stdio
 pitroom cooldown [--clear]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
