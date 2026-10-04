@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.12.0
+
+### Cooldowns
+- A model that says "rate limited" (a free daily quota used up, an overloaded provider) is remembered for a while, so the next runs go straight to the fallback instead of each one trying the exhausted model first and waiting for it to fail. The wait comes from the provider's message when it gives one (`retry in 4h28m`), else a guess: 4 hours for a daily quota, 20 minutes for overload; at least a minute, at most a day.
+- A model on cooldown is skipped only while another worker is left to run; if it is the only one it is still tried. Cooldowns expire on their own.
+- The report says `skipped: … (cooling down until 14:05: …)`, the dashboard card shows "Skipped …", `pitroom doctor` warns with the time, and `pitroom cooldown` lists them (`--clear` tries them again). Only rate-limit failures count, not a missing model or a sign-in problem.
+
 ## 0.11.0
 
 ### Gemini CLI as your primary agent
