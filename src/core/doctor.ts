@@ -160,7 +160,7 @@ export function doctor(probe: boolean): number {
   const have = mcpStatus().filter((m) => m.state !== 'absent');
   const stale = have.filter((m) => m.state === 'different');
   add('ok', have.length ? `pitroom mcp is registered in: ${have.map((m) => m.name).join(', ')}` : 'pitroom mcp is not registered in any client: `pitroom install --mcp` does it for the ones found (Cursor, Claude Desktop, Claude Code, Codex, Gemini CLI)');
-  for (const m of stale) add('warn', `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --force\` updates it`);
+  for (const m of stale) add('warn', `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --no-skills\` updates it`);
 
   section('Skills and agents');
   addAll(skillChecks());

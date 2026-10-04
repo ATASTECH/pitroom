@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getBackend } from '../backends/index.js';
 import { resolveCommand } from '../backends/exec.js';
-import { launcherPath } from './install.js';
+import { isPitroomLauncher, launcherPath } from './install.js';
 
 export type ClientId = 'claude-code' | 'codex' | 'gemini' | 'cursor' | 'claude-desktop';
 export const CLIENT_IDS: ClientId[] = ['claude-code', 'codex', 'gemini', 'cursor', 'claude-desktop'];
@@ -32,7 +32,8 @@ export interface McpResult {
 /** What the clients are told to run: the launcher, else `pitroom` from PATH, else this Node and bundle. */
 export function mcpCommand(): McpCommand {
   const launcher = launcherPath();
-  if (fs.existsSync(launcher)) return { command: launcher, args: ['mcp'] };
+  // a file at that path that is not a Pitroom launcher (installing kept it) is not what to register
+  if (isPitroomLauncher(launcher)) return { command: launcher, args: ['mcp'] };
   for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
     const p = path.join(dir, process.platform === 'win32' ? 'pitroom.cmd' : 'pitroom');
     if (fs.existsSync(p)) return { command: path.resolve(p), args: ['mcp'] };
@@ -63,10 +64,15 @@ const readJson = (file: string): any => {
   }
 };
 
+const jsonState = (file: string, c: McpCommand): 'absent' | 'same' | 'different' => {
+  const entry = readJson(file)?.mcpServers?.[NAME];
+  return entry === undefined ? 'absent' : same(c, entry) ? 'same' : 'different';
+};
+
 interface Client {
   id: ClientId;
   name: string;
-  where: string;
+  where?: string;
   found(): boolean;
   /** Is the server in this client's config, and is it ours as registered now? */
   state(c: McpCommand): 'absent' | 'same' | 'different';
@@ -84,11 +90,11 @@ function cliClient(id: ClientId, backend: string, name: string, where: string, o
     state: o.state,
     add: (c) => {
       const r = run(backend, o.add(c));
-      return { ok: r.ok, message: r.ok ? where : r.out.split('\n')[0] ?? 'failed' };
+      return { ok: r.ok, message: r.ok ? where : r.out.split('\n')[0]?.trim() || `${name}'s command failed` };
     },
     remove: () => {
       const r = run(backend, o.remove());
-      return { ok: r.ok, message: r.ok ? where : r.out.split('\n')[0] ?? 'failed' };
+      return { ok: r.ok, message: r.ok ? where : r.out.split('\n')[0]?.trim() || `${name}'s command failed` };
     },
   };
 }
@@ -96,12 +102,9 @@ function cliClient(id: ClientId, backend: string, name: string, where: string, o
 function jsonClient(id: ClientId, name: string, file: () => string, dir: () => string): Client {
   const rel = () => file().replace(home(), '~');
   return {
-    id, name, where: '',
+    id, name,
     found: () => fs.existsSync(dir()),
-    state: (c) => {
-      const entry = readJson(file())?.mcpServers?.[NAME];
-      return entry === undefined ? 'absent' : same(c, entry) ? 'same' : 'different';
-    },
+    state: (c) => jsonState(file(), c),
     add: (c) => {
       let config: any = {};
       if (fs.existsSync(file())) {
@@ -133,10 +136,25 @@ function desktopFile(): string {
   return path.join(process.env.XDG_CONFIG_HOME ?? path.join(home(), '.config'), 'Claude', 'claude_desktop_config.json');
 }
 
-const jsonState = (file: string, c: McpCommand): 'absent' | 'same' | 'different' => {
-  const entry = readJson(file)?.mcpServers?.[NAME];
-  return entry === undefined ? 'absent' : same(c, entry) ? 'same' : 'different';
-};
+/** Codex's `[mcp_servers.pitroom]` table: its command and args, compared with what this install would register. */
+function codexState(c: McpCommand): 'absent' | 'same' | 'different' {
+  let text: string;
+  try {
+    text = fs.readFileSync(path.join(process.env.CODEX_HOME ?? path.join(home(), '.codex'), 'config.toml'), 'utf8');
+  } catch {
+    return 'absent';
+  }
+  const at = text.search(/^\[mcp_servers\.pitroom\]\s*$/m);
+  if (at < 0) return 'absent';
+  const table = text.slice(at).split(/\n(?=\[)/)[0] ?? '';
+  try {
+    const command = /^command\s*=\s*("(?:[^"\\]|\\.)*")/m.exec(table)?.[1];
+    const args = /^args\s*=\s*(\[[^\n]*\])/m.exec(table)?.[1];
+    return command && args && same(c, { command: JSON.parse(command), args: JSON.parse(args) }) ? 'same' : 'different';
+  } catch {
+    return 'different';
+  }
+}
 
 function clients(): Client[] {
   return [
@@ -146,13 +164,7 @@ function clients(): Client[] {
       remove: () => ['mcp', 'remove', NAME, '--scope', 'user'],
     }),
     cliClient('codex', 'codex', 'Codex', '~/.codex/config.toml', {
-      state: () => {
-        try {
-          return /^\[mcp_servers\.pitroom\]/m.test(fs.readFileSync(path.join(process.env.CODEX_HOME ?? path.join(home(), '.codex'), 'config.toml'), 'utf8')) ? 'same' : 'absent';
-        } catch {
-          return 'absent';
-        }
-      },
+      state: (c) => codexState(c),
       add: (c) => ['mcp', 'add', NAME, '--', c.command, ...c.args],
       remove: () => ['mcp', 'remove', NAME],
     }),
@@ -167,6 +179,15 @@ function clients(): Client[] {
 }
 
 // ── what install, uninstall and doctor use ────────────────────────────────────────────────────────
+
+/** A client's change, with a thrown error (a read-only config, a full disk) turned into a failure line. */
+function attempt(f: () => { ok: boolean; message: string }): { ok: boolean; message: string } {
+  try {
+    return f();
+  } catch (e) {
+    return { ok: false, message: (e as Error).message.split('\n')[0] ?? 'failed' };
+  }
+}
 
 /** Registers `pitroom mcp` in the clients found (or the named ones). `dryRun` only says what it would do. */
 export function installMcp(opts: { only?: ClientId[]; dryRun?: boolean; force?: boolean } = {}): McpResult[] {
@@ -188,9 +209,9 @@ export function installMcp(opts: { only?: ClientId[]; dryRun?: boolean; force?: 
       r('would-add', `would register ${[c.command, ...c.args].join(' ')}`);
       continue;
     }
-    if (now !== 'absent') client.remove(); // replace what is there (a changed path, or --force)
-    const done = client.add(c);
-    r(done.ok ? (now === 'absent' ? 'added' : 'updated') : 'failed', done.ok ? `registered in ${done.message}` : done.message);
+    if (now !== 'absent') attempt(() => client.remove()); // replace what is there (a changed path, or --force)
+    const done = attempt(() => client.add(c));
+    r(done.ok ? (now === 'absent' ? 'added' : 'updated') : 'failed', done.ok ? `${now === 'absent' ? 'registered' : 'updated'} in ${done.message}` : done.message);
   }
   return out;
 }
@@ -207,7 +228,8 @@ export function uninstallMcp(): McpResult[] {
       has = false;
     }
     if (!has) continue;
-    const done = client.remove();
+    // a CLI client whose command is gone cannot be asked to remove it
+    const done = client.found() ? attempt(() => client.remove()) : { ok: false, message: `its command does not run: remove the pitroom entry from its config by hand` };
     out.push({ id: client.id, name: client.name, state: done.ok ? 'removed' : 'failed', message: done.ok ? `removed from ${done.message}` : done.message });
   }
   return out;

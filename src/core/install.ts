@@ -64,6 +64,15 @@ function isOurLauncher(file: string, root: string): boolean {
   }
 }
 
+/** A file that is a Pitroom launcher (of any install), not just any file at that path. */
+export function isPitroomLauncher(file: string): boolean {
+  try {
+    return fs.readFileSync(file, 'utf8').includes(LAUNCHER_MARK);
+  } catch {
+    return false;
+  }
+}
+
 function placeLauncher(bundle: string, root: string, force: boolean): string {
   const dest = launcherPath();
   fs.mkdirSync(path.dirname(dest), { recursive: true });

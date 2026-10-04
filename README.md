@@ -281,7 +281,7 @@ pitroom install --mcp --dry-run     # only say what it would do
 pitroom install --mcp --client cursor,claude-desktop
 ```
 
-It registers the launcher by its full path (apps like Claude Desktop start without your `PATH`), changes the three CLI clients with their own `mcp add` command at user scope, merges the JSON of Cursor and Claude Desktop without touching their other servers (keeping a `.bak-pitroom` backup, and leaving a file that is not valid JSON alone), skips what is already registered, and `pitroom uninstall` removes it again. `pitroom doctor` shows where it is registered. Restart the client afterwards. Or do it by hand:
+It registers the launcher by its full path (apps like Claude Desktop start without your `PATH`), changes Claude Code, Codex and Gemini CLI with their own `mcp add` command (user scope where it has one), merges the JSON of Cursor and Claude Desktop without touching their other servers (keeping a `.bak-pitroom` backup, and leaving a file that is not valid JSON alone), skips what is already registered, and `pitroom uninstall` removes it again. `pitroom doctor` shows where it is registered. Restart the client afterwards. Or do it by hand:
 
 ```bash
 claude mcp add pitroom -- pitroom mcp
@@ -503,7 +503,7 @@ pitroom ls [--running] [-g NAME] · pitroom clean [--days 14] [--yes]
 pitroom savings [--since 7d|30d|all] [--models] [--card file.svg] [--badge]
 pitroom models [worker] [--all] [--json]      models, effort levels, your costs, your usage
 pitroom statusline [--then CMD] · pitroom hook-card
-pitroom doctor [--probe] · pitroom config · pitroom init [--model ID] [--fallback A,B] [--yes] [--force] · pitroom install [--copy] [--force] · pitroom uninstall
+pitroom doctor [--probe] · pitroom config · pitroom init [--model ID] [--fallback A,B] [--yes] [--force] · pitroom install [--copy] [--force] [--mcp [--client A,B] [--no-skills] [--dry-run]] · pitroom uninstall
 ```
 
 Exit codes: `0` ok · `1` worker failed · `2` usage · `3` refused/setup · `4` timeout · `5` read-only violation · `6` verify failed · `75` still running.

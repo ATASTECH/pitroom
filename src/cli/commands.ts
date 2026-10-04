@@ -510,7 +510,7 @@ export function cmdInstall(p: Parsed): number {
   const results = installMcp({ only, dryRun: has(p, 'dry-run'), force: has(p, 'force') });
   console.log(`\nMCP clients (pitroom mcp):`);
   for (const r of results) console.log(`${MCP_ICON[r.state] ?? '•'} ${r.name}: ${r.message}`);
-  if (!results.some((r) => r.state === 'added' || r.state === 'updated' || r.state === 'already' || r.state === 'would-add')) {
+  if (results.every((r) => r.state === 'not-found')) {
     console.log('no MCP client found: add the server by hand (see the README), or install a client first');
   } else if (results.some((r) => r.state === 'added' || r.state === 'updated')) {
     console.log('restart those clients (or start a new session) so they pick the server up');
@@ -520,8 +520,9 @@ export function cmdInstall(p: Parsed): number {
 
 export function cmdUninstall(): number {
   for (const line of uninstall()) console.log(line);
-  for (const r of uninstallMcp()) console.log(`${MCP_ICON[r.state] ?? '•'} ${r.name}: ${r.message}`);
-  return 0;
+  const mcp = uninstallMcp();
+  for (const r of mcp) console.log(`${MCP_ICON[r.state] ?? '•'} ${r.name}: ${r.message}`);
+  return mcp.some((r) => r.state === 'failed') ? 1 : 0;
 }
 
 export function cmdConfig(p: Parsed): number {

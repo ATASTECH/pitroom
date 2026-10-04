@@ -2532,6 +2532,13 @@ function isOurLauncher(file2, root) {
     return false;
   }
 }
+function isPitroomLauncher(file2) {
+  try {
+    return fs16.readFileSync(file2, "utf8").includes(LAUNCHER_MARK);
+  } catch {
+    return false;
+  }
+}
 function placeLauncher(bundle, root, force) {
   const dest = launcherPath();
   fs16.mkdirSync(path14.dirname(dest), { recursive: true });
@@ -4602,7 +4609,7 @@ var CLIENT_IDS = ["claude-code", "codex", "gemini", "cursor", "claude-desktop"];
 var NAME = "pitroom";
 function mcpCommand() {
   const launcher = launcherPath();
-  if (fs26.existsSync(launcher)) return { command: launcher, args: ["mcp"] };
+  if (isPitroomLauncher(launcher)) return { command: launcher, args: ["mcp"] };
   for (const dir of (process.env.PATH ?? "").split(path22.delimiter).filter(Boolean)) {
     const p = path22.join(dir, process.platform === "win32" ? "pitroom.cmd" : "pitroom");
     if (fs26.existsSync(p)) return { command: path22.resolve(p), args: ["mcp"] };
@@ -4626,6 +4633,10 @@ var readJson = (file2) => {
     return void 0;
   }
 };
+var jsonState = (file2, c) => {
+  const entry = readJson(file2)?.mcpServers?.[NAME];
+  return entry === void 0 ? "absent" : same(c, entry) ? "same" : "different";
+};
 var home2 = () => os10.homedir();
 var geminiDir = () => path22.join(process.env.GEMINI_CLI_HOME ?? home2(), ".gemini");
 function cliClient(id, backend, name, where, o) {
@@ -4637,11 +4648,11 @@ function cliClient(id, backend, name, where, o) {
     state: o.state,
     add: (c) => {
       const r = run(backend, o.add(c));
-      return { ok: r.ok, message: r.ok ? where : r.out.split("\n")[0] ?? "failed" };
+      return { ok: r.ok, message: r.ok ? where : r.out.split("\n")[0]?.trim() || `${name}'s command failed` };
     },
     remove: () => {
       const r = run(backend, o.remove());
-      return { ok: r.ok, message: r.ok ? where : r.out.split("\n")[0] ?? "failed" };
+      return { ok: r.ok, message: r.ok ? where : r.out.split("\n")[0]?.trim() || `${name}'s command failed` };
     }
   };
 }
@@ -4650,12 +4661,8 @@ function jsonClient(id, name, file2, dir) {
   return {
     id,
     name,
-    where: "",
     found: () => fs26.existsSync(dir()),
-    state: (c) => {
-      const entry = readJson(file2())?.mcpServers?.[NAME];
-      return entry === void 0 ? "absent" : same(c, entry) ? "same" : "different";
-    },
+    state: (c) => jsonState(file2(), c),
     add: (c) => {
       let config = {};
       if (fs26.existsSync(file2())) {
@@ -4687,10 +4694,24 @@ function desktopFile() {
   if (process.platform === "win32") return path22.join(process.env.APPDATA ?? path22.join(home2(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
   return path22.join(process.env.XDG_CONFIG_HOME ?? path22.join(home2(), ".config"), "Claude", "claude_desktop_config.json");
 }
-var jsonState = (file2, c) => {
-  const entry = readJson(file2)?.mcpServers?.[NAME];
-  return entry === void 0 ? "absent" : same(c, entry) ? "same" : "different";
-};
+function codexState(c) {
+  let text;
+  try {
+    text = fs26.readFileSync(path22.join(process.env.CODEX_HOME ?? path22.join(home2(), ".codex"), "config.toml"), "utf8");
+  } catch {
+    return "absent";
+  }
+  const at = text.search(/^\[mcp_servers\.pitroom\]\s*$/m);
+  if (at < 0) return "absent";
+  const table2 = text.slice(at).split(/\n(?=\[)/)[0] ?? "";
+  try {
+    const command = /^command\s*=\s*("(?:[^"\\]|\\.)*")/m.exec(table2)?.[1];
+    const args = /^args\s*=\s*(\[[^\n]*\])/m.exec(table2)?.[1];
+    return command && args && same(c, { command: JSON.parse(command), args: JSON.parse(args) }) ? "same" : "different";
+  } catch {
+    return "different";
+  }
+}
 function clients() {
   return [
     cliClient("claude-code", "claude", "Claude Code", "user settings (~/.claude.json)", {
@@ -4699,13 +4720,7 @@ function clients() {
       remove: () => ["mcp", "remove", NAME, "--scope", "user"]
     }),
     cliClient("codex", "codex", "Codex", "~/.codex/config.toml", {
-      state: () => {
-        try {
-          return /^\[mcp_servers\.pitroom\]/m.test(fs26.readFileSync(path22.join(process.env.CODEX_HOME ?? path22.join(home2(), ".codex"), "config.toml"), "utf8")) ? "same" : "absent";
-        } catch {
-          return "absent";
-        }
-      },
+      state: (c) => codexState(c),
       add: (c) => ["mcp", "add", NAME, "--", c.command, ...c.args],
       remove: () => ["mcp", "remove", NAME]
     }),
@@ -4717,6 +4732,13 @@ function clients() {
     jsonClient("cursor", "Cursor", () => path22.join(home2(), ".cursor", "mcp.json"), () => path22.join(home2(), ".cursor")),
     jsonClient("claude-desktop", "Claude Desktop", desktopFile, () => path22.dirname(desktopFile()))
   ];
+}
+function attempt2(f) {
+  try {
+    return f();
+  } catch (e) {
+    return { ok: false, message: e.message.split("\n")[0] ?? "failed" };
+  }
 }
 function installMcp(opts = {}) {
   const c = mcpCommand();
@@ -4737,9 +4759,9 @@ function installMcp(opts = {}) {
       r("would-add", `would register ${[c.command, ...c.args].join(" ")}`);
       continue;
     }
-    if (now !== "absent") client.remove();
-    const done = client.add(c);
-    r(done.ok ? now === "absent" ? "added" : "updated" : "failed", done.ok ? `registered in ${done.message}` : done.message);
+    if (now !== "absent") attempt2(() => client.remove());
+    const done = attempt2(() => client.add(c));
+    r(done.ok ? now === "absent" ? "added" : "updated" : "failed", done.ok ? `${now === "absent" ? "registered" : "updated"} in ${done.message}` : done.message);
   }
   return out;
 }
@@ -4754,7 +4776,7 @@ function uninstallMcp() {
       has2 = false;
     }
     if (!has2) continue;
-    const done = client.remove();
+    const done = client.found() ? attempt2(() => client.remove()) : { ok: false, message: `its command does not run: remove the pitroom entry from its config by hand` };
     out.push({ id: client.id, name: client.name, state: done.ok ? "removed" : "failed", message: done.ok ? `removed from ${done.message}` : done.message });
   }
   return out;
@@ -5952,7 +5974,7 @@ function cmdInstall(p) {
   console.log(`
 MCP clients (pitroom mcp):`);
   for (const r of results) console.log(`${MCP_ICON[r.state] ?? "\u2022"} ${r.name}: ${r.message}`);
-  if (!results.some((r) => r.state === "added" || r.state === "updated" || r.state === "already" || r.state === "would-add")) {
+  if (results.every((r) => r.state === "not-found")) {
     console.log("no MCP client found: add the server by hand (see the README), or install a client first");
   } else if (results.some((r) => r.state === "added" || r.state === "updated")) {
     console.log("restart those clients (or start a new session) so they pick the server up");
@@ -5961,8 +5983,9 @@ MCP clients (pitroom mcp):`);
 }
 function cmdUninstall() {
   for (const line of uninstall()) console.log(line);
-  for (const r of uninstallMcp()) console.log(`${MCP_ICON[r.state] ?? "\u2022"} ${r.name}: ${r.message}`);
-  return 0;
+  const mcp = uninstallMcp();
+  for (const r of mcp) console.log(`${MCP_ICON[r.state] ?? "\u2022"} ${r.name}: ${r.message}`);
+  return mcp.some((r) => r.state === "failed") ? 1 : 0;
 }
 function cmdConfig(p) {
   const { warnings } = loadConfig();
@@ -6129,7 +6152,7 @@ function doctor5(probe) {
   const have = mcpStatus().filter((m) => m.state !== "absent");
   const stale = have.filter((m) => m.state === "different");
   add("ok", have.length ? `pitroom mcp is registered in: ${have.map((m) => m.name).join(", ")}` : "pitroom mcp is not registered in any client: `pitroom install --mcp` does it for the ones found (Cursor, Claude Desktop, Claude Code, Codex, Gemini CLI)");
-  for (const m of stale) add("warn", `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --force\` updates it`);
+  for (const m of stale) add("warn", `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --no-skills\` updates it`);
   section2("Skills and agents");
   addAll(skillChecks());
   if (probe && chain[0]) {

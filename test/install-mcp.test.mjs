@@ -81,7 +81,7 @@ test('install --mcp registers in every client found, keeps what they hold, and a
   edited.mcpServers.pitroom.command = '/old/place/pitroom';
   fs.writeFileSync(m.cursorFile, JSON.stringify(edited));
   const fixed = s.run(['install', '--mcp', '--no-skills'], m.env);
-  assert.match(fixed.stdout, /✔ Cursor: registered in/);
+  assert.match(fixed.stdout, /✔ Cursor: updated in/, 'a refresh reads differently from a first registration');
   assert.notEqual(json(m.cursorFile).mcpServers.pitroom.command, '/old/place/pitroom');
 });
 
@@ -120,4 +120,61 @@ test('doctor shows where pitroom mcp is registered, and uninstall removes only w
   for (const name of ['Claude Code', 'Codex', 'Gemini CLI', 'Cursor', 'Claude Desktop']) assert.match(out, new RegExp(`✔ ${name}: removed from`));
   assert.deepEqual(json(m.cursorFile).mcpServers, { other: { command: 'x' } }, 'the other server stays');
   assert.match(s.run(['doctor'], m.env).stdout, /not registered in any client/);
+});
+
+test('install --mcp --force registers again, a Codex entry with another command is refreshed, and extra fields of other servers survive', () => {
+  const s = sandbox();
+  const m = machine(s);
+  const other = { type: 'stdio', command: 'x', args: ['a'], env: { KEY: 'v' } };
+  fs.writeFileSync(m.cursorFile, JSON.stringify({ mcpServers: { other } }));
+  fs.mkdirSync(path.join(m.home, '.codex'), { recursive: true });
+  fs.writeFileSync(path.join(m.home, '.codex', 'config.toml'), '[mcp_servers.pitroom]\ncommand = "/old/pitroom"\nargs = ["mcp"]\n\n[memories]\nx = 1\n');
+  assert.match(s.run(['doctor'], m.env).stdout, /! Codex runs a different command for pitroom mcp/, 'a stale Codex entry is seen');
+  const first = s.run(['install', '--mcp', '--no-skills'], m.env);
+  assert.match(first.stdout, /✔ Codex: updated in/);
+  assert.match(fs.readFileSync(path.join(m.home, '.codex', 'config.toml'), 'utf8'), /\[memories\]\nx = 1/, 'the rest of Codex\'s config is kept');
+  assert.deepEqual(json(m.cursorFile).mcpServers.other, other, 'another server is untouched, fields and all');
+  const adds = () => m.calls().filter((c) => c.args[1] === 'add').length;
+  const before = adds();
+  assert.equal(s.run(['install', '--mcp', '--no-skills'], m.env).status, 0);
+  assert.equal(adds(), before, 'nothing to do');
+  const forced = s.run(['install', '--mcp', '--no-skills', '--force'], m.env);
+  assert.match(forced.stdout, /✔ Cursor: updated in/);
+  assert.equal(adds(), before + 3, 'the three CLI clients were registered again');
+});
+
+test('install --mcp does not register a file at the launcher path that is not a Pitroom launcher', () => {
+  const s = sandbox();
+  const m = machine(s, { desktop: false, clis: [] });
+  fs.mkdirSync(path.join(m.home, '.local', 'bin'), { recursive: true });
+  const foreign = path.join(m.home, '.local', 'bin', 'pitroom');
+  fs.writeFileSync(foreign, '#!/bin/sh\necho not pitroom\n', { mode: 0o755 });
+  const r = s.run(['install', '--mcp', '--no-skills'], m.env);
+  assert.match(r.stdout, /exists and is not Pitroom's launcher; kept/);
+  assert.notEqual(json(m.cursorFile).mcpServers.pitroom.command, foreign, 'the foreign file is not what Cursor is told to run');
+});
+
+test('uninstall: a client whose command is gone cannot drop its entry, which is a failure (exit 1); with nothing registered it says nothing more', () => {
+  const s = sandbox();
+  const quiet = machine(s, { cursor: false, desktop: false, clis: [] });
+  const none = s.run(['uninstall'], quiet.env);
+  assert.equal(none.status, 0);
+  assert.doesNotMatch(none.stdout, /Claude Code|Cursor|Codex|Gemini/);
+  fs.writeFileSync(path.join(quiet.home, '.claude.json'), JSON.stringify({ mcpServers: { pitroom: { command: '/x/pitroom', args: ['mcp'] } } }));
+  const stuck = s.run(['uninstall'], quiet.env);
+  assert.equal(stuck.status, 1);
+  assert.match(stuck.stdout, /✘ Claude Code: its command does not run: remove the pitroom entry from its config by hand/);
+});
+
+test('install: --no-skills and --dry-run need --mcp, and a failing client command is a line, not a crash', () => {
+  const s = sandbox();
+  const m = machine(s, { cursor: false, desktop: false, clis: ['claude'] });
+  assert.equal(s.run(['install', '--no-skills'], m.env).status, 2);
+  // a claude that refuses: fail with its first line (here: a stub that exits 1 and prints a reason)
+  const refuse = path.join(s.base, 'bin', 'claude');
+  fs.writeFileSync(refuse, '#!/bin/sh\n[ "$1" = "--version" ] && echo ok && exit 0\necho "refused: managed settings"\nexit 1\n', { mode: 0o755 });
+  const r = s.run(['install', '--mcp', '--no-skills', '--client', 'claude-code'], m.env);
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /✘ Claude Code: refused: managed settings/);
+  assert.doesNotMatch(r.stdout, /no MCP client found/, 'a failure is not "no client"');
 });
