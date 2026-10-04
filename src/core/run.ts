@@ -57,6 +57,8 @@ export interface RunOptions {
   audit?: { of: string };
   /** This run's own audit chance, 0 to 1: --audit is 1, --no-audit is 0. */
   auditRate?: number;
+  /** The answer cache's key, stored on the run so a later identical question finds it (see cache.ts). */
+  cache?: { key: string; state: string };
   /** Set by `pitroom review`. */
   review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string; plan?: RunMeta['plan'] };
 }
@@ -169,6 +171,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     auditOf: o.audit?.of,
     auditRate: o.auditRate,
     inPlace: o.inPlace || undefined,
+    cache: o.cache,
     snapshot: parent?.snapshot ?? (snap ? { dir: '', tree: '', left: snap.secrets } : undefined),
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,

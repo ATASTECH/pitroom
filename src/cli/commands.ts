@@ -13,6 +13,7 @@ import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
+import { cacheKey, cachedNote, findCached } from '../core/cache.js';
 import { prune as pruneSnapshots } from '../core/snapshot.js';
 import { activeCooldowns, clearCooldowns, untilText } from '../core/cooldown.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
@@ -49,7 +50,15 @@ async function launch(p: Parsed, meta: RunMeta): Promise<number> {
 export async function cmdRun(p: Parsed): Promise<number> {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
-  return launch(p, prepareRun(opts));
+  const cache = cacheKey(opts);
+  // --fresh asks a worker, and its answer is the one found from then on
+  const hit = cache && !has(p, 'fresh') ? findCached(cache) : undefined;
+  if (hit) {
+    // the same question on the same code: the earlier answer, and no worker runs
+    console.log(has(p, 'json') ? JSON.stringify({ ...hit, cached: true }, null, 2) : `${cachedNote(hit)}\n\n${formatReport(hit)}`);
+    return exitCodeFor(hit);
+  }
+  return launch(p, prepareRun({ ...opts, cache }));
 }
 
 /** A read-only review of a run's change, of a fix round, or of a commit range. */

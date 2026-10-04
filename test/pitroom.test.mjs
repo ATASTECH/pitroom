@@ -260,7 +260,7 @@ test('secret-looking files in the worker directory are called out: a read run re
   assert.doesNotMatch(inPlace.stdout, /\.env\.example/);
   const bg = s.run(['run', '--bg', 'look around again'], place);
   assert.match(bg.stdout, /warning: secret-looking files/);
-  const quiet = s.run(['run', 'look around'], { ...place, PITROOM_NO_SECRET_WARNING: '1' });
+  const quiet = s.run(['run', 'look around quietly'], { ...place, PITROOM_NO_SECRET_WARNING: '1' });
   assert.doesNotMatch(quiet.stdout, /secret-looking/);
 });
 

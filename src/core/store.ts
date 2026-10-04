@@ -74,6 +74,8 @@ export interface RunMeta {
   snapshot?: { dir: string; tree: string; left: string[] };
   /** `--in-place`: read the directory itself, never a snapshot. */
   inPlace?: boolean;
+  /** The answer cache's key for this read run (see cache.ts). */
+  cache?: { key: string; state: string };
   /** For an audit: the audited run's id. An audit re-checks a read run's answer with another worker. */
   auditOf?: string;
   auditVerdict?: AuditVerdict;

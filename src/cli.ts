@@ -84,6 +84,7 @@ Run options
       --in-place        a read run reads the directory itself, not a clean snapshot (default: a snapshot without secret-looking
                         files when the directory has any; config "readIn": auto | snapshot | project)
       --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
+      --fresh           ask a worker even when the same read question was answered on the same code (config "cacheDays", default 7)
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, … (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
@@ -105,9 +106,9 @@ Exit codes: 0 ok · 1 worker failed · 2 usage · 3 refused/setup · 4 timeout
             5 read-only violation · 6 verify failed · 75 still running (wait again)
 Workers: ${backendIds().join(', ')} (targets: "opencode", "opencode:provider/model", or a bare model)
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
-     PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
+     PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 

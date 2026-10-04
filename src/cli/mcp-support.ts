@@ -190,13 +190,16 @@ export async function startAndWait(start: string[], seconds: number, ctx: Ctx, t
   const started = await pit([...start, '--bg', '--json', ...(task === undefined ? [] : ['--', task])]);
   if (started.code !== 0) return asResult(started);
   let id: string;
+  let cached = false;
   try {
-    id = (JSON.parse(started.out) as { id: string }).id;
+    ({ id, cached = false } = JSON.parse(started.out) as { id: string; cached?: boolean });
   } catch {
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([id], seconds, ctx);
-  if (cancelled(ctx)) await stopQuietly(['stop', id]);
+  if (cancelled(ctx) && !cached) await stopQuietly(['stop', id]);
+  // the earlier answer to the same question on the same code: say so, it is not a new run
+  if (cached) result.text = `Cached answer: the same question on the same code as run ${id}; no worker ran (fresh: true asks one).\n\n${result.text}`;
   return result;
 }
 

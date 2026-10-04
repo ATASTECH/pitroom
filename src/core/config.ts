@@ -25,6 +25,8 @@ export interface PitroomConfig {
   readIn?: string;
   /** Chance (0 to 1) that a finished read run is re-checked by another worker in the background (default 0: off). */
   audit?: number;
+  /** Days an answer may be reused for the same read question on the same code (default 7; 0 turns the cache off). */
+  cacheDays?: number;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -43,6 +45,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   costs: 'numbers',
   audit: 'number',
   readIn: 'string',
+  cacheDays: 'number',
 };
 
 export function configPath(): string {
@@ -120,6 +123,12 @@ const rate = (v: unknown) => {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : undefined;
 };
 
+/** A whole number of days, 0 or more. */
+const days = (v: unknown) => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
+};
+
 const readIn = (v: unknown) => (v === 'auto' || v === 'snapshot' || v === 'project' ? v : undefined);
 
 const list = (s: string | undefined) => s?.split(',').map((x) => x.trim()).filter(Boolean);
@@ -151,5 +160,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),
     audit: setting<number>(undefined, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
     readIn: setting<string>(undefined, readIn(e.PITROOM_READ_IN), readIn(c.readIn), 'auto'),
+    cacheDays: setting<number>(undefined, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
   };
 }
