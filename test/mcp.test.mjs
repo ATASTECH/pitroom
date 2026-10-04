@@ -57,7 +57,7 @@ test('mcp: the handshake negotiates a version, tools are listed with schemas and
     assert.equal(init.result.protocolVersion, '2025-06-18');
     assert.equal(init.result.serverInfo.name, 'pitroom');
     assert.match(init.result.instructions, /pitroom_run/);
-    assert.deepEqual(init.result.capabilities, { tools: { listChanged: false } });
+    assert.deepEqual(init.result.capabilities, { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } });
     assert.equal((await c.rpc('initialize', { protocolVersion: '2024-11-05' })).result.protocolVersion, '2024-11-05', 'an older version it knows');
     assert.equal((await c.rpc('initialize', { protocolVersion: '1999-01-01' })).result.protocolVersion, '2025-06-18', 'an unknown one gets the latest');
 
@@ -65,7 +65,10 @@ test('mcp: the handshake negotiates a version, tools are listed with schemas and
     assert.deepEqual((await c.rpc('ping', {})).result, {});
 
     const { tools } = (await c.rpc('tools/list', {})).result;
-    assert.deepEqual(tools.map((t) => t.name), ['pitroom_run', 'pitroom_wait', 'pitroom_status', 'pitroom_show', 'pitroom_review', 'pitroom_audit', 'pitroom_apply', 'pitroom_discard', 'pitroom_stop']);
+    assert.deepEqual(tools.map((t) => t.name), [
+      'pitroom_run', 'pitroom_crew', 'pitroom_wait', 'pitroom_status', 'pitroom_list', 'pitroom_show', 'pitroom_history', 'pitroom_stats', 'pitroom_savings', 'pitroom_models',
+      'pitroom_cooldown', 'pitroom_doctor', 'pitroom_review', 'pitroom_audit', 'pitroom_apply', 'pitroom_discard', 'pitroom_revert', 'pitroom_stop',
+    ]);
     for (const t of tools) {
       assert.equal(t.inputSchema.type, 'object', t.name);
       assert.ok(t.description.length > 20 && t.title, t.name);
@@ -221,6 +224,156 @@ test('mcp: pitroom_audit re-checks a read run with another worker, and a review 
     assert.equal(rev.isError, false, rev.text);
     assert.match(rev.text, /review of /);
     assert.match(rev.text, /SPEC PASS/);
+  } finally {
+    await c2.close();
+  }
+});
+
+const progressOf = (c, token) => c.lines.map((l) => JSON.parse(l)).filter((m) => m.method === 'notifications/progress' && m.params.progressToken === token);
+
+test('mcp: a client that asks for progress gets it while a run is waited for, increasing, and one that does not gets none', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'sleep:4;answer:SUMMARY: slow but done' });
+  try {
+    await handshake(c);
+    const m = await c.rpc('tools/call', { name: 'pitroom_run', arguments: { task: 'slow one', waitSeconds: 60 }, _meta: { progressToken: 'tok-1' } });
+    assert.match(m.result.content[0].text, /pitroom ✔ done/);
+    const seen = progressOf(c, 'tok-1');
+    assert.ok(seen.length >= 1, 'at least one progress notification');
+    assert.deepEqual(seen.map((n) => n.params.progress), seen.map((_, i) => i + 1), 'progress only goes up');
+    assert.match(seen[0].params.message, /running|queued/);
+    assert.match(seen[0].params.message, /run \d{8}-\d{6}-[0-9a-f]{4}/);
+    const before = c.lines.length;
+    await c.call('pitroom_run', { task: 'second', waitSeconds: 60 });
+    assert.ok(!c.lines.slice(before).some((l) => JSON.parse(l).method === 'notifications/progress'), 'no token, no progress');
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: cancelling a request stops the run it started and sends no answer', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'sleep:30;answer:late' });
+  try {
+    await handshake(c);
+    c.raw(JSON.stringify({ jsonrpc: '2.0', id: 777, method: 'tools/call', params: { name: 'pitroom_run', arguments: { task: 'long one', waitSeconds: 120 } } }));
+    let id;
+    for (let i = 0; i < 50 && !id; i++) {
+      await new Promise((r) => setTimeout(r, 200));
+      id = RUN_ID.exec(s.run(['ls']).stdout)?.[0];
+    }
+    assert.ok(id, 'the run started');
+    c.raw(JSON.stringify({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 777, reason: 'user' } }));
+    let state = '';
+    for (let i = 0; i < 100 && !/stopped/.test(state); i++) {
+      await new Promise((r) => setTimeout(r, 300));
+      state = s.run(['status', id]).stdout;
+    }
+    assert.match(state, /stopped/, 'the cancelled request\'s run was stopped');
+    assert.ok(!c.lines.some((l) => JSON.parse(l).id === 777), 'a cancelled request is not answered');
+    assert.deepEqual((await c.rpc('ping', {})).result, {}, 'the server goes on');
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: runs are resources (report and patch), with templates, and a bad uri is the protocol\'s "not found"', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'append:app.txt:from the worker;answer:SUMMARY: extended app.txt' });
+  try {
+    await handshake(c);
+    const r = await c.call('pitroom_run', { task: 'extend app.txt', mode: 'isolate' });
+    const id = RUN_ID.exec(r.text)[0];
+    const { resources } = (await c.rpc('resources/list', {})).result;
+    const uris = resources.map((x) => x.uri);
+    assert.ok(uris.includes(`pitroom://run/${id}`) && uris.includes(`pitroom://run/${id}/patch`), uris.join(' '));
+    const report = (await c.rpc('resources/read', { uri: `pitroom://run/${id}` })).result.contents[0];
+    assert.match(report.text, /SUMMARY: extended app\.txt/);
+    assert.equal(report.mimeType, 'text/plain');
+    const patch = (await c.rpc('resources/read', { uri: `pitroom://run/${id}/patch` })).result.contents[0];
+    assert.match(patch.text, /\+from the worker/);
+    assert.equal(patch.mimeType, 'text/x-diff');
+    const { resourceTemplates } = (await c.rpc('resources/templates/list', {})).result;
+    assert.deepEqual(resourceTemplates.map((t) => t.uriTemplate), ['pitroom://run/{id}', 'pitroom://run/{id}/patch']);
+    assert.equal((await c.rpc('resources/read', { uri: 'file:///etc/passwd' })).error.code, -32002, 'only runs are resources');
+    assert.equal((await c.rpc('resources/read', { uri: 'pitroom://run/19990101-000000-0000' })).error.code, -32002);
+    assert.equal((await c.rpc('resources/read', {})).error.code, -32602);
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: prompts say how to use Pitroom, with their arguments checked', async () => {
+  const s = sandbox();
+  const c = connect(s);
+  try {
+    await handshake(c);
+    const { prompts } = (await c.rpc('prompts/list', {})).result;
+    assert.deepEqual(prompts.map((p) => p.name), ['research', 'implement', 'review', 'crew']);
+    const research = (await c.rpc('prompts/get', { name: 'research', arguments: { question: 'where is login handled?' } })).result;
+    assert.equal(research.messages[0].role, 'user');
+    assert.match(research.messages[0].content.text, /pitroom_run[\s\S]*where is login handled\?/);
+    assert.match((await c.rpc('prompts/get', { name: 'review', arguments: { range: 'main..HEAD' } })).result.messages[0].content.text, /range "main\.\.HEAD"/);
+    assert.match((await c.rpc('prompts/get', { name: 'review' })).result.messages[0].content.text, /run "last"/, 'an optional argument');
+    assert.equal((await c.rpc('prompts/get', { name: 'research' })).error.code, -32602, 'a required argument is missing');
+    assert.equal((await c.rpc('prompts/get', { name: 'nope' })).error.code, -32602);
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: pitroom_crew runs tasks in parallel as one group and returns every report', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: done here' });
+  try {
+    await handshake(c);
+    const r = await c.call('pitroom_crew', { tasks: ['first job', 'second job'], group: 'pair', waitSeconds: 90 });
+    assert.equal(r.isError, false, r.text);
+    assert.equal(r.text.match(/pitroom ✔ done/g).length, 2, r.text);
+    assert.equal(s.run(['ls', '-g', 'pair']).stdout.match(/\d{8}-\d{6}-[0-9a-f]{4}/g).length, 2, 'both runs are in the group');
+    assert.equal((await c.call('pitroom_crew', { tasks: [] })).isError, true);
+    assert.equal((await c.call('pitroom_crew', { tasks: ['x'], mode: 'write' })).isError, true, 'parallel workers never write in place');
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: the read-only tools show what the CLI shows, a follow-up continues a run, and a written change is reverted', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: app.txt holds line1' });
+  try {
+    await handshake(c);
+    const id = RUN_ID.exec((await c.call('pitroom_run', { task: 'where is app.txt?' })).text)[0];
+    assert.match((await c.call('pitroom_list', {})).text, new RegExp(id));
+    assert.equal((await c.call('pitroom_list', { running: true })).text, 'nothing is running');
+    assert.match((await c.call('pitroom_history', { text: 'app.txt' })).text, new RegExp(id));
+    assert.match((await c.call('pitroom_stats', {})).text, /1 runs/);
+    assert.equal((await c.call('pitroom_stats', { since: 'last week' })).isError, true);
+    assert.match((await c.call('pitroom_history', { limit: 0 })).text, /"limit" must be/);
+    assert.equal((await c.call('pitroom_savings', {})).isError, false);
+    assert.equal((await c.call('pitroom_models', {})).isError, false);
+    assert.match((await c.call('pitroom_cooldown', {})).text, /no model is cooling down/);
+    assert.ok((await c.call('pitroom_doctor', {})).text.length > 0);
+
+    const follow = await c.call('pitroom_run', { task: 'and the second line?', continue: id });
+    assert.equal(follow.isError, false, follow.text);
+    assert.match(s.calls().filter((x) => x.argv[0] === 'run').at(-1).argv.join(' '), /--session|resume|-s/, 'the worker session was resumed');
+  } finally {
+    await c.close();
+  }
+  const s2 = sandbox();
+  const c2 = connect(s2, { MOCK_ACTIONS: 'append:app.txt:written in place;answer:SUMMARY: wrote' });
+  try {
+    await handshake(c2);
+    const w = await c2.call('pitroom_run', { task: 'write it', mode: 'write' });
+    assert.equal(w.isError, false, w.text);
+    const id = RUN_ID.exec(w.text)[0];
+    assert.match(fs.readFileSync(path.join(s2.repo, 'app.txt'), 'utf8'), /written in place/);
+    const back = await c2.call('pitroom_revert', { run: id });
+    assert.equal(back.isError, false, back.text);
+    assert.match(back.text, /reverted 1 file/);
+    assert.doesNotMatch(fs.readFileSync(path.join(s2.repo, 'app.txt'), 'utf8'), /written in place/);
+    assert.equal((await c2.call('pitroom_revert', { run: id })).isError, true, 'twice is refused');
   } finally {
     await c2.close();
   }

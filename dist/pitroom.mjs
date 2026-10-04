@@ -1680,7 +1680,6 @@ function effortFlag(p) {
 }
 
 // src/cli/mcp.ts
-import { spawn as spawn3 } from "node:child_process";
 import readline from "node:readline";
 
 // src/core/run.ts
@@ -3129,12 +3128,12 @@ function hookCards(input) {
   const output = typeof response === "string" ? response : [response?.stdout, response?.stderr].filter(Boolean).join("\n");
   const ids = [...new Set(`${command}
 ${output}`.match(RUN_ID) ?? [])].filter((id) => fs21.existsSync(`${runsDir()}/${id}`));
-  const since = Date.now() - RECENT_HOURS * 36e5;
+  const since2 = Date.now() - RECENT_HOURS * 36e5;
   for (const id of listRunIds().slice(-RECENT)) {
     if (ids.includes(id) || fs21.existsSync(runFile(id, "card-ended"))) continue;
     try {
       const m = readMeta(id);
-      if (!isActive(m.state) && Date.parse(m.endedAt ?? m.startedAt) > since) ids.push(id);
+      if (!isActive(m.state) && Date.parse(m.endedAt ?? m.startedAt) > since2) ids.push(id);
     } catch {
     }
   }
@@ -3408,17 +3407,17 @@ function listHistory(q = {}) {
   }
 }
 var NOT_AUDIT = "json_extract(meta_json, '$.auditOf') IS NULL";
-function auditStats(db, since) {
+function auditStats(db, since2) {
   const total = { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 };
   const byWorker = /* @__PURE__ */ new Map();
   try {
-    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(tokens),0) tokens FROM runs WHERE started_at >= ? AND json_extract(meta_json, '$.auditOf') IS NOT NULL").get(since);
+    const t = db.prepare("SELECT COUNT(*) runs, COALESCE(SUM(tokens),0) tokens FROM runs WHERE started_at >= ? AND json_extract(meta_json, '$.auditOf') IS NOT NULL").get(since2);
     total.runs = t.runs;
     total.tokens = t.tokens;
     const rows = db.prepare(`SELECT r.backend, r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
       FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
       WHERE a.started_at >= ? AND a.state = 'done' AND json_extract(a.meta_json, '$.auditOf') IS NOT NULL
-      GROUP BY r.backend, r.model, v`).all(since);
+      GROUP BY r.backend, r.model, v`).all(since2);
     for (const r of rows) {
       const v = r.v ?? "unclear";
       if (v in total && v !== "runs" && v !== "tokens") total[v] += r.n;
@@ -3456,12 +3455,12 @@ function historyStats(sinceMs2) {
   const empty = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
   if (!db) return empty;
-  const since = sinceMs2 ? new Date(sinceMs2).toISOString() : "";
+  const since2 = sinceMs2 ? new Date(sinceMs2).toISOString() : "";
   try {
-    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
-    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
-    const audits = auditStats(db, since);
+    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since2);
+    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since2);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since2);
+    const audits = auditStats(db, since2);
     const ledger = readLedger(sinceMs2);
     const byDay = /* @__PURE__ */ new Map();
     for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
@@ -4059,437 +4058,8 @@ function cleanupWorktree(meta) {
   if (meta.worktree && fs24.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
 }
 
-// src/cli/mcp.ts
-var PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
-var MAX_OUTPUT = 12e4;
-var DEFAULT_WAIT = 50;
-var MAX_WAIT = 540;
-var INSTRUCTIONS = [
-  "Pitroom hands bounded work to cheaper worker agents and returns a verified answer, the exact diff and a cost receipt. You decide, verify and answer.",
-  'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard).',
-  'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it.',
-  "It is optional: for a small task you can do yourself, skip it."
-].join(" ");
-var ToolError = class extends Error {
-};
-var str = (a, key, required = false) => {
-  const v = a[key];
-  if (v === void 0 || v === null || v === "") {
-    if (required) throw new ToolError(`"${key}" is required`);
-    return void 0;
-  }
-  if (typeof v !== "string") throw new ToolError(`"${key}" must be a string`);
-  return v;
-};
-var strs = (a, key) => {
-  const v = a[key];
-  if (v === void 0 || v === null) return [];
-  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new ToolError(`"${key}" must be a list of strings`);
-  return v;
-};
-var bool = (a, key) => {
-  const v = a[key];
-  if (v === void 0 || v === null) return false;
-  if (typeof v !== "boolean") throw new ToolError(`"${key}" must be true or false`);
-  return v;
-};
-var waitSeconds = (a) => {
-  const v = a.waitSeconds;
-  if (v === void 0 || v === null) return DEFAULT_WAIT;
-  if (typeof v !== "number" || !Number.isFinite(v) || v < 1) throw new ToolError('"waitSeconds" must be a number of seconds, 1 or more');
-  return Math.min(Math.round(v), MAX_WAIT);
-};
-var oneOf = (a, key, allowed, fallback) => {
-  const v = str(a, key);
-  if (v === void 0) return fallback;
-  if (!allowed.includes(v)) throw new ToolError(`"${key}" must be one of: ${allowed.join(", ")}`);
-  return v;
-};
-function workerFlags(a, only) {
-  const out = [];
-  const on = (key) => !only || only.includes(key);
-  const pairs = [["worker", "-W"], ["model", "-m"], ["tier", "--tier"], ["effort", "--effort"], ["dir", "-d"], ["verify", "--verify"], ["group", "-g"]];
-  for (const [key, flag2] of pairs) {
-    const v = on(key) ? str(a, key) : void 0;
-    if (v !== void 0) out.push(flag2, v);
-  }
-  if (on("files")) for (const f of strs(a, "files")) out.push("-f", f);
-  const link = on("link") ? strs(a, "link") : [];
-  if (link.length) out.push("--link", link.join(","));
-  if (on("web") && bool(a, "web")) out.push("--web");
-  return out;
-}
-var strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
-var clip6 = (s) => s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}
-\u2026 (${s.length - MAX_OUTPUT} more characters)` : s;
-function pit(args, timeoutMs = 60 * 6e4) {
-  return new Promise((resolve2) => {
-    const script = process.argv[1];
-    if (!script) return resolve2({ code: 1, out: "", err: "cannot locate the pitroom executable" });
-    const child = spawn3(process.execPath, [script, ...args], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
-    child.stdout.on("data", (d) => out += d);
-    child.stderr.on("data", (d) => err += d);
-    const timer = setTimeout(() => child.kill("SIGTERM"), timeoutMs);
-    child.on("error", (e) => resolve2({ code: 1, out, err: err || String(e.message) }));
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve2({ code, out: strip(out).trim(), err: strip(err).trim() });
-    });
-  });
-}
-function asResult(r, still) {
-  const text = [r.out, r.err && r.code !== 0 ? r.err : ""].filter(Boolean).join("\n\n") || "(no output)";
-  if (r.code === 75 && still) return { text: clip6(`${text}
-
-${still}`) };
-  return { text: clip6(text), isError: r.code === 2 || r.code === 3 || r.code === 1 && !r.out };
-}
-async function startAndWait(start, seconds, task) {
-  const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]]);
-  if (started.code !== 0) return asResult(started);
-  let id;
-  try {
-    id = JSON.parse(started.out).id;
-  } catch {
-    return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
-  }
-  return waitFor([id], seconds);
-}
-async function waitFor(ids, seconds, group) {
-  const args = group ? ["wait", "-g", group, "--timeout", String(seconds)] : ["wait", ...ids, "--timeout", String(seconds)];
-  const r = await pit(args, (seconds + 60) * 1e3);
-  const again = group ? `{"group": "${group}"}` : `{"runs": ${JSON.stringify(ids)}}`;
-  return asResult(r, `Not finished yet: call pitroom_wait with ${again} (waitSeconds up to ${MAX_WAIT}); pitroom_stop ends it.`);
-}
-var WORKER_PROPS = {
-  worker: { type: "string", description: 'Worker target "backend[:model]", e.g. "opencode", "codex", "claude:haiku", "gemini:gemini-3.8-flash". Default: the configured worker.' },
-  model: { type: "string", description: "Model for the preferred worker." },
-  tier: { type: "string", description: "A worker tier from the config: cheap, standard, capable (an explicit worker wins)." },
-  effort: { type: "string", description: "Reasoning effort for the worker: low, medium, high, xhigh." },
-  dir: { type: "string", description: "Project directory (default: the directory the server was started in)." },
-  files: { type: "array", items: { type: "string" }, description: "Files to attach (paths)." },
-  verify: { type: "string", description: 'A command run after the worker finishes (e.g. "npm test"); a failing one is reported.' },
-  link: { type: "array", items: { type: "string" }, description: 'Ignored directories to link into an isolated copy so tests can run (e.g. ["node_modules"]).' },
-  web: { type: "boolean", description: "Let the worker use web tools." },
-  group: { type: "string", description: "A name to group related runs under." }
-};
-var WAIT_PROP = { waitSeconds: { type: "number", description: `How long to wait for the result before returning "still running" (default ${DEFAULT_WAIT}, at most ${MAX_WAIT}).` } };
-var RUN_ID2 = { type: "string", description: 'A run id as printed by a run, or "last".' };
-var TOOLS2 = [
-  {
-    name: "pitroom_run",
-    title: "Run a worker",
-    description: 'Hand a bounded task to a cheaper worker agent. mode "read" (default) is read-only research that returns an answer whose file:line references are verified; "isolate" lets the worker edit a private copy and returns the exact diff (review it, then pitroom_apply or pitroom_discard); "write" edits the working tree in place and is undoable with the CLI (`pitroom revert`). Returns the worker\'s answer and a receipt, or "still running" with the run id.',
-    inputSchema: {
-      type: "object",
-      properties: {
-        task: { type: "string", description: "What the worker should do, with the context it needs." },
-        mode: { type: "string", enum: ["read", "isolate", "write"], description: "read (default), isolate, or write." },
-        inPlace: { type: "boolean", description: "Read mode only: read the directory itself instead of a clean snapshot without secret-looking files." },
-        audit: { type: "boolean", description: "Read mode only: have another worker re-check the answer afterwards." },
-        ...WORKER_PROPS,
-        ...WAIT_PROP
-      },
-      required: ["task"]
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async call(a) {
-      const task = str(a, "task", true);
-      const mode = oneOf(a, "mode", ["read", "isolate", "write"], "read");
-      const flags = mode === "isolate" ? ["-i"] : mode === "write" ? ["-w"] : [];
-      if (mode === "read") {
-        if (bool(a, "inPlace")) flags.push("--in-place");
-        if (bool(a, "audit")) flags.push("--audit");
-      }
-      return startAndWait(["run", ...flags, ...workerFlags(a)], waitSeconds(a), task);
-    }
-  },
-  {
-    name: "pitroom_wait",
-    title: "Wait for runs",
-    description: 'Wait for runs started earlier (a run that came back "still running") and return their reports.',
-    inputSchema: {
-      type: "object",
-      properties: { runs: { type: "array", items: { type: "string" }, description: "Run ids." }, group: { type: "string", description: "Or a group name." }, ...WAIT_PROP }
-    },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    async call(a) {
-      const runs = strs(a, "runs");
-      const group = str(a, "group");
-      if (!runs.length && !group) throw new ToolError('give "runs" or "group"');
-      return waitFor(runs, waitSeconds(a), runs.length ? void 0 : group);
-    }
-  },
-  {
-    name: "pitroom_status",
-    title: "Run status",
-    description: "The state and live progress of a run (default: the latest), or of a group.",
-    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string", description: "A group name." } } },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    async call(a) {
-      const group = str(a, "group");
-      const run2 = str(a, "run");
-      return asResult(await pit(["status", ...group ? ["-g", group] : run2 ? [run2] : []], 6e4));
-    }
-  },
-  {
-    name: "pitroom_show",
-    title: "Show a run",
-    description: "A finished run's report again; with patch the exact diff of an isolated change, with full the untruncated answer.",
-    inputSchema: { type: "object", properties: { run: RUN_ID2, patch: { type: "boolean" }, full: { type: "boolean" } }, required: ["run"] },
-    annotations: { readOnlyHint: true, openWorldHint: false },
-    async call(a) {
-      const run2 = str(a, "run", true);
-      return asResult(await pit(["show", run2, ...bool(a, "patch") ? ["--patch"] : bool(a, "full") ? ["--full"] : []], 6e4));
-    }
-  },
-  {
-    name: "pitroom_review",
-    title: "Review a change",
-    description: `A read-only reviewer (by default another worker than the implementer) judges one run's change, or a range of commits ("main..HEAD"). Returns findings with severities and a SPEC / QUALITY verdict.`,
-    inputSchema: {
-      type: "object",
-      properties: {
-        run: { ...RUN_ID2, description: "The run whose change to review (an isolated or in-place change)." },
-        range: { type: "string", description: 'Or a commit range "A..B".' },
-        plan: { type: "string", description: "With range: the plan file the commits implement." },
-        worker: WORKER_PROPS.worker,
-        tier: WORKER_PROPS.tier,
-        dir: WORKER_PROPS.dir,
-        group: WORKER_PROPS.group,
-        ...WAIT_PROP
-      }
-    },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async call(a) {
-      const run2 = str(a, "run");
-      const range = str(a, "range");
-      if (!run2 === !range) throw new ToolError('give exactly one of "run" or "range"');
-      const plan = str(a, "plan");
-      const flags = workerFlags(a, ["worker", "tier", "dir", "group"]);
-      return startAndWait(["review", ...range ? ["--range", range, ...plan ? ["--plan", plan] : []] : [run2], ...flags], waitSeconds(a));
-    }
-  },
-  {
-    name: "pitroom_audit",
-    title: "Audit an answer",
-    description: "Another worker re-checks a finished read run's answer against the project and says AGREE, PARTIAL or DISAGREE with the claims it disputes.",
-    inputSchema: { type: "object", properties: { run: RUN_ID2, worker: WORKER_PROPS.worker, ...WAIT_PROP }, required: ["run"] },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
-    async call(a) {
-      const run2 = str(a, "run", true);
-      const worker = str(a, "worker");
-      return startAndWait(["audit", run2, ...worker ? ["-W", worker] : []], waitSeconds(a));
-    }
-  },
-  {
-    name: "pitroom_apply",
-    title: "Apply an isolated change",
-    description: "Land an isolated run's patch on the user's working tree (checked first; refused if it no longer applies cleanly). A patch that deletes files is refused unless allowDelete is true: only pass it after checking the deletions are what the user asked for.",
-    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string" }, allowDelete: { type: "boolean" } } },
-    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-    async call(a) {
-      const group = str(a, "group");
-      const run2 = str(a, "run");
-      if (!run2 && !group) throw new ToolError('give "run" or "group"');
-      return asResult(await pit(["apply", ...group && !run2 ? ["-g", group] : [run2], ...bool(a, "allowDelete") ? ["--allow-delete"] : []], 12e4));
-    }
-  },
-  {
-    name: "pitroom_discard",
-    title: "Discard an isolated change",
-    description: "Drop an isolated run's private copy (its patch is kept).",
-    inputSchema: { type: "object", properties: { run: RUN_ID2 }, required: ["run"] },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async call(a) {
-      return asResult(await pit(["discard", str(a, "run", true)], 6e4));
-    }
-  },
-  {
-    name: "pitroom_stop",
-    title: "Stop runs",
-    description: "Stop a running or queued run, or every run of a group.",
-    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string" } } },
-    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-    async call(a) {
-      const run2 = str(a, "run");
-      const group = str(a, "group");
-      if (!run2 && !group) throw new ToolError('give "run" or "group"');
-      return asResult(await pit(["stop", ...run2 ? [run2] : ["-g", group]], 6e4));
-    }
-  }
-];
-var log = (msg) => void process.stderr.write(`pitroom mcp: ${msg}
-`);
-var send = (msg) => void process.stdout.write(`${JSON.stringify(msg)}
-`);
-var RpcError = class extends Error {
-  constructor(code, message) {
-    super(message);
-    this.code = code;
-  }
-};
-async function dispatch(method, params) {
-  switch (method) {
-    case "initialize": {
-      const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
-      return {
-        protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
-        capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: "pitroom", title: "Pitroom", version: VERSION2 },
-        instructions: INSTRUCTIONS
-      };
-    }
-    case "ping":
-      return {};
-    case "tools/list":
-      return { tools: TOOLS2.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })) };
-    case "tools/call": {
-      const tool = TOOLS2.find((t) => t.name === params.name);
-      if (!tool) throw new RpcError(-32602, `unknown tool: ${String(params.name)}`);
-      const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments : {};
-      try {
-        const r = await tool.call(args);
-        return { content: [{ type: "text", text: r.text }], isError: r.isError === true };
-      } catch (e) {
-        if (e instanceof ToolError) return { content: [{ type: "text", text: e.message }], isError: true };
-        log(`${tool.name} failed: ${e.stack ?? e}`);
-        return { content: [{ type: "text", text: `pitroom: ${e.message}` }], isError: true };
-      }
-    }
-    default:
-      throw new RpcError(-32601, `method not found: ${method}`);
-  }
-}
-async function handle(msg) {
-  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request" } };
-  const m = msg;
-  if (typeof m.method !== "string") return void 0;
-  const isRequest = m.id !== void 0 && m.id !== null;
-  try {
-    const result = await dispatch(m.method, m.params && typeof m.params === "object" ? m.params : {});
-    return isRequest ? { jsonrpc: "2.0", id: m.id, result } : void 0;
-  } catch (e) {
-    if (!isRequest) return void 0;
-    const code = e instanceof RpcError ? e.code : -32603;
-    return { jsonrpc: "2.0", id: m.id, error: { code, message: e.message } };
-  }
-}
-async function handleLine(line) {
-  let parsed;
-  try {
-    parsed = JSON.parse(line);
-  } catch {
-    send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
-    return;
-  }
-  if (Array.isArray(parsed)) {
-    const replies = (await Promise.all(parsed.map(handle))).filter((r) => !!r);
-    if (replies.length) send(replies);
-    return;
-  }
-  const reply = await handle(parsed);
-  if (reply) send(reply);
-}
-async function serveMcp() {
-  const rl = readline.createInterface({ input: process.stdin });
-  const inflight = /* @__PURE__ */ new Set();
-  rl.on("line", (line) => {
-    if (!line.trim()) return;
-    const p = handleLine(line).catch((e) => log(String(e.stack ?? e)));
-    inflight.add(p);
-    void p.finally(() => inflight.delete(p));
-  });
-  await new Promise((resolve2) => rl.once("close", resolve2));
-  await Promise.allSettled([...inflight]);
-  return 0;
-}
-
-// src/cli/commands.ts
-import { spawnSync as spawnSync8 } from "node:child_process";
-import fs30 from "node:fs";
-import path26 from "node:path";
-import { fileURLToPath as fileURLToPath4 } from "node:url";
-
-// src/core/init.ts
-import fs25 from "node:fs";
-import path21 from "node:path";
-var FREE = /-free$/;
-var TIER_ORDER = [["cheap", "opencode"], ["standard", "codex"], ["capable", "claude"]];
-var isFound = (binary5) => path21.isAbsolute(binary5) && fs25.existsSync(binary5);
-function planInit(opts = {}) {
-  const file2 = configPath();
-  const workers = backendIds().map((id) => {
-    const b = getBackend(id);
-    const binary5 = b.binary();
-    return { id, name: b.name, found: isFound(binary5), binary: binary5 };
-  });
-  const notes = [];
-  const config = {};
-  let blocked;
-  let opencode2;
-  if (workers.find((w) => w.id === "opencode")?.found) {
-    const b = getBackend("opencode");
-    let models = [];
-    try {
-      models = b.catalog ? b.catalog().models.map((m) => m.id) : b.listModels?.() ?? [];
-    } catch {
-      notes.push("could not list OpenCode models (is it logged in?)");
-    }
-    const defaultModel4 = b.defaultModel?.();
-    const chosen = opts.model ?? defaultModel4;
-    const free = models.filter((m) => FREE.test(m) && m !== chosen);
-    opencode2 = { defaultModel: defaultModel4, models: models.length, free: free.slice(0, 6) };
-    if (opts.model) {
-      if (models.length && !models.includes(opts.model)) throw new UserError(`"${opts.model}" is not in \`opencode models\``);
-      if (!models.length) notes.push(`could not check "${opts.model}": \`opencode models\` listed nothing`);
-      config.models = { opencode: opts.model };
-    } else if (!defaultModel4) {
-      blocked = `OpenCode has no default model: choose one with --model <id>${free.length ? ` (free models you have: ${free.slice(0, 4).join(", ")})` : ""}`;
-    }
-    const fallback = opts.fallback ?? free.slice(0, 2);
-    for (const m of fallback) {
-      if (models.length && !models.includes(m)) throw new UserError(`"${m}" is not in \`opencode models\``);
-    }
-    if (fallback.length) {
-      config.fallback = fallback.map((m) => `opencode:${m}`);
-      if (!opts.fallback) notes.push(`fallback suggested from the free models in your catalogue: ${fallback.join(", ")} (change it with --fallback a,b)`);
-    } else {
-      notes.push("no fallback: no free OpenCode model found to suggest (pass --fallback a,b to name some)");
-    }
-  }
-  const tiers = Object.fromEntries(TIER_ORDER.filter(([, id]) => workers.find((w) => w.id === id)?.found));
-  if (Object.keys(tiers).length > 1) config.tiers = tiers;
-  if (!workers.some((w) => w.found)) blocked = "no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI, Claude Code or Gemini CLI first";
-  else if (!blocked && !Object.keys(config).length) notes.push("nothing to propose: the default model and the single worker need no config");
-  return { path: file2, exists: fs25.existsSync(file2), workers, opencode: opencode2, config, blocked, notes };
-}
-function writeInit(plan, force) {
-  if (plan.blocked) throw new UserError(plan.blocked);
-  if (!Object.keys(plan.config).length) throw new UserError("nothing to write: the proposal is empty");
-  if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path21.basename(plan.path)}.bak)`);
-  fs25.mkdirSync(path21.dirname(plan.path), { recursive: true });
-  if (plan.exists) fs25.copyFileSync(plan.path, `${plan.path}.bak`);
-  fs25.writeFileSync(plan.path, `${JSON.stringify(plan.config, null, 2)}
-`);
-  return plan.path;
-}
-function formatInit(plan, written) {
-  const out = [bold("pitroom init") + dim(": worker CLIs on this machine")];
-  for (const w of plan.workers) out.push(`  ${w.found ? green("\u2714") : dim("\xB7")} ${w.name.padEnd(12)} ${w.found ? w.binary : dim("not found")}`);
-  if (plan.opencode) {
-    const o = plan.opencode;
-    out.push(`  OpenCode: ${o.models} models, default ${o.defaultModel ?? "none"}${o.free.length ? `, free: ${o.free.slice(0, 3).join(", ")}${o.free.length > 3 ? ", \u2026" : ""}` : ""}`);
-  }
-  out.push("", `config file: ${plan.path}${plan.exists ? " (exists)" : " (not present)"}`, JSON.stringify(plan.config, null, 2));
-  for (const n of plan.notes) out.push(`  note: ${n}`);
-  if (written) out.push("", green(`\u2714 written to ${written}`), dim("  next: pitroom doctor, then pitroom install"));
-  else if (plan.blocked) out.push("", yellow(`! ${plan.blocked}`));
-  else out.push("", `nothing written yet: pass --yes to write it${plan.exists ? " (with --force, since the file exists)" : ""}`);
-  return out.join("\n");
-}
+// src/cli/mcp-support.ts
+import { spawn as spawn3 } from "node:child_process";
 
 // src/core/group.ts
 function groupIds(group) {
@@ -4598,6 +4168,740 @@ ${(/* @__PURE__ */ new Date()).toLocaleTimeString()} \xB7 Ctrl-C to stop watchin
     if (Date.now() >= deadline) return { metas, timedOut: true };
     await sleep2(opts.intervalMs);
   }
+}
+
+// src/cli/mcp-support.ts
+var MAX_OUTPUT = 12e4;
+var DEFAULT_WAIT = 50;
+var MAX_WAIT = 540;
+var PROGRESS_EVERY_MS = 5e3;
+var ToolError = class extends Error {
+};
+var str = (a, key, required = false) => {
+  const v = a[key];
+  if (v === void 0 || v === null || v === "") {
+    if (required) throw new ToolError(`"${key}" is required`);
+    return void 0;
+  }
+  if (typeof v !== "string") throw new ToolError(`"${key}" must be a string`);
+  return v;
+};
+var strs = (a, key) => {
+  const v = a[key];
+  if (v === void 0 || v === null) return [];
+  if (!Array.isArray(v) || v.some((x) => typeof x !== "string")) throw new ToolError(`"${key}" must be a list of strings`);
+  return v;
+};
+var bool = (a, key) => {
+  const v = a[key];
+  if (v === void 0 || v === null) return false;
+  if (typeof v !== "boolean") throw new ToolError(`"${key}" must be true or false`);
+  return v;
+};
+var waitSeconds = (a) => {
+  const v = a.waitSeconds;
+  if (v === void 0 || v === null) return DEFAULT_WAIT;
+  if (typeof v !== "number" || !Number.isFinite(v) || v < 1) throw new ToolError('"waitSeconds" must be a number of seconds, 1 or more');
+  return Math.min(Math.round(v), MAX_WAIT);
+};
+var oneOf = (a, key, allowed, fallback) => {
+  const v = str(a, key);
+  if (v === void 0) return fallback;
+  if (!allowed.includes(v)) throw new ToolError(`"${key}" must be one of: ${allowed.join(", ")}`);
+  return v;
+};
+var since = (a) => {
+  const v = str(a, "since");
+  if (v === void 0) return [];
+  if (v !== "all" && !/^\d+d$/.test(v)) throw new ToolError('"since" takes 7d, 30d, \u2026 or all');
+  return ["--since", v];
+};
+function workerFlags(a, only) {
+  const out = [];
+  const on = (key) => !only || only.includes(key);
+  const pairs = [["worker", "-W"], ["model", "-m"], ["tier", "--tier"], ["effort", "--effort"], ["dir", "-d"], ["verify", "--verify"], ["group", "-g"]];
+  for (const [key, flag2] of pairs) {
+    const v = on(key) ? str(a, key) : void 0;
+    if (v !== void 0) out.push(flag2, v);
+  }
+  if (on("files")) for (const f of strs(a, "files")) out.push("-f", f);
+  const link = on("link") ? strs(a, "link") : [];
+  if (link.length) out.push("--link", link.join(","));
+  if (on("web") && bool(a, "web")) out.push("--web");
+  return out;
+}
+var strip = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+var clip6 = (s) => s.length > MAX_OUTPUT ? `${s.slice(0, MAX_OUTPUT)}
+\u2026 (${s.length - MAX_OUTPUT} more characters)` : s;
+function pit(args, timeoutMs = 60 * 6e4, signal) {
+  return new Promise((resolve2) => {
+    const script = process.argv[1];
+    if (!script) return resolve2({ code: 1, out: "", err: "cannot locate the pitroom executable" });
+    const child = spawn3(process.execPath, [script, ...args], { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    let err = "";
+    child.stdout.on("data", (d) => out += d);
+    child.stderr.on("data", (d) => err += d);
+    const stop = () => child.kill("SIGTERM");
+    const timer = setTimeout(stop, timeoutMs);
+    signal?.addEventListener("abort", stop, { once: true });
+    if (signal?.aborted) stop();
+    child.on("error", (e) => resolve2({ code: 1, out, err: err || String(e.message) }));
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", stop);
+      resolve2({ code, out: strip(out).trim(), err: strip(err).trim() });
+    });
+  });
+}
+function asResult(r, still) {
+  const text = [r.out, r.err && r.code !== 0 ? r.err : ""].filter(Boolean).join("\n\n") || "(no output)";
+  if (r.code === 75 && still) return { text: clip6(`${text}
+
+${still}`) };
+  return { text: clip6(text), isError: r.code === 2 || r.code === 3 || r.code === 1 && !r.out };
+}
+var plain = async (args, ctx, timeoutMs = 6e4) => asResult(await pit(args, timeoutMs, ctx.signal));
+function trackProgress(ctx, ids) {
+  const tick = () => {
+    try {
+      const lines = ids().map((id) => freshMeta(id)).filter((m) => isActive(m.state)).map((m) => progress(m).replace(/^pitroom\s+/, ""));
+      if (lines.length) ctx.progress(lines.slice(0, 3).join("\n") + (lines.length > 3 ? `
+\u2026 and ${lines.length - 3} more` : ""));
+    } catch {
+    }
+  };
+  const first = setTimeout(tick, 800);
+  const timer = setInterval(tick, PROGRESS_EVERY_MS);
+  return () => {
+    clearTimeout(first);
+    clearInterval(timer);
+  };
+}
+async function waitFor(ids, seconds, ctx, group) {
+  const args = group ? ["wait", "-g", group, "--timeout", String(seconds)] : ["wait", ...ids, "--timeout", String(seconds)];
+  const done = trackProgress(ctx, () => group ? groupIds(group) : ids);
+  let r;
+  try {
+    r = await pit(args, (seconds + 60) * 1e3, ctx.signal);
+  } finally {
+    done();
+  }
+  const again = group ? `{"group": "${group}"}` : `{"runs": ${JSON.stringify(ids)}}`;
+  return asResult(r, `Not finished yet: call pitroom_wait with ${again} (waitSeconds up to ${MAX_WAIT}); pitroom_stop ends it.`);
+}
+var cancelled = (ctx) => ctx.signal.aborted && ctx.signal.reason === "cancelled";
+async function startAndWait(start, seconds, ctx, task) {
+  const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]], void 0, ctx.signal);
+  if (started.code !== 0) return asResult(started);
+  let id;
+  try {
+    id = JSON.parse(started.out).id;
+  } catch {
+    return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
+  }
+  const result = await waitFor([id], seconds, ctx);
+  if (cancelled(ctx)) await pit(["stop", id], 3e4);
+  return result;
+}
+async function startCrew(flags, tasks, seconds, ctx) {
+  const started = await pit(["crew", ...flags, "--json", "--", ...tasks], void 0, ctx.signal);
+  if (started.code !== 0) return asResult(started);
+  let group;
+  try {
+    group = JSON.parse(started.out).group;
+  } catch {
+    return { text: `could not read the group from: ${started.out.slice(0, 200)}`, isError: true };
+  }
+  const result = await waitFor([], seconds, ctx, group);
+  if (cancelled(ctx)) await pit(["stop", "-g", group], 3e4);
+  return result;
+}
+
+// src/cli/mcp-extras.ts
+var RpcError = class extends Error {
+  constructor(code, message) {
+    super(message);
+    this.code = code;
+  }
+};
+var RUN = /^pitroom:\/\/run\/(\d{8}-\d{6}-[0-9a-f]{4})(\/patch)?$/;
+var LISTED = 30;
+var oneLine6 = (text, n) => {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > n ? `${flat.slice(0, n - 1)}\u2026` : flat;
+};
+function listResources() {
+  const resources = [];
+  for (const id of listRunIds().slice(-LISTED).reverse()) {
+    try {
+      const m = freshMeta(id);
+      const what2 = `${m.state} \xB7 ${m.mode} \xB7 ${m.worker.backend}${m.worker.model ? `:${m.worker.model.split("/").pop()}` : ""}`;
+      resources.push({ uri: `pitroom://run/${id}`, name: `run ${id}`, title: oneLine6(m.task, 70), description: `${what2}: the report`, mimeType: "text/plain" });
+      if (m.changes?.length) resources.push({ uri: `pitroom://run/${id}/patch`, name: `patch ${id}`, title: `Patch of ${oneLine6(m.task, 60)}`, description: `${what2}: the exact diff, ${m.changes.length} file(s)`, mimeType: "text/x-diff" });
+    } catch {
+    }
+  }
+  return { resources };
+}
+var resourceTemplates = () => ({
+  resourceTemplates: [
+    { uriTemplate: "pitroom://run/{id}", name: "run-report", title: "A run's report", description: "The report of a run: answer, receipt, verified references.", mimeType: "text/plain" },
+    { uriTemplate: "pitroom://run/{id}/patch", name: "run-patch", title: "A run's patch", description: "The exact diff an isolated or in-place run made.", mimeType: "text/x-diff" }
+  ]
+});
+async function readResource(uri, ctx) {
+  const m = RUN.exec(uri);
+  if (!m) throw new RpcError(-32002, `unknown resource: ${uri}`);
+  const patch = m[2] !== void 0;
+  const r = await pit(["show", m[1], patch ? "--patch" : "--full"], 6e4, ctx.signal);
+  if (r.code !== 0) throw new RpcError(-32002, r.err || r.out || `run ${m[1]} cannot be read`);
+  return { contents: [{ uri, mimeType: patch ? "text/x-diff" : "text/plain", text: r.out }] };
+}
+var PROMPTS = [
+  {
+    name: "research",
+    title: "Research with a worker",
+    description: "Find, map or explain code through a read-only worker, and verify what comes back.",
+    arguments: [{ name: "question", description: "What to find out about the project.", required: true }],
+    text: (a) => `Use the pitroom_run tool (mode "read") to find out: ${a.question}
+
+Give the worker the full question and any file it should start from. When it answers, check one or two of the cited file:line references yourself before relying on the answer, and say plainly what is verified and what is not. If it comes back "still running", call pitroom_wait with the run id.`
+  },
+  {
+    name: "implement",
+    title: "Get a change made",
+    description: "A worker makes a change in an isolated copy; you review the exact diff and apply it only when it is right.",
+    arguments: [{ name: "task", description: "The change to make, with the context a worker needs.", required: true }],
+    text: (a) => `Get this change made by a worker: ${a.task}
+
+Call pitroom_run with mode "isolate" (add "verify" with the project's test command if there is one). Read the diff with pitroom_show (patch: true), then have it judged with pitroom_review. If the diff does what was asked and the review has no critical findings, call pitroom_apply; otherwise pitroom_run with "continue" to ask for the fix, or pitroom_discard. Do not apply a change you have not read.`
+  },
+  {
+    name: "review",
+    title: "Review changes with another model",
+    description: "A read-only reviewer from another model judges a commit range or the latest change.",
+    arguments: [{ name: "range", description: "A commit range such as main..HEAD. Default: the latest run's change." }],
+    text: (a) => (a.range ? `Have the commits ${a.range} reviewed: call pitroom_review with range "${a.range}".` : 'Have the latest change reviewed: call pitroom_review with run "last".') + "\n\nWeigh each finding against the code before acting on it: a reviewer can be wrong. Fix what is real, and say which findings you dropped and why."
+  },
+  {
+    name: "crew",
+    title: "Split work across workers",
+    description: "Independent tasks run in parallel as one group of workers.",
+    arguments: [{ name: "tasks", description: "The tasks, one per line.", required: true }],
+    text: (a) => `Run these independent tasks in parallel with pitroom_crew (one worker each):
+
+${a.tasks}
+
+Make each task self-contained. Use mode "isolate" if they change files, then read every patch (pitroom_show, patch: true) and apply them with pitroom_apply (group). Only split work that does not depend on each other.`
+  }
+];
+var listPrompts = () => ({ prompts: PROMPTS.map(({ name, title, description, arguments: args }) => ({ name, title, description, arguments: args })) });
+function getPrompt(name, given) {
+  const p = PROMPTS.find((x) => x.name === name);
+  if (!p) throw new RpcError(-32602, `unknown prompt: ${String(name)}`);
+  const args = {};
+  const raw = given && typeof given === "object" && !Array.isArray(given) ? given : {};
+  for (const a of p.arguments) {
+    const v = raw[a.name];
+    if (typeof v === "string" && v.trim()) args[a.name] = v.trim();
+    else if (a.required) throw new RpcError(-32602, `missing argument: ${a.name}`);
+  }
+  return { description: p.description, messages: [{ role: "user", content: { type: "text", text: p.text(args) } }] };
+}
+
+// src/cli/mcp-tools.ts
+var WORKER_PROPS = {
+  worker: { type: "string", description: 'Worker target "backend[:model]", e.g. "opencode", "codex", "claude:haiku", "gemini:gemini-3.8-flash". Default: the configured worker.' },
+  model: { type: "string", description: "Model for the preferred worker." },
+  tier: { type: "string", description: "A worker tier from the config: cheap, standard, capable (an explicit worker wins)." },
+  effort: { type: "string", description: "Reasoning effort for the worker: low, medium, high, xhigh." },
+  dir: { type: "string", description: "Project directory (default: the directory the server was started in)." },
+  files: { type: "array", items: { type: "string" }, description: "Files to attach (paths)." },
+  verify: { type: "string", description: 'A command run after the worker finishes (e.g. "npm test"); a failing one is reported.' },
+  link: { type: "array", items: { type: "string" }, description: 'Ignored directories to link into an isolated copy so tests can run (e.g. ["node_modules"]).' },
+  web: { type: "boolean", description: "Let the worker use web tools." },
+  group: { type: "string", description: "A name to group related runs under." }
+};
+var WAIT_PROP = { waitSeconds: { type: "number", description: `How long to wait for the result before returning "still running" (default ${DEFAULT_WAIT}, at most ${MAX_WAIT}).` } };
+var RUN_ID2 = { type: "string", description: 'A run id as printed by a run, or "last".' };
+var SINCE = { type: "string", description: "A window: 7d, 30d, \u2026 or all." };
+var READ_ONLY = { readOnlyHint: true, openWorldHint: false };
+var TOOLS2 = [
+  {
+    name: "pitroom_run",
+    title: "Run a worker",
+    description: `Hand a bounded task to a cheaper worker agent. mode "read" (default) is read-only research that returns an answer whose file:line references are verified; "isolate" lets the worker edit a private copy and returns the exact diff (review it, then pitroom_apply or pitroom_discard); "write" edits the working tree in place and is undoable with pitroom_revert. Returns the worker's answer and a receipt, or "still running" with the run id. Progress is reported while it waits; cancelling the call stops the run.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        task: { type: "string", description: "What the worker should do, with the context it needs." },
+        mode: { type: "string", enum: ["read", "isolate", "write"], description: "read (default), isolate, or write." },
+        continue: { type: "string", description: "A finished run to follow up in the same worker session (the task is then the follow-up)." },
+        inPlace: { type: "boolean", description: "Read mode only: read the directory itself instead of a clean snapshot without secret-looking files." },
+        audit: { type: "boolean", description: "Read mode only: have another worker re-check the answer afterwards." },
+        ...WORKER_PROPS,
+        ...WAIT_PROP
+      },
+      required: ["task"]
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async call(a, ctx) {
+      const task = str(a, "task", true);
+      const mode = oneOf(a, "mode", ["read", "isolate", "write"], "read");
+      const flags = mode === "isolate" ? ["-i"] : mode === "write" ? ["-w"] : [];
+      const follow = str(a, "continue");
+      if (follow) flags.push("--continue", follow);
+      if (mode === "read") {
+        if (bool(a, "inPlace")) flags.push("--in-place");
+        if (bool(a, "audit")) flags.push("--audit");
+      }
+      return startAndWait(["run", ...flags, ...workerFlags(a)], waitSeconds(a), ctx, task);
+    }
+  },
+  {
+    name: "pitroom_crew",
+    title: "Run workers in parallel",
+    description: 'Start several independent tasks at once as one group of workers (read, or isolate: each edits its own copy) and wait for the group. Returns every report, or "still running" with the group name for pitroom_wait. Only for tasks that do not depend on each other. Cancelling the call stops the group.',
+    inputSchema: {
+      type: "object",
+      properties: {
+        tasks: { type: "array", items: { type: "string" }, minItems: 1, description: "One self-contained task per worker." },
+        mode: { type: "string", enum: ["read", "isolate"], description: "read (default) or isolate." },
+        ...WORKER_PROPS,
+        ...WAIT_PROP
+      },
+      required: ["tasks"]
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async call(a, ctx) {
+      const tasks = strs(a, "tasks").filter((t) => t.trim());
+      if (!tasks.length) throw new ToolError('"tasks" needs at least one task');
+      const mode = oneOf(a, "mode", ["read", "isolate"], "read");
+      return startCrew([...mode === "isolate" ? ["-i"] : [], ...workerFlags(a)], tasks, waitSeconds(a), ctx);
+    }
+  },
+  {
+    name: "pitroom_wait",
+    title: "Wait for runs",
+    description: 'Wait for runs started earlier (a run that came back "still running") and return their reports.',
+    inputSchema: {
+      type: "object",
+      properties: { runs: { type: "array", items: { type: "string" }, description: "Run ids." }, group: { type: "string", description: "Or a group name." }, ...WAIT_PROP }
+    },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const runs = strs(a, "runs");
+      const group = str(a, "group");
+      if (!runs.length && !group) throw new ToolError('give "runs" or "group"');
+      return waitFor(runs, waitSeconds(a), ctx, runs.length ? void 0 : group);
+    }
+  },
+  {
+    name: "pitroom_status",
+    title: "Run status",
+    description: "The state and live progress of a run (default: the latest), or of a group.",
+    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string", description: "A group name." } } },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const group = str(a, "group");
+      const run2 = str(a, "run");
+      return plain(["status", ...group ? ["-g", group] : run2 ? [run2] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_list",
+    title: "List runs",
+    description: "The latest runs with their state, worker and task; with running only the active ones, or one group's.",
+    inputSchema: { type: "object", properties: { running: { type: "boolean", description: "Only runs that are queued or running." }, group: { type: "string", description: "A group name." } } },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const group = str(a, "group");
+      return plain(["ls", ...bool(a, "running") ? ["--running"] : [], ...group ? ["-g", group] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_show",
+    title: "Show a run",
+    description: "A finished run's report again; with patch the exact diff of an isolated change, with full the untruncated answer.",
+    inputSchema: { type: "object", properties: { run: RUN_ID2, patch: { type: "boolean" }, full: { type: "boolean" } }, required: ["run"] },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const run2 = str(a, "run", true);
+      return plain(["show", run2, ...bool(a, "patch") ? ["--patch"] : bool(a, "full") ? ["--full"] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_history",
+    title: "Search past runs",
+    description: "Finished runs from the history, searchable: full-text over the task, the answer and the steps. Use it to find an earlier answer before asking a worker again.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        text: { type: "string", description: "Words to search for." },
+        state: { type: "string", description: "done, problem, failed, \u2026" },
+        model: { type: "string", description: "Only runs of this model." },
+        since: SINCE,
+        limit: { type: "number", description: "How many runs (default 20)." }
+      }
+    },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const limit = a.limit;
+      if (limit !== void 0 && (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 200)) throw new ToolError('"limit" must be a whole number from 1 to 200');
+      const text = str(a, "text");
+      const state = str(a, "state");
+      const model = str(a, "model");
+      return plain(["history", ...since(a), ...state ? ["--state", state] : [], ...model ? ["--model", model] : [], ...limit ? ["--limit", String(limit)] : [], ...text ? ["--", text] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_stats",
+    title: "Worker statistics",
+    description: "Runs, success rate, average time and tokens per worker and model, and how often their answers were confirmed by audits. Use it to pick a worker.",
+    inputSchema: { type: "object", properties: { since: SINCE } },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      return plain(["history", "stats", ...since(a)], ctx);
+    }
+  },
+  {
+    name: "pitroom_savings",
+    title: "What the workers saved",
+    description: "The tokens and money workers took over from you, per model, from the receipts of the runs.",
+    inputSchema: { type: "object", properties: { since: SINCE, models: { type: "boolean", description: "Break it down per model." } } },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      return plain(["savings", ...since(a), ...bool(a, "models") ? ["--models"] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_models",
+    title: "Worker models",
+    description: "The models a worker backend offers, with effort levels, the costs set in the config and recent usage. Use it to choose a model for pitroom_run.",
+    inputSchema: { type: "object", properties: { worker: { type: "string", description: "A backend: opencode, codex, claude, gemini. Default: the configured one." }, all: { type: "boolean", description: "Include models that are hidden by default." } } },
+    annotations: READ_ONLY,
+    async call(a, ctx) {
+      const worker = str(a, "worker");
+      return plain(["models", ...worker ? [worker] : [], ...bool(a, "all") ? ["--all"] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_cooldown",
+    title: "Rate-limited models",
+    description: 'The models that said "rate limited" and are being skipped for now (runs go to the next worker). With clear they are tried again immediately.',
+    inputSchema: { type: "object", properties: { clear: { type: "boolean", description: "Forget the cooldowns." } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async call(a, ctx) {
+      return plain(["cooldown", ...bool(a, "clear") ? ["--clear"] : []], ctx);
+    }
+  },
+  {
+    name: "pitroom_doctor",
+    title: "Check the setup",
+    description: "Checks the setup without spending tokens: the workers found and their logins, the config, the skills, where the MCP server is registered. Use it when a run fails to start.",
+    inputSchema: { type: "object", properties: {} },
+    annotations: READ_ONLY,
+    async call(_a, ctx) {
+      return plain(["doctor"], ctx, 12e4);
+    }
+  },
+  {
+    name: "pitroom_review",
+    title: "Review a change",
+    description: `A read-only reviewer (by default another worker than the implementer) judges one run's change, or a range of commits ("main..HEAD"). Returns findings with severities and a SPEC / QUALITY verdict.`,
+    inputSchema: {
+      type: "object",
+      properties: {
+        run: { ...RUN_ID2, description: "The run whose change to review (an isolated or in-place change)." },
+        range: { type: "string", description: 'Or a commit range "A..B".' },
+        plan: { type: "string", description: "With range: the plan file the commits implement." },
+        worker: WORKER_PROPS.worker,
+        tier: WORKER_PROPS.tier,
+        dir: WORKER_PROPS.dir,
+        group: WORKER_PROPS.group,
+        ...WAIT_PROP
+      }
+    },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async call(a, ctx) {
+      const run2 = str(a, "run");
+      const range = str(a, "range");
+      if (!run2 === !range) throw new ToolError('give exactly one of "run" or "range"');
+      const plan = str(a, "plan");
+      const flags = workerFlags(a, ["worker", "tier", "dir", "group"]);
+      return startAndWait(["review", ...range ? ["--range", range, ...plan ? ["--plan", plan] : []] : [run2], ...flags], waitSeconds(a), ctx);
+    }
+  },
+  {
+    name: "pitroom_audit",
+    title: "Audit an answer",
+    description: "Another worker re-checks a finished read run's answer against the project and says AGREE, PARTIAL or DISAGREE with the claims it disputes.",
+    inputSchema: { type: "object", properties: { run: RUN_ID2, worker: WORKER_PROPS.worker, ...WAIT_PROP }, required: ["run"] },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
+    async call(a, ctx) {
+      const run2 = str(a, "run", true);
+      const worker = str(a, "worker");
+      return startAndWait(["audit", run2, ...worker ? ["-W", worker] : []], waitSeconds(a), ctx);
+    }
+  },
+  {
+    name: "pitroom_apply",
+    title: "Apply an isolated change",
+    description: "Land an isolated run's patch on the user's working tree (checked first; refused if it no longer applies cleanly), or every patch of a group in order. A patch that deletes files is refused unless allowDelete is true: only pass it after checking the deletions are what the user asked for.",
+    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string" }, allowDelete: { type: "boolean" } } },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    async call(a, ctx) {
+      const group = str(a, "group");
+      const run2 = str(a, "run");
+      if (!run2 && !group) throw new ToolError('give "run" or "group"');
+      return plain(["apply", ...group && !run2 ? ["-g", group] : [run2], ...bool(a, "allowDelete") ? ["--allow-delete"] : []], ctx, 12e4);
+    }
+  },
+  {
+    name: "pitroom_discard",
+    title: "Discard an isolated change",
+    description: "Drop an isolated run's private copy (its patch is kept).",
+    inputSchema: { type: "object", properties: { run: RUN_ID2 }, required: ["run"] },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async call(a, ctx) {
+      return plain(["discard", str(a, "run", true)], ctx);
+    }
+  },
+  {
+    name: "pitroom_revert",
+    title: "Undo an in-place change",
+    description: 'Undo what a mode "write" run changed in the working tree (checked first; refused when the files changed since).',
+    inputSchema: { type: "object", properties: { run: RUN_ID2 }, required: ["run"] },
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+    async call(a, ctx) {
+      return plain(["revert", str(a, "run", true)], ctx, 12e4);
+    }
+  },
+  {
+    name: "pitroom_stop",
+    title: "Stop runs",
+    description: "Stop a running or queued run, or every run of a group.",
+    inputSchema: { type: "object", properties: { run: RUN_ID2, group: { type: "string" } } },
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
+    async call(a, ctx) {
+      const run2 = str(a, "run");
+      const group = str(a, "group");
+      if (!run2 && !group) throw new ToolError('give "run" or "group"');
+      return plain(["stop", ...run2 ? [run2] : ["-g", group]], ctx);
+    }
+  }
+];
+
+// src/cli/mcp.ts
+var PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
+var INSTRUCTIONS = [
+  "Pitroom hands bounded work to cheaper worker agents and returns a verified answer, the exact diff and a cost receipt. You decide, verify and answer.",
+  'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard); pitroom_crew for independent tasks in parallel.',
+  'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it.',
+  "It is optional: for a small task you can do yourself, skip it."
+].join(" ");
+var log = (msg) => void process.stderr.write(`pitroom mcp: ${msg}
+`);
+var send = (msg) => void process.stdout.write(`${JSON.stringify(msg)}
+`);
+var inflight = /* @__PURE__ */ new Map();
+function contextFor(params, abort) {
+  const meta = params._meta && typeof params._meta === "object" ? params._meta : {};
+  const token = typeof meta.progressToken === "string" || typeof meta.progressToken === "number" ? meta.progressToken : void 0;
+  let n = 0;
+  return {
+    signal: abort.signal,
+    progress: (message) => {
+      if (token === void 0 || abort.signal.aborted) return;
+      send({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: ++n, message } });
+    }
+  };
+}
+async function dispatch(method, params, ctx) {
+  switch (method) {
+    case "initialize": {
+      const asked = typeof params.protocolVersion === "string" ? params.protocolVersion : "";
+      return {
+        protocolVersion: PROTOCOLS.includes(asked) ? asked : PROTOCOLS[0],
+        capabilities: { tools: { listChanged: false }, resources: { listChanged: false, subscribe: false }, prompts: { listChanged: false } },
+        serverInfo: { name: "pitroom", title: "Pitroom", version: VERSION2 },
+        instructions: INSTRUCTIONS
+      };
+    }
+    case "ping":
+      return {};
+    case "tools/list":
+      return { tools: TOOLS2.map(({ name, title, description, inputSchema, annotations }) => ({ name, title, description, inputSchema, annotations })) };
+    case "tools/call": {
+      const tool = TOOLS2.find((t) => t.name === params.name);
+      if (!tool) throw new RpcError(-32602, `unknown tool: ${String(params.name)}`);
+      const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? params.arguments : {};
+      try {
+        const r = await tool.call(args, ctx);
+        return { content: [{ type: "text", text: r.text }], isError: r.isError === true };
+      } catch (e) {
+        if (e instanceof ToolError) return { content: [{ type: "text", text: e.message }], isError: true };
+        log(`${tool.name} failed: ${e.stack ?? e}`);
+        return { content: [{ type: "text", text: `pitroom: ${e.message}` }], isError: true };
+      }
+    }
+    case "resources/list":
+      return listResources();
+    case "resources/templates/list":
+      return resourceTemplates();
+    case "resources/read":
+      if (typeof params.uri !== "string") throw new RpcError(-32602, '"uri" is required');
+      return readResource(params.uri, ctx);
+    case "prompts/list":
+      return listPrompts();
+    case "prompts/get":
+      return getPrompt(params.name, params.arguments);
+    default:
+      throw new RpcError(-32601, `method not found: ${method}`);
+  }
+}
+function cancel(params) {
+  const id = params.requestId;
+  if (typeof id !== "string" && typeof id !== "number") return;
+  inflight.get(id)?.abort.abort("cancelled");
+}
+async function handle(msg) {
+  if (!msg || typeof msg !== "object" || Array.isArray(msg)) return { jsonrpc: "2.0", id: null, error: { code: -32600, message: "invalid request" } };
+  const m = msg;
+  if (typeof m.method !== "string") return void 0;
+  const params = m.params && typeof m.params === "object" && !Array.isArray(m.params) ? m.params : {};
+  if (m.method === "notifications/cancelled") {
+    cancel(params);
+    return void 0;
+  }
+  const isRequest = typeof m.id === "string" || typeof m.id === "number";
+  const abort = new AbortController();
+  if (isRequest) inflight.set(m.id, { abort, ctx: contextFor(params, abort) });
+  try {
+    const result = await dispatch(m.method, params, isRequest ? inflight.get(m.id).ctx : contextFor(params, abort));
+    if (abort.signal.aborted && abort.signal.reason === "cancelled") return void 0;
+    return isRequest ? { jsonrpc: "2.0", id: m.id, result } : void 0;
+  } catch (e) {
+    if (!isRequest || abort.signal.aborted && abort.signal.reason === "cancelled") return void 0;
+    const code = e instanceof RpcError ? e.code : -32603;
+    return { jsonrpc: "2.0", id: m.id, error: { code, message: e.message } };
+  } finally {
+    if (isRequest) inflight.delete(m.id);
+  }
+}
+async function handleLine(line) {
+  let parsed;
+  try {
+    parsed = JSON.parse(line);
+  } catch {
+    send({ jsonrpc: "2.0", id: null, error: { code: -32700, message: "parse error" } });
+    return;
+  }
+  if (Array.isArray(parsed)) {
+    const replies = (await Promise.all(parsed.map(handle))).filter((r) => !!r);
+    if (replies.length) send(replies);
+    return;
+  }
+  const reply = await handle(parsed);
+  if (reply) send(reply);
+}
+async function serveMcp() {
+  const rl = readline.createInterface({ input: process.stdin });
+  const pending = /* @__PURE__ */ new Set();
+  rl.on("line", (line) => {
+    if (!line.trim()) return;
+    const p = handleLine(line).catch((e) => log(String(e.stack ?? e)));
+    pending.add(p);
+    void p.finally(() => pending.delete(p));
+  });
+  await new Promise((resolve2) => rl.once("close", resolve2));
+  await Promise.allSettled([...pending]);
+  return 0;
+}
+
+// src/cli/commands.ts
+import { spawnSync as spawnSync8 } from "node:child_process";
+import fs30 from "node:fs";
+import path26 from "node:path";
+import { fileURLToPath as fileURLToPath4 } from "node:url";
+
+// src/core/init.ts
+import fs25 from "node:fs";
+import path21 from "node:path";
+var FREE = /-free$/;
+var TIER_ORDER = [["cheap", "opencode"], ["standard", "codex"], ["capable", "claude"]];
+var isFound = (binary5) => path21.isAbsolute(binary5) && fs25.existsSync(binary5);
+function planInit(opts = {}) {
+  const file2 = configPath();
+  const workers = backendIds().map((id) => {
+    const b = getBackend(id);
+    const binary5 = b.binary();
+    return { id, name: b.name, found: isFound(binary5), binary: binary5 };
+  });
+  const notes = [];
+  const config = {};
+  let blocked;
+  let opencode2;
+  if (workers.find((w) => w.id === "opencode")?.found) {
+    const b = getBackend("opencode");
+    let models = [];
+    try {
+      models = b.catalog ? b.catalog().models.map((m) => m.id) : b.listModels?.() ?? [];
+    } catch {
+      notes.push("could not list OpenCode models (is it logged in?)");
+    }
+    const defaultModel4 = b.defaultModel?.();
+    const chosen = opts.model ?? defaultModel4;
+    const free = models.filter((m) => FREE.test(m) && m !== chosen);
+    opencode2 = { defaultModel: defaultModel4, models: models.length, free: free.slice(0, 6) };
+    if (opts.model) {
+      if (models.length && !models.includes(opts.model)) throw new UserError(`"${opts.model}" is not in \`opencode models\``);
+      if (!models.length) notes.push(`could not check "${opts.model}": \`opencode models\` listed nothing`);
+      config.models = { opencode: opts.model };
+    } else if (!defaultModel4) {
+      blocked = `OpenCode has no default model: choose one with --model <id>${free.length ? ` (free models you have: ${free.slice(0, 4).join(", ")})` : ""}`;
+    }
+    const fallback = opts.fallback ?? free.slice(0, 2);
+    for (const m of fallback) {
+      if (models.length && !models.includes(m)) throw new UserError(`"${m}" is not in \`opencode models\``);
+    }
+    if (fallback.length) {
+      config.fallback = fallback.map((m) => `opencode:${m}`);
+      if (!opts.fallback) notes.push(`fallback suggested from the free models in your catalogue: ${fallback.join(", ")} (change it with --fallback a,b)`);
+    } else {
+      notes.push("no fallback: no free OpenCode model found to suggest (pass --fallback a,b to name some)");
+    }
+  }
+  const tiers = Object.fromEntries(TIER_ORDER.filter(([, id]) => workers.find((w) => w.id === id)?.found));
+  if (Object.keys(tiers).length > 1) config.tiers = tiers;
+  if (!workers.some((w) => w.found)) blocked = "no worker CLI found: install OpenCode (https://opencode.ai), Codex CLI, Claude Code or Gemini CLI first";
+  else if (!blocked && !Object.keys(config).length) notes.push("nothing to propose: the default model and the single worker need no config");
+  return { path: file2, exists: fs25.existsSync(file2), workers, opencode: opencode2, config, blocked, notes };
+}
+function writeInit(plan, force) {
+  if (plan.blocked) throw new UserError(plan.blocked);
+  if (!Object.keys(plan.config).length) throw new UserError("nothing to write: the proposal is empty");
+  if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path21.basename(plan.path)}.bak)`);
+  fs25.mkdirSync(path21.dirname(plan.path), { recursive: true });
+  if (plan.exists) fs25.copyFileSync(plan.path, `${plan.path}.bak`);
+  fs25.writeFileSync(plan.path, `${JSON.stringify(plan.config, null, 2)}
+`);
+  return plan.path;
+}
+function formatInit(plan, written) {
+  const out = [bold("pitroom init") + dim(": worker CLIs on this machine")];
+  for (const w of plan.workers) out.push(`  ${w.found ? green("\u2714") : dim("\xB7")} ${w.name.padEnd(12)} ${w.found ? w.binary : dim("not found")}`);
+  if (plan.opencode) {
+    const o = plan.opencode;
+    out.push(`  OpenCode: ${o.models} models, default ${o.defaultModel ?? "none"}${o.free.length ? `, free: ${o.free.slice(0, 3).join(", ")}${o.free.length > 3 ? ", \u2026" : ""}` : ""}`);
+  }
+  out.push("", `config file: ${plan.path}${plan.exists ? " (exists)" : " (not present)"}`, JSON.stringify(plan.config, null, 2));
+  for (const n of plan.notes) out.push(`  note: ${n}`);
+  if (written) out.push("", green(`\u2714 written to ${written}`), dim("  next: pitroom doctor, then pitroom install"));
+  else if (plan.blocked) out.push("", yellow(`! ${plan.blocked}`));
+  else out.push("", `nothing written yet: pass --yes to write it${plan.exists ? " (with --force, since the file exists)" : ""}`);
+  return out.join("\n");
 }
 
 // src/core/mcp-install.ts
@@ -5249,7 +5553,7 @@ var WEEK_MS2 = 7 * 24 * 3600 * 1e3;
 var SCAN = 400;
 var RUN_ID3 = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
 var LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i;
-var oneLine6 = (s, max) => {
+var oneLine7 = (s, max) => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 };
@@ -5278,7 +5582,7 @@ function toRun(m) {
     audit: auditBadge(m),
     changes: m.changes?.length || void 0,
     applied: m.applied || void 0,
-    note: l?.last ? oneLine6(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine6(m.error ?? "", 200)
+    note: l?.last ? oneLine7(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine7(m.error ?? "", 200)
   };
 }
 function dashState(opts = {}) {
@@ -5770,9 +6074,9 @@ function cmdHistory(p) {
     return 0;
   }
   importRuns();
-  const since = sinceMs(flag(p, "since"));
+  const since2 = sinceMs(flag(p, "since"));
   if (sub === "stats") {
-    const s = historyStats(since);
+    const s = historyStats(since2);
     if (has(p, "json")) return console.log(JSON.stringify(s, null, 2)), 0;
     const t = s.totals;
     console.log(`${t.runs} runs \xB7 ${t.ok} ok \xB7 ${t.failed} not ok \xB7 ${secs(t.seconds)} of worker time \xB7 ${(t.tokens / 1e6).toFixed(1)}M tokens \xB7 ~${usd(t.saved)} saved`);
@@ -5785,7 +6089,7 @@ ${[fmt2(head2), ...rows2.map(fmt2)].join("\n")}`);
     return 0;
   }
   const limit = flag(p, "limit") ? Number(flag(p, "limit")) : 20;
-  const { rows, total } = listHistory({ text: p.positional.join(" "), model: flag(p, "model"), state: flag(p, "state"), group: flag(p, "group"), sinceMs: since, limit });
+  const { rows, total } = listHistory({ text: p.positional.join(" "), model: flag(p, "model"), state: flag(p, "state"), group: flag(p, "group"), sinceMs: since2, limit });
   if (has(p, "json")) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
   if (!rows.length) return console.log(total ? "nothing on this page" : "no matching runs"), 0;
   const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
@@ -5922,11 +6226,11 @@ function cmdInit(p) {
   return 0;
 }
 function cmdSavings(p) {
-  const since = flag(p, "since") ?? "all";
-  const t = totals(readLedger(sinceMs(since)));
+  const since2 = flag(p, "since") ?? "all";
+  const t = totals(readLedger(sinceMs(since2)));
   if (has(p, "models")) {
     const by = /* @__PURE__ */ new Map();
-    for (const e of readLedger(sinceMs(since))) {
+    for (const e of readLedger(sinceMs(since2))) {
       const key = `${e.backend ?? "?"}  ${e.model ?? "(default model)"}`;
       const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, saved: 0 };
       by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, saved: a.saved + e.saved });
@@ -5938,7 +6242,7 @@ function cmdSavings(p) {
     }
     return 0;
   }
-  const period = since === "all" ? "all time" : `last ${since.replace("d", " days")}`;
+  const period = since2 === "all" ? "all time" : `last ${since2.replace("d", " days")}`;
   if (has(p, "json")) {
     console.log(JSON.stringify({ period, ...t, price: primaryPrice() }, null, 2));
     return 0;

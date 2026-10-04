@@ -273,7 +273,7 @@ npm i -g pitroom
 
 **Any agent that speaks MCP (Cursor, Claude Desktop, and the three above too)**
 
-Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: nine tools (`pitroom_run`, `pitroom_wait`, `pitroom_status`, `pitroom_show`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_stop`) instead of shell commands and skills. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
+Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: tools instead of shell commands and skills (`pitroom_run`, `pitroom_crew`, `pitroom_wait`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_revert`, … 18 in all, covering the commands an agent needs), the runs as resources, and four prompts. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
 
 ```bash
 pitroom install --mcp               # also links the skills; add --no-skills to skip that
@@ -296,6 +296,11 @@ or, for Cursor (`~/.cursor/mcp.json`), Claude Desktop (`claude_desktop_config.js
 ```
 
 Each tool runs the matching `pitroom` command, so every rule of the CLI applies unchanged (permission profiles, git guard, isolation, read snapshots). A run is waited for up to `waitSeconds` (default 50), then comes back as "still running" with its id for `pitroom_wait`; keep it below your client's tool timeout. The server works in the directory the client starts it in.
+
+- **Progress.** While a call waits for a run, a client that sent a progress token gets a `notifications/progress` every few seconds ("running · read · 12s · 3 steps, 2 tool calls · last: …"), which also keeps clients with a per-call timeout from giving up on a long run. **Cancelling** a `pitroom_run`, `pitroom_crew`, `pitroom_review` or `pitroom_audit` call stops the run it started (a cancelled `pitroom_wait` only stops waiting).
+- **Resources.** The latest runs are listed as `pitroom://run/<id>` (the report) and, for runs that changed files, `pitroom://run/<id>/patch` (the exact diff), so a client can attach one to a conversation.
+- **Prompts.** `research`, `implement`, `review` and `crew` say how to use Pitroom for that job (in Claude Code they appear as `/mcp__pitroom__research`, …).
+- **Also as tools:** `pitroom_crew` (independent tasks in parallel), `pitroom_list`, `pitroom_history` (find an earlier answer), `pitroom_stats` and `pitroom_models` (pick a worker), `pitroom_savings`, `pitroom_cooldown`, `pitroom_doctor`, `pitroom_revert`, and a `continue` option on `pitroom_run` for a follow-up.
 
 **Any other agent (a plain shell) or just the CLI**
 

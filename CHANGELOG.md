@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+### MCP server
+- **Progress notifications.** A call that waits for a run reports how it is doing every few seconds (`notifications/progress`, when the client sent a progress token), which also keeps clients with a per-call timeout from giving up on a long run.
+- **Cancellation.** A client that cancels `pitroom_run`, `pitroom_crew`, `pitroom_review` or `pitroom_audit` (`notifications/cancelled`) stops the run or group it started and gets no answer, as the protocol says; a cancelled `pitroom_wait` only stops waiting. A client that sends its requests and closes the pipe still gets the answers.
+- **Resources.** The latest runs are resources, `pitroom://run/<id>` (the report) and `pitroom://run/<id>/patch` (the exact diff), with resource templates; anything else is "not found" (-32002).
+- **Prompts.** `research`, `implement`, `review` and `crew`, with their arguments checked.
+- **Nine new tools** (18 in all): `pitroom_crew` (independent tasks in parallel as one group), `pitroom_list`, `pitroom_history` (search earlier answers), `pitroom_stats`, `pitroom_savings`, `pitroom_models`, `pitroom_cooldown`, `pitroom_doctor` and `pitroom_revert` (undo a write run); `pitroom_run` takes `continue` for a follow-up in the same worker session, and `pitroom_apply` can apply a group.
+- The server is split into protocol (`mcp.ts`), tools (`mcp-tools.ts`), resources and prompts (`mcp-extras.ts`) and what they share (`mcp-support.ts`).
+
 ## 0.15.0
 
 ### `pitroom install --mcp`
