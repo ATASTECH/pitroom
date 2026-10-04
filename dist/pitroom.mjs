@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import fs33 from "node:fs";
+import fs34 from "node:fs";
 
 // src/core/errors.ts
 var UserError = class extends Error {
@@ -1420,7 +1420,8 @@ var SCHEMA = {
   tiers: "record",
   costs: "numbers",
   audit: "number",
-  readIn: "string"
+  readIn: "string",
+  cacheDays: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1478,6 +1479,10 @@ var rate = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
 };
+var days = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
+};
 var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
 var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
 function setting(flag2, env, conf, fallback) {
@@ -1504,7 +1509,8 @@ function effective(flags = {}) {
     tiers: setting(void 0, void 0, c.tiers, {}),
     costs: setting(void 0, void 0, c.costs, {}),
     audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
-    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto")
+    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
+    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7)
   };
 }
 
@@ -1581,6 +1587,7 @@ var BOOL_FLAGS = {
   "--stop": "stop",
   "--open": "open",
   "--serve": "serve",
+  "--fresh": "fresh",
   "--http": "http",
   "-h": "help",
   "--help": "help",
@@ -3732,6 +3739,7 @@ function prepareRun(o) {
     auditOf: o.audit?.of,
     auditRate: o.auditRate,
     inPlace: o.inPlace || void 0,
+    cache: o.cache,
     snapshot: parent?.snapshot ?? (snap ? { dir: "", tree: "", left: snap.secrets } : void 0),
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
@@ -4823,7 +4831,7 @@ import { fileURLToPath as fileURLToPath3 } from "node:url";
 // src/core/file-diff.ts
 var PREVIEW_LINES = 300;
 function gitPath(value, prefix = true) {
-  let path29 = value;
+  let path30 = value;
   if (value.startsWith('"') && value.endsWith('"')) {
     const bytes = [];
     const escapes = { t: "	", n: "\n", r: "\r", b: "\b", f: "\f", v: "\v" };
@@ -4831,9 +4839,9 @@ function gitPath(value, prefix = true) {
       if (match[1] && /^[0-7]+$/.test(match[1])) bytes.push(parseInt(match[1], 8));
       else bytes.push(...new TextEncoder().encode(match[2] ?? escapes[match[1]] ?? match[1]));
     }
-    path29 = new TextDecoder().decode(new Uint8Array(bytes));
+    path30 = new TextDecoder().decode(new Uint8Array(bytes));
   }
-  return prefix ? path29.replace(/^[ab]\//, "") : path29;
+  return prefix ? path30.replace(/^[ab]\//, "") : path30;
 }
 function headerPath(header) {
   const quoted = header.match(/^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|\S+)$/);
@@ -5118,21 +5126,21 @@ function handler(touch2) {
     }
     if (url.pathname === "/api/history") {
       const q = url.searchParams;
-      const days = Number(q.get("days") ?? 0);
+      const days2 = Number(q.get("days") ?? 0);
       return json(res, 200, listHistory({
         text: (q.get("q") ?? "").slice(0, 200),
         model: q.get("model") || void 0,
         backend: q.get("backend") || void 0,
         state: q.get("state") || void 0,
         group: q.get("group") || void 0,
-        sinceMs: days > 0 ? Date.now() - days * 864e5 : void 0,
+        sinceMs: days2 > 0 ? Date.now() - days2 * 864e5 : void 0,
         beforeId: RUN_ID3.test(q.get("before") ?? "") ? q.get("before") : void 0,
         limit: Number(q.get("limit") ?? 30) || 30
       }));
     }
     if (url.pathname === "/api/stats") {
-      const days = Number(url.searchParams.get("days") ?? 30);
-      return json(res, 200, { ...historyStats(days > 0 ? Date.now() - days * 864e5 : void 0), price: primaryPrice().name });
+      const days2 = Number(url.searchParams.get("days") ?? 30);
+      return json(res, 200, { ...historyStats(days2 > 0 ? Date.now() - days2 * 864e5 : void 0), price: primaryPrice().name });
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {
@@ -5430,8 +5438,8 @@ async function serveMcpHttp(opts) {
 
 // src/cli/commands.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
-import fs31 from "node:fs";
-import path27 from "node:path";
+import fs32 from "node:fs";
+import path28 from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/core/init.ts
@@ -5800,10 +5808,61 @@ ${rulings}`,
   ].join("\n");
 }
 
-// src/core/review.ts
+// src/core/cache.ts
 import crypto9 from "node:crypto";
 import fs30 from "node:fs";
 import path26 from "node:path";
+var SCAN2 = 500;
+function cacheKey(o) {
+  if (o.fresh || o.mode !== "read" || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return void 0;
+  if (!(effective().cacheDays.value > 0)) return void 0;
+  const dir = path26.resolve(o.dir);
+  const root = repoRoot(dir);
+  if (!root) return void 0;
+  try {
+    const tree = snapshotTree(root);
+    const head = commitOf(root, "HEAD") ?? "";
+    const files = o.files.map((f) => {
+      const abs = path26.resolve(f);
+      return [abs, crypto9.createHash("sha256").update(fs30.readFileSync(abs)).digest("hex")];
+    });
+    const question = o.task.replace(/\s+/g, " ").trim();
+    const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
+    const where = !o.inPlace && wantSnapshot(readIn2, root, dir) ? "snapshot" : "project";
+    const key = crypto9.createHash("sha256").update(JSON.stringify([question, path26.relative(root, dir), files, where])).digest("hex");
+    return { key, state: `${head}:${tree}` };
+  } catch {
+    return void 0;
+  }
+}
+var heldUp = (m) => m.state === "done" && m.mode === "read" && !m.reviewOf && !m.auditOf && (!m.refs || m.refs.invalid.length === 0) && m.audit?.verdict !== "disagree" && m.audit?.verdict !== "partial";
+function findCached(k, now = Date.now()) {
+  const maxAge = effective().cacheDays.value * 864e5;
+  for (const id of listRunIds().slice(-SCAN2).reverse()) {
+    let m;
+    try {
+      m = readMeta(id);
+    } catch {
+      continue;
+    }
+    if (m.cache?.key !== k.key || m.cache.state !== k.state) continue;
+    if (now - Date.parse(m.endedAt ?? m.startedAt) > maxAge) return void 0;
+    if (heldUp(m)) return m;
+  }
+  return void 0;
+}
+function ago(iso, now = Date.now()) {
+  const s = Math.max(0, (now - Date.parse(iso)) / 1e3);
+  if (s < 3600) return `${Math.max(1, Math.round(s / 60))} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} d ago`;
+}
+var cachedNote = (m) => `pitroom \u27F2 cached answer \xB7 the same question on the same code as run ${m.id} (${ago(m.endedAt ?? m.startedAt)}) \xB7 no worker ran \xB7 --fresh asks one again`;
+
+// src/core/review.ts
+import crypto10 from "node:crypto";
+import fs31 from "node:fs";
+import path27 from "node:path";
 var TEMPLATE2 = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
 var section = (title, body) => `## ${title}
 
@@ -5821,7 +5880,7 @@ function ancestors(m) {
 function briefOf(m) {
   const root = [m, ...ancestors(m)].at(-1);
   const f = runFile(root.id, "brief.md");
-  return fs30.existsSync(f) ? fs30.readFileSync(f, "utf8") : root.task;
+  return fs31.existsSync(f) ? fs31.readFileSync(f, "utf8") : root.task;
 }
 function latestReview(ids) {
   for (const id of listRunIds().reverse()) {
@@ -5835,7 +5894,7 @@ function latestReview(ids) {
 }
 function diffOf(m, from = m.baseTree) {
   const where = m.mode === "isolate" ? m.worktree : m.repoRoot;
-  if (where && fs30.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
+  if (where && fs31.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
   if (from !== m.baseTree) {
     throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
   }
@@ -5849,7 +5908,7 @@ function runReview(id) {
   if (!m.changes?.length) throw new UserError(`run ${m.id} made no changes; nothing to review`);
   const chain = ancestors(m);
   const previous = latestReview(chain.map((a) => a.id));
-  const dir = m.mode === "isolate" && m.worktree && fs30.existsSync(m.worktree) ? m.cwd : m.dir;
+  const dir = m.mode === "isolate" && m.worktree && fs31.existsSync(m.worktree) ? m.cwd : m.dir;
   const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group, plan: m.plan };
   const title = m.plan ? `Task ${m.plan.step}: ${m.plan.title}` : `run ${m.id}`;
   if (!previous) {
@@ -5924,20 +5983,20 @@ function writePackage(job) {
   const g = gitDir(job.dir);
   const root = repoRoot(job.dir);
   if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
-  const name = `review-${crypto9.randomBytes(4).toString("hex")}.md`;
-  const inside2 = !path26.relative(fs30.realpathSync(root), fs30.realpathSync(g)).startsWith("..");
-  const file2 = inside2 ? path26.join(g, "pitroom", name) : path26.join(root, ".pitroom", name);
+  const name = `review-${crypto10.randomBytes(4).toString("hex")}.md`;
+  const inside2 = !path27.relative(fs31.realpathSync(root), fs31.realpathSync(g)).startsWith("..");
+  const file2 = inside2 ? path27.join(g, "pitroom", name) : path27.join(root, ".pitroom", name);
   if (!inside2) ignoreInGit(root, "/.pitroom/");
-  fs30.mkdirSync(path26.dirname(file2), { recursive: true });
-  fs30.writeFileSync(file2, job.package);
+  fs31.mkdirSync(path27.dirname(file2), { recursive: true });
+  fs31.writeFileSync(file2, job.package);
   return file2;
 }
 function ignoreInGit(root, pattern) {
-  const exclude = path26.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
-  const text = fs30.existsSync(exclude) ? fs30.readFileSync(exclude, "utf8") : "";
+  const exclude = path27.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
+  const text = fs31.existsSync(exclude) ? fs31.readFileSync(exclude, "utf8") : "";
   if (text.split(/\r?\n/).includes(pattern)) return;
-  fs30.mkdirSync(path26.dirname(exclude), { recursive: true });
-  fs30.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
+  fs31.mkdirSync(path27.dirname(exclude), { recursive: true });
+  fs31.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
 ${pattern}
 `);
 }
@@ -6057,7 +6116,15 @@ warning: ${w}`).join("")
 async function cmdRun(p) {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
-  return launch(p, prepareRun(opts));
+  const cache = cacheKey({ ...opts, fresh: has(p, "fresh") });
+  const hit = cache && findCached(cache);
+  if (hit) {
+    console.log(has(p, "json") ? JSON.stringify({ ...hit, cached: true }, null, 2) : `${cachedNote(hit)}
+
+${formatReport(hit)}`);
+    return exitCodeFor(hit);
+  }
+  return launch(p, prepareRun({ ...opts, cache }));
 }
 async function cmdReview(p) {
   const range = flag(p, "range");
@@ -6085,10 +6152,10 @@ async function cmdReview(p) {
       writeMeta(meta);
     }
   } catch (e) {
-    fs31.rmSync(packageFile, { force: true });
+    fs32.rmSync(packageFile, { force: true });
     throw e;
   }
-  fs31.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  fs32.writeFileSync(runFile(meta.id, "package.md"), job.package);
   return launch(p, meta);
 }
 async function cmdAudit(p) {
@@ -6156,7 +6223,7 @@ function cmdPlan(p) {
 }
 function cmdCrew(p) {
   const file2 = flag(p, "task-file");
-  const tasks = (file2 ? fs31.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  const tasks = (file2 ? fs32.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
@@ -6359,7 +6426,7 @@ function sinceMs(s) {
   if (!m) throw new UserError("--since takes 7d, 30d, \u2026 or all");
   return Date.now() - Number(m[1]) * 864e5;
 }
-var readStdin = () => process.stdin.isTTY ? "" : fs31.readFileSync(0, "utf8");
+var readStdin = () => process.stdin.isTTY ? "" : fs32.readFileSync(0, "utf8");
 function cmdStatusline(p) {
   const input = readStdin();
   const lines = [];
@@ -6399,8 +6466,8 @@ function cmdModels(p) {
   return 0;
 }
 function cmdHookStart() {
-  const script = path27.join(path27.dirname(path27.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
-  if (fs31.existsSync(script)) spawnSync8(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
+  const script = path28.join(path28.dirname(path28.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
+  if (fs32.existsSync(script)) spawnSync8(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
   return 0;
 }
 function cmdInit(p) {
@@ -6440,8 +6507,8 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs31.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path27.resolve(out)}`);
+    fs32.writeFileSync(out, card(t, period));
+    console.log(`card written to ${path28.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -6483,7 +6550,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs31.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs32.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -6492,22 +6559,22 @@ function cmdConfig(p) {
   return 0;
 }
 function cmdClean(p) {
-  const days = Number(flag(p, "days") ?? 14);
-  const cutoff = Date.now() - days * 864e5;
+  const days2 = Number(flag(p, "days") ?? 14);
+  const cutoff = Date.now() - days2 * 864e5;
   const old = listRunIds().filter((id) => {
     const m = freshMeta(id);
     const pendingPatch = m.mode === "isolate" && !m.applied && !m.discarded && m.changes?.length;
     return TERMINAL.includes(m.state) && Date.parse(m.startedAt) < cutoff && !pendingPatch;
   });
   if (!has(p, "yes")) {
-    console.log(`${old.length} run(s) older than ${days} days would be removed (unapplied isolate patches are kept). Re-run with --yes.`);
+    console.log(`${old.length} run(s) older than ${days2} days would be removed (unapplied isolate patches are kept). Re-run with --yes.`);
     return 0;
   }
   for (const id of old) {
     const m = readMeta(id);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
     recordRun(m);
-    fs31.rmSync(runDir(id), { recursive: true, force: true });
+    fs32.rmSync(runDir(id), { recursive: true, force: true });
   }
   const snapshots = prune(Date.now(), 0);
   console.log(`removed ${old.length} run(s)${snapshots ? ` and ${snapshots} read snapshot${snapshots === 1 ? "" : "s"}` : ""}; the history and the savings ledger are kept`);
@@ -6518,9 +6585,9 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 
 // src/core/doctor.ts
 import { spawnSync as spawnSync9 } from "node:child_process";
-import fs32 from "node:fs";
+import fs33 from "node:fs";
 import os11 from "node:os";
-import path28 from "node:path";
+import path29 from "node:path";
 var MARK = { ok: () => green("\u2714"), warn: () => yellow("!"), fail: () => red("\u2718") };
 var NEXT = [
   { when: /no default model|no fallback workers/, command: "pitroom init", why: "propose a starter config (fallback models from your catalogue)" },
@@ -6530,10 +6597,10 @@ var NEXT = [
   { when: /Gemini CLI is not signed in|IneligibleTierError/, command: "export GEMINI_API_KEY=\u2026", why: "a Google AI Studio key for the Gemini worker" }
 ];
 function firstNodeOnPath() {
-  for (const dir of (process.env.PATH ?? "").split(path28.delimiter).filter(Boolean)) {
-    const file2 = path28.join(dir, process.platform === "win32" ? "node.exe" : "node");
+  for (const dir of (process.env.PATH ?? "").split(path29.delimiter).filter(Boolean)) {
+    const file2 = path29.join(dir, process.platform === "win32" ? "node.exe" : "node");
     try {
-      if (!fs32.statSync(file2).isFile()) continue;
+      if (!fs33.statSync(file2).isFile()) continue;
     } catch {
       continue;
     }
@@ -6560,12 +6627,12 @@ function doctor5(probe) {
   const addAll = (list2) => list2.forEach((c) => add(c.level, c.message));
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   const onPath = firstNodeOnPath();
-  if (onPath && onPath.version && tooOld(onPath.version) && path28.resolve(onPath.path) !== path28.resolve(process.execPath)) {
+  if (onPath && onPath.version && tooOld(onPath.version) && path29.resolve(onPath.path) !== path29.resolve(process.execPath)) {
     add("warn", `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
   }
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs32.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs33.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
   if (process.platform !== "win32") {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
@@ -6718,19 +6785,19 @@ function skillChecks() {
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
   if (geminiExtensionInstalled()) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path28.sep}.agents${path28.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path29.sep}.agents${path29.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`" } : { level: "ok", message: "Gemini CLI extension installed (skills + context)" }
     );
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path28.sep}.claude${path28.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path29.sep}.claude${path29.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
   }
   const launcher = launcherPath();
-  if (fs32.existsSync(launcher)) {
+  if (fs33.existsSync(launcher)) {
     const r = spawnSync9(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
@@ -6742,12 +6809,12 @@ function skillChecks() {
 }
 function geminiExtensionInstalled() {
   const home3 = process.env.GEMINI_CLI_HOME ?? os11.homedir();
-  return fs32.existsSync(path28.join(home3, ".gemini", "extensions", "pitroom"));
+  return fs33.existsSync(path29.join(home3, ".gemini", "extensions", "pitroom"));
 }
 function pluginInstalled() {
   try {
-    const f = path28.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs32.readFileSync(f, "utf8")).plugins ?? {};
+    const f = path29.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const plugins = JSON.parse(fs33.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
@@ -6764,24 +6831,24 @@ function superpowersActive() {
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
-  for (const base2 of [path28.join(os11.homedir(), ".agents", "skills"), path28.join(os11.homedir(), ".claude", "skills")]) {
-    const dir = path28.join(base2, "using-superpowers");
-    if (fs32.existsSync(path28.join(dir, "SKILL.md"))) found.push(dir);
+  for (const base2 of [path29.join(os11.homedir(), ".agents", "skills"), path29.join(os11.homedir(), ".claude", "skills")]) {
+    const dir = path29.join(base2, "using-superpowers");
+    if (fs33.existsSync(path29.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
 }
 function claudePlugins() {
   try {
-    const f = path28.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
-    return Object.keys(JSON.parse(fs32.readFileSync(f, "utf8")).plugins ?? {});
+    const f = path29.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
+    return Object.keys(JSON.parse(fs33.readFileSync(f, "utf8")).plugins ?? {});
   } catch {
     return [];
   }
 }
 function claudePluginEnabled(key) {
   try {
-    const f = path28.join(os11.homedir(), ".claude", "settings.json");
-    return JSON.parse(fs32.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
+    const f = path29.join(os11.homedir(), ".claude", "settings.json");
+    return JSON.parse(fs33.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
   } catch {
     return true;
   }
@@ -6790,7 +6857,7 @@ function codexPlugins() {
   const plugins = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs32.readFileSync(path28.join(process.env.CODEX_HOME ?? path28.join(os11.homedir(), ".codex"), "config.toml"), "utf8");
+    text = fs33.readFileSync(path29.join(process.env.CODEX_HOME ?? path29.join(os11.homedir(), ".codex"), "config.toml"), "utf8");
   } catch {
     return plugins;
   }
@@ -6808,11 +6875,11 @@ function codexPlugins() {
   return plugins;
 }
 function openCodePlugins() {
-  const dir = path28.join(process.env.XDG_CONFIG_HOME ?? path28.join(os11.homedir(), ".config"), "opencode");
+  const dir = path29.join(process.env.XDG_CONFIG_HOME ?? path29.join(os11.homedir(), ".config"), "opencode");
   const plugins = [];
   for (const name of ["opencode.json", "opencode.jsonc"]) {
     try {
-      const text = fs32.readFileSync(path28.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const text = fs33.readFileSync(path29.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
       const list2 = JSON.parse(text).plugin;
       if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
     } catch {
@@ -6820,7 +6887,7 @@ function openCodePlugins() {
   }
   for (const folder of ["plugin", "plugins"]) {
     try {
-      for (const f of fs32.readdirSync(path28.join(dir, folder))) plugins.push(path28.join(dir, folder, f));
+      for (const f of fs33.readdirSync(path29.join(dir, folder))) plugins.push(path29.join(dir, folder, f));
     } catch {
     }
   }
@@ -6900,6 +6967,7 @@ Run options
       --in-place        a read run reads the directory itself, not a clean snapshot (default: a snapshot without secret-looking
                         files when the directory has any; config "readIn": auto | snapshot | project)
       --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
+      --fresh           ask a worker even when the same read question was answered on the same code (config "cacheDays", default 7)
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, \u2026 (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes
       --step N          the plan task for --plan
@@ -6921,9 +6989,9 @@ Exit codes: 0 ok \xB7 1 worker failed \xB7 2 usage \xB7 3 refused/setup \xB7 4 t
             5 read-only violation \xB7 6 verify failed \xB7 75 still running (wait again)
 Workers: ${backendIds().join(", ")} (targets: "opencode", "opencode:provider/model", or a bare model)
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
-     PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG,
+     PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel)`;
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,
@@ -6936,7 +7004,7 @@ var COMMANDS = {
     if (port !== void 0 && !(/^\d+$/.test(port) && Number(port) <= 65535)) throw new UserError("--port takes a number from 0 to 65535 (0 picks a free one)");
     const dir = flag(p, "dir");
     if (dir !== void 0) {
-      if (!fs33.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new UserError(`-d ${dir}: no such directory`);
+      if (!fs34.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new UserError(`-d ${dir}: no such directory`);
       process.chdir(dir);
       process.env.PWD = process.cwd();
     }
