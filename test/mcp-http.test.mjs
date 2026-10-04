@@ -109,7 +109,7 @@ test('mcp http: initialize opens a session; every other request needs it; delete
     assert.equal((await h.post({ jsonrpc: '2.0', id: 50, method: 'tools/list' })).status, 400, 'no session id');
     assert.equal((await h.post({ jsonrpc: '2.0', id: 51, method: 'tools/list' }, { 'Mcp-Session-Id': 'nope' })).status, 404, 'an unknown one');
     const listed = await h.rpc(sid, 'tools/list', {});
-    assert.equal(listed.result.tools.length, 18);
+    assert.equal(listed.result.tools.length, 10);
     assert.equal((await h.post({ jsonrpc: '2.0', method: 'notifications/initialized' }, { 'Mcp-Session-Id': sid })).status, 202, 'a notification is accepted, with no body');
     const batch = await (await h.post([{ jsonrpc: '2.0', id: 60, method: 'ping' }, { jsonrpc: '2.0', id: 61, method: 'ping' }], { 'Mcp-Session-Id': sid })).json();
     assert.deepEqual(batch.map((m) => m.id), [60, 61]);

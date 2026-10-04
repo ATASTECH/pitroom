@@ -19,7 +19,7 @@ const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 
 const INSTRUCTIONS = [
   'Pitroom hands bounded work to cheaper worker agents and returns a verified answer, the exact diff and a cost receipt. You decide, verify and answer.',
-  'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard); pitroom_crew for independent tasks in parallel.',
+  'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard); pitroom_run with "tasks" for independent tasks in parallel; pitroom_info (topic history) finds an earlier answer before you ask again.',
   'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it.',
   'It is optional: for a small task you can do yourself, skip it.',
 ].join(' ');
