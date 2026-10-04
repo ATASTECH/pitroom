@@ -55,6 +55,9 @@ export function auditTask(meta: RunMeta, answer: string): string {
   return [
     "You are auditing another worker's answer to a read-only question about this project. Do not take the answer on trust:",
     "check its key claims yourself against the files here (open the cited files and lines, search for what it says exists or is missing).",
+    'Check the answer against the QUESTION, not only its own claims: every condition the question sets (a directory or scope,',
+    'what to leave out, "all", "only", "exactly", a count) must hold. Valid references do not make an answer right:',
+    'for a list, look for items that are missing and items that do not belong; for a count, count again yourself.',
     'Do not edit anything and do not run anything that changes files.',
     '',
     'QUESTION:',
@@ -69,7 +72,7 @@ export function auditTask(meta: RunMeta, answer: string): string {
     'DISPUTED:',
     '- <the claim> — <what is actually true, with path:line>',
     '',
-    'AGREE: every key claim you checked holds. PARTIAL: some are wrong or could not be verified. DISAGREE: the main conclusion is wrong.',
+    "AGREE: every key claim you checked holds and the answer meets every condition of the question (no extra or missing items, the right count). PARTIAL: some are wrong, unverified, or the answer goes beyond or falls short of the question's scope. DISAGREE: the main conclusion is wrong.",
     'Under DISPUTED list only claims you checked and found wrong or unsupported; write "- (none)" when there are none.',
   ].join('\n');
 }

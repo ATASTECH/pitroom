@@ -314,3 +314,9 @@ test('gemini: a refused tool counts as denied; an error result is the failure me
   assert.equal(quota.finalText, '');
   assert.equal(b.failure(quota, '', 1).kind, 'rate-limited');
 });
+
+test('opencode: "Endpoint is unavailable" (HTTP 400) is a rate limit: the model cools down and the next worker runs', () => {
+  const b = getBackend('opencode');
+  const run = { ...b.parse(''), error: 'Endpoint is unavailable [provider.invalid-request, HTTP 400]' };
+  assert.equal(b.failure(run, '', 1).kind, 'rate-limited');
+});

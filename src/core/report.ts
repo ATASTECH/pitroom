@@ -33,7 +33,10 @@ export function readSummary(meta: RunMeta): string {
 
 export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLines = 400): string {
   const out: string[] = [];
-  out.push(`${bold('pitroom')} ${stateColour(meta.state, `${ICON[meta.state]} ${meta.state}`)} · ${meta.mode} · ${duration(meta)} · run ${dim(meta.id)}`);
+  // a finished run whose --verify failed is not "✔ done": the check the user asked for did not pass
+  const verifyFailed = meta.state === 'done' && meta.verifyResult && !meta.verifyResult.ok;
+  const head = verifyFailed ? stateColour('failed', '⚠ done · verify failed') : stateColour(meta.state, `${ICON[meta.state]} ${meta.state}`);
+  out.push(`${bold('pitroom')} ${head} · ${meta.mode} · ${duration(meta)} · run ${dim(meta.id)}`);
   const ran = meta.ran ?? meta.worker;
   const ids = [`worker ${ran.backend}`, meta.resolvedModel && `model ${meta.resolvedModel}`, meta.sessionId && `session ${meta.sessionId}`];
   out.push(ids.filter(Boolean).join(' · '));
@@ -113,7 +116,9 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
 
   if (meta.verifyResult) {
     const v = meta.verifyResult;
-    out.push(`── verify: \`${meta.verify}\` ${v.ok ? '✔ passed' : `✘ failed (exit ${v.code})`}`);
+    const notFound = !v.ok && v.code === 127;
+    out.push(`── verify: \`${meta.verify}\` ${v.ok ? '✔ passed' : notFound ? '✘ could not run (exit 127: command not found)' : `✘ failed (exit ${v.code})`}`);
+    if (notFound) out.push('   the command is not on the PATH Pitroom runs with (an app such as an MCP client may start it without your shell\'s PATH): give its full path, or set PATH in the command');
     if (!v.ok && v.tail) out.push(...v.tail.split('\n').map((l) => `   ${l}`));
   }
 

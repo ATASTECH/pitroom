@@ -1,4 +1,4 @@
-import { CircleCheck, CircleSlash, CircleX, Clock, Hourglass, Loader2 } from 'lucide-react';
+import { CircleCheck, CircleSlash, CircleX, Clock, Hourglass, Loader2, TriangleAlert } from 'lucide-react';
 import type { RunState } from '@/api';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
@@ -12,8 +12,10 @@ const ICONS = {
   stopped: { Icon: CircleSlash, cls: 'text-muted-foreground', hint: 'Stopped: ended with pitroom stop' },
 } as const;
 
-export function StateIcon({ state, className }: { state: RunState; className?: string }) {
-  const { Icon, cls, hint } = ICONS[state];
+const VERIFY_FAILED = { Icon: TriangleAlert, cls: 'text-destructive animate-in zoom-in-50 duration-300', hint: 'Done, but its verify command failed: open it for the output' };
+
+export function StateIcon({ state, verifyFailed, className }: { state: RunState; verifyFailed?: boolean; className?: string }) {
+  const { Icon, cls, hint } = state === 'done' && verifyFailed ? VERIFY_FAILED : ICONS[state];
   return (
     <Tooltip>
       <TooltipTrigger render={<span tabIndex={0} className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring" />}>

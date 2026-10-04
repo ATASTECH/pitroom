@@ -47,6 +47,8 @@ export interface DashRun {
   audit?: string;
   changes?: number;
   applied?: boolean;
+  /** Finished, but its --verify command failed: it needs attention like a failed run. */
+  verifyFailed?: boolean;
   note: string;
 }
 
@@ -77,6 +79,7 @@ function toRun(m: RunMeta): DashRun {
   return {
     id: m.id,
     state: m.state,
+    verifyFailed: m.verifyResult && !m.verifyResult.ok ? true : undefined,
     kind: kind(m),
     // the model that really ran, once the CLI has said which; until then just the worker, never a guess
     worker: workerName(ranTarget(m)),

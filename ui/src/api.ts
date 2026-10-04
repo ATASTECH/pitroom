@@ -20,6 +20,8 @@ export interface DashRun {
   audit?: string;
   changes?: number;
   applied?: boolean;
+  /** Finished, but its --verify command failed. */
+  verifyFailed?: boolean;
   note: string;
 }
 

@@ -72,7 +72,7 @@ export const TOOLS: Tool[] = [
     name: 'pitroom_run',
     title: 'Run a worker',
     description:
-      'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. Cancelling the call stops the run.',
+      'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. The using-pitroom skill (or prompt) says when and how to delegate. Cancelling the call stops the run.',
     inputSchema: {
       type: 'object',
       properties: {

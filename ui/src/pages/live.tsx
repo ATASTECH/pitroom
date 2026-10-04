@@ -57,7 +57,7 @@ export function LivePage({ focus }: { focus?: string }) {
   const shown = useMemo(
     () =>
       (data?.runs ?? []).filter(
-        (r) => matches(r, q.trim().toLowerCase()) && (filter === 'all' || (filter === 'running' ? r.state === 'running' || r.state === 'queued' : r.state === 'failed' || r.state === 'timeout' || r.state === 'stopped')),
+        (r) => matches(r, q.trim().toLowerCase()) && (filter === 'all' || (filter === 'running' ? r.state === 'running' || r.state === 'queued' : r.state === 'failed' || r.state === 'timeout' || r.state === 'stopped' || !!r.verifyFailed)),
       ),
     [data, q, filter],
   );

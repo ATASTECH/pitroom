@@ -126,3 +126,15 @@ test('audit: `pitroom audit RUN -W` audits at once and prints the verdict; chang
   assert.match(s.run(['audit', RUN_ID.exec(change.stdout)[0]]).stderr, /changed files/);
   assert.equal(s.run(['audit']).status, 2);
 });
+
+test('audit: the auditor is told to check the question\'s conditions, extra and missing items and counts, not only the references', () => {
+  const s = sandbox();
+  two(s);
+  const id = RUN_ID.exec(s.run(['run', 'list the files under src/ only'], { MOCK_ACTIONS: `answer:${ANSWER}` }).stdout)[0];
+  s.run(['audit', id, '-W', 'opencode:mock/other'], { MOCK_ACTIONS: 'answer:AUDIT: AGREE\nCHECKED: 1\nDISPUTED:\n- (none)' });
+  const prompt = s.calls().filter((c) => c.argv[0] === 'run').at(-1).argv.at(-1);
+  assert.match(prompt, /every condition the question sets/);
+  assert.match(prompt, /items that are missing and items that do not belong/);
+  assert.match(prompt, /for a count, count again yourself/);
+  assert.match(prompt, /QUESTION:\nlist the files under src\/ only/);
+});
