@@ -50,7 +50,7 @@ export interface RunDetail {
   patch?: string;
   fileDiffs?: FileDiffData[];
   info: Record<string, string | number | undefined>;
-  attempts: { target: string; error: string }[];
+  attempts: { target: string; error: string; skipped?: boolean }[];
   warnings: string[];
   refs?: { valid: number; total: number; invalid: string[] };
   verify?: { command: string; ok: boolean; tail: string };

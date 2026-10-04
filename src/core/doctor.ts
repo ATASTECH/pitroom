@@ -9,6 +9,7 @@ import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimDir } from '../vcs/guard.js';
 import { pickAuditor } from './audit.js';
+import { activeCooldowns, untilText } from './cooldown.js';
 import { resolveChain } from './chain.js';
 import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
@@ -117,6 +118,10 @@ export function doctor(probe: boolean): number {
       const cheaper = Object.entries(costs).filter(([k, v]) => k.startsWith(`${t.backend}:`) && v < mine).sort((a, b) => a[1] - b[1])[0];
       add('ok', `cost: ${key} = ${mine}${cheaper ? `; you priced ${cheaper[0]} cheaper (${cheaper[1]}): is the dearer one needed?` : ''}`);
     }
+  }
+  // Models skipped for now because they said "rate limited": say so, with when they come back.
+  for (const c of Object.values(activeCooldowns())) {
+    add('warn', `${c.target} is cooling down ${untilText(c)} (${c.reason.slice(0, 80)}): runs skip it while a fallback is left; \`pitroom cooldown --clear\` tries it again`);
   }
   const byBackend = new Map<string, (string | undefined)[]>();
   for (const t of [...chain, ...tierTargets]) byBackend.set(t.backend, [...(byBackend.get(t.backend) ?? []), t.model]);

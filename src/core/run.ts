@@ -13,6 +13,7 @@ import { effective } from './config.js';
 import { DeletionRefused, UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
+import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
@@ -237,12 +238,20 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
     for (let i = 0; i < chain.length; i++) {
       const target = chain[i]!;
       const backend = getBackend(target.backend);
+      // A model that said "rate limited" a moment ago is skipped while a fallback is left to run.
+      const cooling = activeCooldown(cooldownKey(target, backend));
+      if (cooling && chain.slice(i + 1).some((t) => !activeCooldown(cooldownKey(t, getBackend(t.backend))))) {
+        (meta.attempts ??= []).push({ target: describeTarget(target), error: `cooling down ${untilText(cooling)}: ${cooling.reason}`, skipped: true });
+        writeMeta(meta);
+        continue;
+      }
       meta.ran = target;
       writeMeta(meta);
       result = await attempt(meta, backend, target);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
+      if (why.kind === 'rate-limited') recordCooldown(cooldownKey(target, backend), describeTarget(target), why.message);
       if (!target.model && backend.defaultModel) {
         // The CLI's default just failed: don't retry the same model under its explicit name.
         const failed = backend.defaultModel();

@@ -51,6 +51,8 @@ Usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
+  pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
+                                        --clear tries them again
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
@@ -103,6 +105,7 @@ const COMMANDS: Record<string, Command> = {
   crew: cmd.cmdCrew,
   review: cmd.cmdReview,
   audit: cmd.cmdAudit,
+  cooldown: cmd.cmdCooldown,
   plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,

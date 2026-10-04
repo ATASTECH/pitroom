@@ -12,6 +12,7 @@ import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
+import { activeCooldowns, clearCooldowns, untilText } from '../core/cooldown.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
 import { formatModels, modelTable } from '../core/models.js';
@@ -115,6 +116,29 @@ export async function cmdAudit(p: Parsed): Promise<number> {
   m.audit = { id: a.id, state: 'running' };
   writeMeta(m);
   return launch(p, a);
+}
+
+/** The models that said "rate limited" and are being left alone for now; --clear tries them again. */
+export function cmdCooldown(p: Parsed): number {
+  if (has(p, 'clear')) {
+    const n = clearCooldowns();
+    console.log(n ? `cleared ${n} cooldown${n === 1 ? '' : 's'}: those models are tried again` : 'no cooldowns');
+    return 0;
+  }
+  const all = activeCooldowns();
+  if (has(p, 'json')) {
+    console.log(JSON.stringify(all, null, 2));
+    return 0;
+  }
+  const rows = Object.values(all);
+  if (!rows.length) {
+    console.log('no model is cooling down');
+    return 0;
+  }
+  console.log('Models left alone for now (runs go to the next worker; they are tried again after the time shown):');
+  for (const c of rows) console.log(`  ${c.target.padEnd(52)} ${untilText(c)} · ${c.reason.slice(0, 90)}`);
+  console.log('\npitroom cooldown --clear   try them again now');
+  return 0;
 }
 
 /** `pitroom plan status PLAN` / `pitroom plan note PLAN "Task N: …"`. */

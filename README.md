@@ -457,6 +457,7 @@ pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- sep
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom audit RUN [-W worker]
+pitroom cooldown [--clear]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
 pitroom status|wait|watch [run… | -g NAME]        wait: --any --brief --timeout · watch: --json|--brief --interval
 pitroom dash [--detach] [--port N] [--open] [--stop]   a live page of the runs on 127.0.0.1
@@ -554,7 +555,7 @@ claude  haiku        low/medium/high/xhigh/max          ?     -     -           
 
 Pitroom cannot know vendor prices and does not fetch them, so a cost is what you enter: `"costs": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}` in the config, in any unit (they are only compared). `pitroom doctor` then prints the cost of the models in use and says when you priced a cheaper one of the same worker. A target that names only an effort (`codex:#low`) uses the model from `models`; a Codex or Claude Code worker with no pinned model gets a warning, because it would run the vendor's own default, which can change and cost more. `--effort LEVEL` sets the level for one run; your agent picks model and level from `pitroom models` (cheapest that fits: `low` for lookups, `medium` for ordinary changes, `high` for reviews).
 
-Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a worker that is rate-limited, logged out or missing its model hands the task to the next. Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md).
+Fallbacks cross backends (e.g. `"fallback": ["codex:#low", "opencode"]`): a worker that is rate-limited, logged out or missing its model hands the task to the next. Follow-ups (`--continue`) always stay on the worker that owns the session. Writing an adapter: [docs/backends.md](docs/backends.md). A model that says "rate limited" (a daily quota used up, an overloaded provider) is remembered for the time its message gives, or a guess: the next runs skip it while a fallback is left, so they do not each wait for it to fail. `pitroom cooldown` lists what is skipped and until when, `--clear` tries it again, and `doctor` shows it too.
 
 ---
 

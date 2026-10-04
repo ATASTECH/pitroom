@@ -23,7 +23,7 @@ const VALUE_FLAGS: Record<string, string> = {
 const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
   '--bg': 'bg', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
-  '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe',
+  '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe', '--clear': 'clear',
   '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running', '--detach': 'detach', '--stop': 'stop', '--open': 'open', '--serve': 'serve',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
 };
