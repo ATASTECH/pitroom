@@ -1,5 +1,6 @@
 import { backendIds } from './backends/index.js';
 import { parse, exitCodeFor, has } from './cli/args.js';
+import { serveMcp } from './cli/mcp.js';
 import * as cmd from './cli/commands.js';
 import { doctor } from './core/doctor.js';
 import { UserError } from './core/errors.js';
@@ -53,6 +54,7 @@ Usage
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
   pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
                                         --clear tries them again
+  pitroom mcp                           serve Pitroom as MCP tools on stdio (Cursor, Claude Desktop, Gemini CLI, …)
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
@@ -108,6 +110,7 @@ const COMMANDS: Record<string, Command> = {
   review: cmd.cmdReview,
   audit: cmd.cmdAudit,
   cooldown: cmd.cmdCooldown,
+  mcp: () => serveMcp(),
   plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,

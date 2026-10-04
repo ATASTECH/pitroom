@@ -63,5 +63,5 @@ export function sandbox() {
   const execs = () => entries().filter((e) => e.exec);
   const status = () => git('status', '--porcelain');
   const config = (obj) => fs.writeFileSync(path.join(base, 'config.json'), JSON.stringify(obj));
-  return { base, repo, git, run, calls, execs, status, config };
+  return { base, repo, git, run, calls, execs, status, config, env };
 }

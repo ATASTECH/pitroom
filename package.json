@@ -47,17 +47,19 @@
     "agent",
     "agent-skills",
     "claude-code",
+    "code-review",
     "codex",
     "cost",
     "delegation",
     "llm",
+    "mcp",
+    "mcp-server",
     "opencode",
+    "planning",
     "subagent",
-    "tokens",
-    "workflow",
-    "code-review",
     "tdd",
-    "planning"
+    "tokens",
+    "workflow"
   ],
   "license": "MIT",
   "devDependencies": {
