@@ -9,10 +9,20 @@ const MAX_VISITED = 20_000;
 const MAX_DEPTH = 4;
 const TEMPLATE = /\.(example|sample|template|dist|defaults?|tpl)$/i;
 
-/** Names that usually hold credentials: .env and .env.local (not .env.example), keys, .netrc, credentials.json. */
+/**
+ * Names that usually hold credentials: .env, .env.local and prod.env (not .env.example), private keys and keystores,
+ * .netrc, credentials.json and secrets.json/yml/toml.
+ */
 export function looksSecret(name: string): boolean {
-  if (name === '.env' || (name.startsWith('.env.') && !TEMPLATE.test(name))) return true;
-  return /\.(pem|p12|pfx)$/i.test(name) || /^id_(rsa|dsa|ecdsa|ed25519)$/.test(name) || name === '.netrc' || name === 'credentials.json';
+  if (TEMPLATE.test(name)) return false;
+  if (name === '.env' || name.startsWith('.env.') || /\.env$/i.test(name)) return true;
+  return (
+    /\.(pem|p12|pfx|key|jks|keystore)$/i.test(name) ||
+    /^id_(rsa|dsa|ecdsa|ed25519)$/.test(name) ||
+    name === '.netrc' ||
+    name === 'credentials.json' ||
+    /^secrets?\.(json|ya?ml|toml)$/i.test(name)
+  );
 }
 
 /** Secret-looking files a worker could read in `dir`, as paths relative to it. */

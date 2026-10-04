@@ -334,6 +334,8 @@ pitroom uninstall && npm rm -g pitroom
 | **isolate** | `-i` | code changes you want to review first | untouched until `pitroom apply` |
 | **write** | `-w` | quick in-place edits | edited now; `pitroom revert` undoes exactly |
 
+**Read snapshots.** With secret-looking files in the directory, a read run reads a snapshot of your project's current state (uncommitted and untracked files included) without them and without git-ignored files, made from git objects, kept once per state and shared by every read run on it (twenty workers, one snapshot), and cleaned up after three days or by `pitroom clean`. Nothing is copied back: a read run has nothing to land. Its files are read-only, and the paths a worker cites are turned back into your project's. With no secret-looking files nothing changes: the worker runs in place. `--in-place` (or `"readIn": "project"` in the config) reads the directory itself, e.g. for a task that needs build output; `"readIn": "snapshot"` always uses one.
+
 ```bash
 pitroom run "Find every place we build SQL strings by hand; file:line and risk"
 pitroom run -i --link node_modules --verify "npm test" "Fix the off-by-one in paginate() and add a test"
@@ -540,7 +542,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | OpenCode (v2+) | ✅ | per-run permission rules | reported | private `--standalone` server per run |
 | Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
-| Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, so use `--isolate`; pin a model, e.g. `-W gemini:gemini-3.8-flash`; no `--continue` (see [the notes](docs/backends.md#gemini-cli-notes)) |
+| Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, but a read run with secret-looking files reads a [clean snapshot](#modes) without them; pin a model, e.g. `-W gemini:gemini-3.8-flash`; no `--continue` (see [the notes](docs/backends.md#gemini-cli-notes)) |
 
 ### Models, costs and effort
 
@@ -612,7 +614,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 
 **Can the worker break my repo?** It can't touch git history, refs or your index (permission profile + git guard), can't run bulk deletes, and write-mode edits are revertible with one command. The guard is not an OS sandbox: git called by absolute path from inside a script, or non-git tools, are outside its reach, which is why `--isolate` exists: nothing reaches your tree until you apply it.
 
-**Can the worker read my `.env`?** In the directory it runs in, yes: its prompt says not to, and nothing stops it, and a free model may be hosted by a third party. Pitroom warns when it sees `.env` files, private keys or `credentials.json` there (`PITROOM_NO_SECRET_WARNING=1` silences it). An isolated copy (`-i`) leaves out git-ignored files, so a git-ignored `.env` is not in it; a clean checkout is the safest place for a first try.
+**Can the worker read my `.env`?** In a read run, no: when the directory holds secret-looking files (`.env`, `prod.env`, private keys and keystores, `.netrc`, `credentials.json`, `secrets.json`), the worker reads a **clean snapshot** of your project instead (see below), where they are simply not present, whatever the worker CLI would have allowed. Edits (`-i`, `-w`) and reviews are different: an isolated copy (`-i`) leaves out git-ignored files, so a git-ignored `.env` is not in it, but one that is not ignored would be copied, and Pitroom warns when it sees such files (`PITROOM_NO_SECRET_WARNING=1` silences the warning). A free model may be hosted by a third party: keep real secrets out of what you delegate.
 
 **What if the worker fails?** Pitroom exits non-zero with the real cause (for example a default model that no longer exists) and your agent simply continues on its own. `pitroom doctor` diagnoses setup problems.
 

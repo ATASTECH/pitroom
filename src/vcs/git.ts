@@ -52,8 +52,8 @@ export function repoRoot(dir: string): string | undefined {
   return r.code === 0 ? path.resolve(r.stdout.trim()) : undefined;
 }
 
-/** `exclude` keeps paths (e.g. symlinked node_modules) out of the snapshot. */
-export function snapshotTree(root: string, exclude: string[] = []): string {
+/** `exclude` keeps paths (e.g. symlinked node_modules) out of the snapshot; `drop` also removes them when they are tracked. */
+export function snapshotTree(root: string, exclude: string[] = [], drop: string[] = []): string {
   const tmp = path.join(os.tmpdir(), `pitroom-index-${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
   const real = path.resolve(root, must(root, ['rev-parse', '--git-path', 'index']).trim());
   const env = { ...process.env, GIT_INDEX_FILE: tmp };
@@ -61,7 +61,11 @@ export function snapshotTree(root: string, exclude: string[] = []): string {
     // Starting from a copy of the real index keeps stat info, so unchanged files aren't re-hashed.
     if (fs.existsSync(real)) fs.copyFileSync(real, tmp);
     else must(root, ['read-tree', '--empty'], env);
-    must(root, ['add', '-A', '--', ':/', ...exclude.map((p) => `:(top,exclude)${p}`)], env);
+    must(root, ['add', '-A', '--', ':/', ...exclude.map((p) => `:(top,exclude)${p}`), ...drop.map((p) => `:(top,literal,exclude)${p}`)], env);
+    if (drop.length) {
+      const r = spawnSync('git', ['update-index', '--force-remove', '-z', '--stdin'], { cwd: root, env, input: `${drop.join('\0')}\0`, encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(`git update-index failed: ${r.stderr.trim()}`);
+    }
     return must(root, ['write-tree'], env).trim();
   } finally {
     fs.rmSync(tmp, { force: true });

@@ -1416,7 +1416,8 @@ var SCHEMA = {
   models: "record",
   tiers: "record",
   costs: "numbers",
-  audit: "number"
+  audit: "number",
+  readIn: "string"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1474,6 +1475,7 @@ var rate = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
 };
+var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
 var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
 function setting(flag2, env, conf, fallback) {
   if (flag2 !== void 0) return { value: flag2, source: "flag" };
@@ -1498,7 +1500,8 @@ function effective(flags = {}) {
     models: setting(void 0, void 0, c.models, {}),
     tiers: setting(void 0, void 0, c.tiers, {}),
     costs: setting(void 0, void 0, c.costs, {}),
-    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0)
+    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
+    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto")
   };
 }
 
@@ -1545,6 +1548,7 @@ var BOOL_FLAGS = {
   "-i": "isolate",
   "--isolate": "isolate",
   "--bg": "bg",
+  "--in-place": "in-place",
   "--audit": "audit",
   "--no-audit": "no-audit",
   "--web": "web",
@@ -1639,6 +1643,7 @@ function runOptions(p, task) {
   return {
     mode: modes[0] ?? "read",
     auditRate: has(p, "no-audit") ? 0 : has(p, "audit") ? 1 : void 0,
+    inPlace: has(p, "in-place"),
     task,
     dir: flag(p, "dir") ?? process.cwd(),
     files: p.flags.get("file") ?? [],
@@ -1672,8 +1677,8 @@ function effortFlag(p) {
 
 // src/cli/commands.ts
 import { spawnSync as spawnSync7 } from "node:child_process";
-import fs28 from "node:fs";
-import path24 from "node:path";
+import fs29 from "node:fs";
+import path25 from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/core/init.ts
@@ -2968,84 +2973,17 @@ ${rulings}`,
   ].join("\n");
 }
 
-// src/core/cooldown.ts
-import fs17 from "node:fs";
-import path14 from "node:path";
-var MAX_MS = 24 * 36e5;
-var OVERLOAD_MS = 20 * 6e4;
-var DAILY_MS = 4 * 36e5;
-var file = () => path14.join(home(), "cooldowns.json");
-function cooldownKey(target, backend) {
-  const model = (target.model ?? backend.defaultModel?.() ?? "").split("#")[0];
-  return `${target.backend}:${model}`;
-}
-function retryAfterMs(message) {
-  const compact3 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
-  const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
-  let ms = 0;
-  if (compact3) {
-    for (const [, n, unit] of compact3.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
-  } else if (words) {
-    ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
-  }
-  return ms > 0 ? ms : void 0;
-}
-function cooldownMs(message) {
-  const told = retryAfterMs(message);
-  if (told !== void 0) return Math.min(Math.max(told, 6e4), MAX_MS);
-  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
-}
-function read() {
-  try {
-    const raw = JSON.parse(fs17.readFileSync(file(), "utf8"));
-    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
-  } catch {
-    return {};
-  }
-}
-function write(all) {
-  fs17.mkdirSync(path14.dirname(file()), { recursive: true });
-  const tmp = `${file()}.${process.pid}.tmp`;
-  fs17.writeFileSync(tmp, `${JSON.stringify(all, null, 2)}
-`);
-  fs17.renameSync(tmp, file());
-}
-function activeCooldowns(now = Date.now()) {
-  return Object.fromEntries(Object.entries(read()).filter(([, c]) => Date.parse(c.until) > now));
-}
-var activeCooldown = (key, now = Date.now()) => activeCooldowns(now)[key];
-function recordCooldown(key, targetName, message, now = Date.now()) {
-  try {
-    const all = activeCooldowns(now);
-    all[key] = { until: new Date(now + cooldownMs(message)).toISOString(), reason: message.replace(/\s+/g, " ").trim().slice(0, 160), target: targetName };
-    write(all);
-  } catch {
-  }
-}
-function clearCooldowns(key) {
-  const all = read();
-  const keys = key ? Object.keys(all).filter((k) => k === key) : Object.keys(all);
-  for (const k of keys) delete all[k];
-  if (keys.length) write(all);
-  return keys.length;
-}
-function untilText(c, now = Date.now()) {
-  const d = new Date(c.until);
-  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-  return d.toDateString() === new Date(now).toDateString() ? `until ${time}` : `until ${d.toLocaleDateString()} ${time}`;
-}
-
-// src/core/review.ts
-import crypto5 from "node:crypto";
+// src/core/snapshot.ts
 import fs19 from "node:fs";
 import path16 from "node:path";
+import crypto5 from "node:crypto";
 
 // src/vcs/git.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
 import crypto4 from "node:crypto";
-import fs18 from "node:fs";
+import fs17 from "node:fs";
 import os9 from "node:os";
-import path15 from "node:path";
+import path14 from "node:path";
 var SAFE = [
   "-c",
   "color.ui=false",
@@ -3077,20 +3015,24 @@ function gitAvailable() {
 }
 function repoRoot(dir) {
   const r = git(dir, ["rev-parse", "--show-toplevel"]);
-  return r.code === 0 ? path15.resolve(r.stdout.trim()) : void 0;
+  return r.code === 0 ? path14.resolve(r.stdout.trim()) : void 0;
 }
-function snapshotTree(root, exclude = []) {
-  const tmp = path15.join(os9.tmpdir(), `pitroom-index-${process.pid}-${crypto4.randomBytes(4).toString("hex")}`);
-  const real = path15.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
+function snapshotTree(root, exclude = [], drop = []) {
+  const tmp = path14.join(os9.tmpdir(), `pitroom-index-${process.pid}-${crypto4.randomBytes(4).toString("hex")}`);
+  const real = path14.resolve(root, must(root, ["rev-parse", "--git-path", "index"]).trim());
   const env = { ...process.env, GIT_INDEX_FILE: tmp };
   try {
-    if (fs18.existsSync(real)) fs18.copyFileSync(real, tmp);
+    if (fs17.existsSync(real)) fs17.copyFileSync(real, tmp);
     else must(root, ["read-tree", "--empty"], env);
-    must(root, ["add", "-A", "--", ":/", ...exclude.map((p) => `:(top,exclude)${p}`)], env);
+    must(root, ["add", "-A", "--", ":/", ...exclude.map((p) => `:(top,exclude)${p}`), ...drop.map((p) => `:(top,literal,exclude)${p}`)], env);
+    if (drop.length) {
+      const r = spawnSync5("git", ["update-index", "--force-remove", "-z", "--stdin"], { cwd: root, env, input: `${drop.join("\0")}\0`, encoding: "utf8" });
+      if (r.status !== 0) throw new Error(`git update-index failed: ${r.stderr.trim()}`);
+    }
     return must(root, ["write-tree"], env).trim();
   } finally {
-    fs18.rmSync(tmp, { force: true });
-    fs18.rmSync(`${tmp}.lock`, { force: true });
+    fs17.rmSync(tmp, { force: true });
+    fs17.rmSync(`${tmp}.lock`, { force: true });
   }
 }
 var DIFF = ["diff", "--no-ext-diff", "--no-textconv", "--no-renames"];
@@ -3110,27 +3052,27 @@ function diffTrees(root, a, b) {
   return { changes, stats: { files: changes.length, insertions, deletions }, patch };
 }
 function createIsolatedCopy(root, tree, dest) {
-  const objects = path15.join(path15.resolve(root, must(root, ["rev-parse", "--git-common-dir"]).trim()), "objects");
-  fs18.mkdirSync(path15.dirname(dest), { recursive: true });
-  must(path15.dirname(dest), ["init", "--quiet", dest]);
-  fs18.writeFileSync(path15.join(dest, ".git", "objects", "info", "alternates"), `${objects}
+  const objects = path14.join(path14.resolve(root, must(root, ["rev-parse", "--git-common-dir"]).trim()), "objects");
+  fs17.mkdirSync(path14.dirname(dest), { recursive: true });
+  must(path14.dirname(dest), ["init", "--quiet", dest]);
+  fs17.writeFileSync(path14.join(dest, ".git", "objects", "info", "alternates"), `${objects}
 `);
   must(dest, ["read-tree", tree]);
   must(dest, ["checkout-index", "--all", "--force"]);
 }
 function removeIsolatedCopy(dest, ownedBy) {
-  const rel = path15.relative(ownedBy, dest);
-  if (!rel || rel.startsWith("..") || path15.isAbsolute(rel)) throw new Error(`refusing to remove ${dest}`);
-  fs18.rmSync(dest, { recursive: true, force: true });
+  const rel = path14.relative(ownedBy, dest);
+  if (!rel || rel.startsWith("..") || path14.isAbsolute(rel)) throw new Error(`refusing to remove ${dest}`);
+  fs17.rmSync(dest, { recursive: true, force: true });
 }
 function linkIntoWorktree(root, worktree, rels) {
   const linked = [];
   for (const rel of rels) {
-    const src = path15.join(root, rel);
-    const dst = path15.join(worktree, rel);
-    if (!fs18.existsSync(src) || fs18.existsSync(dst)) continue;
-    fs18.mkdirSync(path15.dirname(dst), { recursive: true });
-    fs18.symlinkSync(src, dst, process.platform === "win32" ? "junction" : void 0);
+    const src = path14.join(root, rel);
+    const dst = path14.join(worktree, rel);
+    if (!fs17.existsSync(src) || fs17.existsSync(dst)) continue;
+    fs17.mkdirSync(path14.dirname(dst), { recursive: true });
+    fs17.symlinkSync(src, dst, process.platform === "win32" ? "junction" : void 0);
     linked.push(rel);
   }
   return linked;
@@ -3171,8 +3113,255 @@ function gitDir(dir) {
   return r.code === 0 ? r.stdout.trim() : void 0;
 }
 
+// src/core/secrets.ts
+import { execFileSync } from "node:child_process";
+import fs18 from "node:fs";
+import path15 from "node:path";
+var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
+var MAX_VISITED = 2e4;
+var MAX_DEPTH = 4;
+var TEMPLATE = /\.(example|sample|template|dist|defaults?|tpl)$/i;
+function looksSecret(name) {
+  if (TEMPLATE.test(name)) return false;
+  if (name === ".env" || name.startsWith(".env.") || /\.env$/i.test(name)) return true;
+  return /\.(pem|p12|pfx|key|jks|keystore)$/i.test(name) || /^id_(rsa|dsa|ecdsa|ed25519)$/.test(name) || name === ".netrc" || name === "credentials.json" || /^secrets?\.(json|ya?ml|toml)$/i.test(name);
+}
+function findSecretFiles(dir) {
+  const found = [];
+  let visited = 0;
+  const walk = (d, depth) => {
+    if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
+    let entries;
+    try {
+      entries = fs18.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      visited++;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS.has(e.name)) walk(path15.join(d, e.name), depth + 1);
+      } else if (e.isFile() && looksSecret(e.name)) {
+        found.push(path15.relative(dir, path15.join(d, e.name)));
+      }
+    }
+  };
+  walk(dir, 0);
+  return found.sort();
+}
+function findSecretFilesInTree(root, dir) {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    return out.split("\0").filter((f) => f && looksSecret(path15.basename(f)) && !path15.relative(dir, path15.join(root, f)).startsWith("..")).map((f) => path15.relative(dir, path15.join(root, f))).sort();
+  } catch {
+    return [];
+  }
+}
+function secretWarning(files, mode) {
+  if (!files.length) return void 0;
+  const shown = files.slice(0, 3).join(", ") + (files.length > 3 ? `, +${files.length - 3} more` : "");
+  const where = mode === "isolate" ? "would be copied into the isolated copy" : "sit in the directory the worker runs in";
+  const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
+  return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
+}
+
+// src/core/snapshot.ts
+var READ_IN = ["auto", "snapshot", "project"];
+var KEEP_MS = 24 * 36e5;
+var PRUNE_AGE_MS = 3 * 24 * 36e5;
+var KEEP_NEWEST = 6;
+var JUST_USED_MS = 10 * 6e4;
+var snapshotsDir = () => path16.join(home(), "snapshots");
+function wantSnapshot(readIn2, root, dir) {
+  if (!root || readIn2 === "project") return void 0;
+  const secrets = findSecretFiles(dir);
+  return readIn2 === "snapshot" || secrets.length ? { secrets } : void 0;
+}
+function readSnapshot(root) {
+  const drop = findSecretFilesInTree(root, root);
+  const tree = snapshotTree(root, [], drop);
+  const dest = path16.join(snapshotsDir(), tree);
+  if (fs19.existsSync(path16.join(dest, ".git"))) {
+    touch(dest);
+    return { dir: dest, tree, created: false };
+  }
+  const tmp = path16.join(snapshotsDir(), `.tmp-${process.pid}-${crypto5.randomBytes(3).toString("hex")}`);
+  try {
+    createIsolatedCopy(root, tree, tmp);
+    readOnly(tmp);
+    try {
+      fs19.renameSync(tmp, dest);
+    } catch (e) {
+      if (!fs19.existsSync(path16.join(dest, ".git"))) throw e;
+      removeIsolatedCopy(tmp, snapshotsDir());
+    }
+  } catch (e) {
+    try {
+      removeIsolatedCopy(tmp, snapshotsDir());
+    } catch {
+    }
+    throw e;
+  }
+  prune();
+  return { dir: dest, tree, created: true };
+}
+function touch(dir) {
+  try {
+    const now = /* @__PURE__ */ new Date();
+    fs19.utimesSync(dir, now, now);
+  } catch {
+  }
+}
+function readOnly(dir) {
+  const walk = (d) => {
+    for (const e of fs19.readdirSync(d, { withFileTypes: true })) {
+      if (e.name === ".git") continue;
+      const p = path16.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) fs19.chmodSync(p, fs19.statSync(p).mode & ~146);
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+  }
+}
+function prune(now = Date.now(), maxAgeMs = PRUNE_AGE_MS, keepNewest = KEEP_NEWEST) {
+  let names;
+  try {
+    names = fs19.readdirSync(snapshotsDir());
+  } catch {
+    return 0;
+  }
+  const inUse = /* @__PURE__ */ new Set();
+  for (const id of listRunIds()) {
+    try {
+      const m = readMeta(id);
+      if (m.snapshot?.dir && isActive(m.state)) inUse.add(path16.resolve(m.snapshot.dir));
+    } catch {
+    }
+  }
+  const entries = names.map((n) => {
+    const dir = path16.join(snapshotsDir(), n);
+    try {
+      return { n, dir, age: now - fs19.statSync(dir).mtimeMs };
+    } catch {
+      return void 0;
+    }
+  }).filter((e) => !!e).sort((x, y) => x.age - y.age);
+  let removed = 0;
+  let rank = 0;
+  for (const e of entries) {
+    if (inUse.has(path16.resolve(e.dir))) continue;
+    const half = e.n.startsWith(".tmp-");
+    const old = e.age >= (half ? KEEP_MS : maxAgeMs);
+    const surplus = !half && ++rank > keepNewest && e.age >= JUST_USED_MS;
+    if (!old && !surplus) continue;
+    try {
+      makeWritable(e.dir);
+      removeIsolatedCopy(e.dir, snapshotsDir());
+      removed++;
+    } catch {
+    }
+  }
+  return removed;
+}
+function makeWritable(dir) {
+  const walk = (d) => {
+    for (const e of fs19.readdirSync(d, { withFileTypes: true })) {
+      const p = path16.join(d, e.name);
+      if (e.isDirectory()) walk(p);
+      else if (e.isFile()) fs19.chmodSync(p, fs19.statSync(p).mode | 128);
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+  }
+}
+function backToProject(text, snapshotDir, root) {
+  let real = snapshotDir;
+  try {
+    real = fs19.realpathSync(snapshotDir);
+  } catch {
+  }
+  let out = text;
+  for (const dir of /* @__PURE__ */ new Set([real, snapshotDir])) out = out.split(`${dir}${path16.sep}`).join(`${root}${path16.sep}`).split(dir).join(root);
+  return out;
+}
+
+// src/core/cooldown.ts
+import fs20 from "node:fs";
+import path17 from "node:path";
+var MAX_MS = 24 * 36e5;
+var OVERLOAD_MS = 20 * 6e4;
+var DAILY_MS = 4 * 36e5;
+var file = () => path17.join(home(), "cooldowns.json");
+function cooldownKey(target, backend) {
+  const model = (target.model ?? backend.defaultModel?.() ?? "").split("#")[0];
+  return `${target.backend}:${model}`;
+}
+function retryAfterMs(message) {
+  const compact3 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
+  const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
+  let ms = 0;
+  if (compact3) {
+    for (const [, n, unit] of compact3.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
+  } else if (words) {
+    ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
+  }
+  return ms > 0 ? ms : void 0;
+}
+function cooldownMs(message) {
+  const told = retryAfterMs(message);
+  if (told !== void 0) return Math.min(Math.max(told, 6e4), MAX_MS);
+  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
+}
+function read() {
+  try {
+    const raw = JSON.parse(fs20.readFileSync(file(), "utf8"));
+    return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
+  } catch {
+    return {};
+  }
+}
+function write(all) {
+  fs20.mkdirSync(path17.dirname(file()), { recursive: true });
+  const tmp = `${file()}.${process.pid}.tmp`;
+  fs20.writeFileSync(tmp, `${JSON.stringify(all, null, 2)}
+`);
+  fs20.renameSync(tmp, file());
+}
+function activeCooldowns(now = Date.now()) {
+  return Object.fromEntries(Object.entries(read()).filter(([, c]) => Date.parse(c.until) > now));
+}
+var activeCooldown = (key, now = Date.now()) => activeCooldowns(now)[key];
+function recordCooldown(key, targetName, message, now = Date.now()) {
+  try {
+    const all = activeCooldowns(now);
+    all[key] = { until: new Date(now + cooldownMs(message)).toISOString(), reason: message.replace(/\s+/g, " ").trim().slice(0, 160), target: targetName };
+    write(all);
+  } catch {
+  }
+}
+function clearCooldowns(key) {
+  const all = read();
+  const keys = key ? Object.keys(all).filter((k) => k === key) : Object.keys(all);
+  for (const k of keys) delete all[k];
+  if (keys.length) write(all);
+  return keys.length;
+}
+function untilText(c, now = Date.now()) {
+  const d = new Date(c.until);
+  const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  return d.toDateString() === new Date(now).toDateString() ? `until ${time}` : `until ${d.toLocaleDateString()} ${time}`;
+}
+
 // src/core/review.ts
-var TEMPLATE = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
+import crypto6 from "node:crypto";
+import fs21 from "node:fs";
+import path18 from "node:path";
+var TEMPLATE2 = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
 var section = (title, body) => `## ${title}
 
 ${body.trim() || "(empty)"}
@@ -3189,7 +3378,7 @@ function ancestors(m) {
 function briefOf(m) {
   const root = [m, ...ancestors(m)].at(-1);
   const f = runFile(root.id, "brief.md");
-  return fs19.existsSync(f) ? fs19.readFileSync(f, "utf8") : root.task;
+  return fs21.existsSync(f) ? fs21.readFileSync(f, "utf8") : root.task;
 }
 function latestReview(ids) {
   for (const id of listRunIds().reverse()) {
@@ -3203,7 +3392,7 @@ function latestReview(ids) {
 }
 function diffOf(m, from = m.baseTree) {
   const where = m.mode === "isolate" ? m.worktree : m.repoRoot;
-  if (where && fs19.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
+  if (where && fs21.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
   if (from !== m.baseTree) {
     throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
   }
@@ -3217,7 +3406,7 @@ function runReview(id) {
   if (!m.changes?.length) throw new UserError(`run ${m.id} made no changes; nothing to review`);
   const chain = ancestors(m);
   const previous = latestReview(chain.map((a) => a.id));
-  const dir = m.mode === "isolate" && m.worktree && fs19.existsSync(m.worktree) ? m.cwd : m.dir;
+  const dir = m.mode === "isolate" && m.worktree && fs21.existsSync(m.worktree) ? m.cwd : m.dir;
   const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group, plan: m.plan };
   const title = m.plan ? `Task ${m.plan.step}: ${m.plan.title}` : `run ${m.id}`;
   if (!previous) {
@@ -3291,15 +3480,15 @@ function pickReviewer(job) {
 function writePackage(job) {
   const g = gitDir(job.dir);
   if (!g) throw new UserError(`not a git repository: ${job.dir}`);
-  const file2 = path16.join(g, "pitroom", `review-${crypto5.randomBytes(4).toString("hex")}.md`);
-  fs19.mkdirSync(path16.dirname(file2), { recursive: true });
-  fs19.writeFileSync(file2, job.package);
+  const file2 = path18.join(g, "pitroom", `review-${crypto6.randomBytes(4).toString("hex")}.md`);
+  fs21.mkdirSync(path18.dirname(file2), { recursive: true });
+  fs21.writeFileSync(file2, job.package);
   return file2;
 }
 
 // src/core/templates.ts
-import fs20 from "node:fs";
-import path17 from "node:path";
+import fs22 from "node:fs";
+import path19 from "node:path";
 var FILES = {
   implementer: "pitroom-driven-development/implementer-prompt.md",
   "task-reviewer": "pitroom-driven-development/task-reviewer-prompt.md",
@@ -3307,9 +3496,9 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file2 = path17.join(root, "skills", FILES[name]);
-  if (!fs20.existsSync(file2)) throw new UserError(`template missing: ${file2} (broken install? run pitroom doctor)`, 3);
-  return fs20.readFileSync(file2, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  const file2 = path19.join(root, "skills", FILES[name]);
+  if (!fs22.existsSync(file2)) throw new UserError(`template missing: ${file2} (broken install? run pitroom doctor)`, 3);
+  return fs22.readFileSync(file2, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -3415,16 +3604,16 @@ function formatModels(t) {
 
 // src/core/dash.ts
 import { spawn } from "node:child_process";
-import crypto6 from "node:crypto";
-import fs21 from "node:fs";
+import crypto7 from "node:crypto";
+import fs23 from "node:fs";
 import http from "node:http";
-import path18 from "node:path";
+import path20 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/core/file-diff.ts
 var PREVIEW_LINES = 300;
 function gitPath(value, prefix = true) {
-  let path26 = value;
+  let path27 = value;
   if (value.startsWith('"') && value.endsWith('"')) {
     const bytes = [];
     const escapes = { t: "	", n: "\n", r: "\r", b: "\b", f: "\f", v: "\v" };
@@ -3432,9 +3621,9 @@ function gitPath(value, prefix = true) {
       if (match[1] && /^[0-7]+$/.test(match[1])) bytes.push(parseInt(match[1], 8));
       else bytes.push(...new TextEncoder().encode(match[2] ?? escapes[match[1]] ?? match[1]));
     }
-    path26 = new TextDecoder().decode(new Uint8Array(bytes));
+    path27 = new TextDecoder().decode(new Uint8Array(bytes));
   }
-  return prefix ? path26.replace(/^[ab]\//, "") : path26;
+  return prefix ? path27.replace(/^[ab]\//, "") : path27;
 }
 function headerPath(header) {
   const quoted = header.match(/^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|\S+)$/);
@@ -3675,32 +3864,32 @@ var HEADERS = {
   "x-content-type-options": "nosniff",
   "referrer-policy": "no-referrer",
   // Own files only, plus the hash of the one inline theme script; styles may be inline (the components position popups with them).
-  "content-security-policy": `default-src 'none'; script-src 'self' 'sha256-${crypto6.createHash("sha256").update(THEME_SCRIPT).digest("base64")}'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'`
+  "content-security-policy": `default-src 'none'; script-src 'self' 'sha256-${crypto7.createHash("sha256").update(THEME_SCRIPT).digest("base64")}'; style-src 'self' 'unsafe-inline'; img-src data:; connect-src 'self'; base-uri 'none'; form-action 'none'`
 };
 var ASSETS = { "/assets/app.js": "text/javascript; charset=utf-8", "/assets/app.css": "text/css; charset=utf-8" };
 var assetsDir = () => fileURLToPath3(new URL("./ui/", import.meta.url));
 var assetCache = /* @__PURE__ */ new Map();
 function readAsset(route) {
   try {
-    const file2 = path18.join(assetsDir(), path18.basename(route));
-    const { mtimeMs } = fs21.statSync(file2);
+    const file2 = path20.join(assetsDir(), path20.basename(route));
+    const { mtimeMs } = fs23.statSync(file2);
     const hit = assetCache.get(route);
     if (hit && hit.mtimeMs === mtimeMs) return hit.data;
-    const data = fs21.readFileSync(file2);
+    const data = fs23.readFileSync(file2);
     assetCache.set(route, { mtimeMs, data });
     return data;
   } catch {
     return void 0;
   }
 }
-function handler(touch) {
+function handler(touch2) {
   const send = (res, code, type, body) => {
     res.writeHead(code, { ...HEADERS, "content-type": type });
     res.end(body);
   };
   const json = (res, code, value) => send(res, code, "application/json; charset=utf-8", JSON.stringify(value));
   return (req, res) => {
-    touch();
+    touch2();
     if (!LOCAL_HOST.test(req.headers.host ?? "")) return json(res, 403, { error: "forbidden host" });
     if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "read-only" });
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
@@ -3766,7 +3955,7 @@ function startDash(opts) {
     });
   });
 }
-var registryFile = () => path18.join(home(), "dash.json");
+var registryFile = () => path20.join(home(), "dash.json");
 async function ping(port) {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/state?limit=1`, { signal: AbortSignal.timeout(1500) });
@@ -3777,11 +3966,11 @@ async function ping(port) {
 }
 async function runningDash() {
   try {
-    const r = JSON.parse(fs21.readFileSync(registryFile(), "utf8"));
+    const r = JSON.parse(fs23.readFileSync(registryFile(), "utf8"));
     if (isAlive(r.pid) && await ping(r.port)) return { ...r, url: `http://127.0.0.1:${r.port}/` };
   } catch {
   }
-  fs21.rmSync(registryFile(), { force: true });
+  fs23.rmSync(registryFile(), { force: true });
   return void 0;
 }
 function openBrowser(url) {
@@ -3796,7 +3985,7 @@ async function dashCommand(o) {
   if (o.stop) {
     if (!existing) throw new UserError("pitroom dash is not running");
     process.kill(existing.pid, "SIGTERM");
-    fs21.rmSync(registryFile(), { force: true });
+    fs23.rmSync(registryFile(), { force: true });
     o.log(`stopped pitroom dash (${existing.url})`);
     return 0;
   }
@@ -3833,8 +4022,8 @@ async function dashCommand(o) {
     if (explicit || e.code !== "EADDRINUSE") throw new UserError(`pitroom dash: ${e.message}`);
     dash = await startDash({ port: 0, idleMs: o.idleMs });
   }
-  fs21.mkdirSync(home(), { recursive: true });
-  fs21.writeFileSync(registryFile(), JSON.stringify({ pid: process.pid, port: dash.port }));
+  fs23.mkdirSync(home(), { recursive: true });
+  fs23.writeFileSync(registryFile(), JSON.stringify({ pid: process.pid, port: dash.port }));
   const stop = () => void dash.close();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
@@ -3843,7 +4032,7 @@ async function dashCommand(o) {
   if (o.open) openBrowser(dash.url);
   await dash.closed;
   try {
-    if (JSON.parse(fs21.readFileSync(registryFile(), "utf8")).pid === process.pid) fs21.rmSync(registryFile(), { force: true });
+    if (JSON.parse(fs23.readFileSync(registryFile(), "utf8")).pid === process.pid) fs23.rmSync(registryFile(), { force: true });
   } catch {
   }
   return 0;
@@ -3851,8 +4040,8 @@ async function dashCommand(o) {
 
 // src/core/run.ts
 import { spawn as spawn3, spawnSync as spawnSync6 } from "node:child_process";
-import fs27 from "node:fs";
-import path23 from "node:path";
+import fs28 from "node:fs";
+import path24 from "node:path";
 
 // src/core/chain.ts
 function resolveChain(flags = {}) {
@@ -3902,11 +4091,11 @@ function resolveChain(flags = {}) {
 
 // src/core/process.ts
 import { spawn as spawn2 } from "node:child_process";
-import fs23 from "node:fs";
+import fs25 from "node:fs";
 
 // src/vcs/guard.ts
-import fs22 from "node:fs";
-import path19 from "node:path";
+import fs24 from "node:fs";
+import path21 from "node:path";
 var VERSION = 1;
 var SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
@@ -3981,15 +4170,15 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path19.join(home(), "shim", `v${VERSION}`);
+  return path21.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
-  for (const dir of (process.env.PATH ?? "").split(path19.delimiter).filter(Boolean)) {
-    if (path19.resolve(dir) === skip) continue;
-    const p = path19.join(dir, "git");
+  for (const dir of (process.env.PATH ?? "").split(path21.delimiter).filter(Boolean)) {
+    if (path21.resolve(dir) === skip) continue;
+    const p = path21.join(dir, "git");
     try {
-      fs22.accessSync(p, fs22.constants.X_OK);
-      if (fs22.statSync(p).isFile()) return p;
+      fs24.accessSync(p, fs24.constants.X_OK);
+      if (fs24.statSync(p).isFile()) return p;
     } catch {
     }
   }
@@ -4002,13 +4191,13 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path19.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path21.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file2, content) {
-  if (fs22.existsSync(file2) && fs22.readFileSync(file2, "utf8") === content) return;
-  fs22.mkdirSync(path19.dirname(file2), { recursive: true });
+  if (fs24.existsSync(file2) && fs24.readFileSync(file2, "utf8") === content) return;
+  fs24.mkdirSync(path21.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}.tmp`;
-  fs22.writeFileSync(tmp, content, { mode: 493 });
-  fs22.renameSync(tmp, file2);
+  fs24.writeFileSync(tmp, content, { mode: 493 });
+  fs24.renameSync(tmp, file2);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -4030,7 +4219,7 @@ function guardEnv(env) {
     PAGER: "cat"
   };
   if (process.platform === "win32") return { ...env, ...quiet };
-  writeIfChanged(path19.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path21.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(env, [
     ["core.hooksPath", hooksDir()],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -4038,14 +4227,14 @@ function guardEnv(env) {
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
-  writeIfChanged(path19.join(dir, "git"), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path19.delimiter}${env.PATH ?? ""}` };
+  writeIfChanged(path21.join(dir, "git"), SHIM);
+  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path21.delimiter}${env.PATH ?? ""}` };
 }
 
 // src/core/process.ts
 async function spawnWorker(inv, opts) {
-  const out = fs23.openSync(opts.stdoutFile, "w");
-  const err = fs23.openSync(opts.stderrFile, "w");
+  const out = fs25.openSync(opts.stdoutFile, "w");
+  const err = fs25.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn2(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -4077,8 +4266,8 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs23.closeSync(out);
-  fs23.closeSync(err);
+  fs25.closeSync(out);
+  fs25.closeSync(err);
   return res;
 }
 
@@ -4110,11 +4299,11 @@ function parseAudit(text) {
 }
 
 // src/core/slots.ts
-import crypto7 from "node:crypto";
-import fs24 from "node:fs";
-import path20 from "node:path";
-var slotsDir = () => path20.join(home(), "slots");
-var locksDir = () => path20.join(home(), "locks");
+import crypto8 from "node:crypto";
+import fs26 from "node:fs";
+import path22 from "node:path";
+var slotsDir = () => path22.join(home(), "slots");
+var locksDir = () => path22.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -4128,23 +4317,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file2, runId) {
-  fs24.mkdirSync(path20.dirname(file2), { recursive: true });
+  fs26.mkdirSync(path22.dirname(file2), { recursive: true });
   try {
-    fs24.writeFileSync(file2, runId, { flag: "wx" });
+    fs26.writeFileSync(file2, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs24.readFileSync(file2, "utf8").trim();
+    owner = fs26.readFileSync(file2, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs24.rmSync(file2, { force: true });
+  fs26.rmSync(file2, { force: true });
   try {
-    fs24.writeFileSync(file2, runId, { flag: "wx" });
+    fs26.writeFileSync(file2, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -4153,25 +4342,25 @@ function tryClaim(file2, runId) {
 function releaseIfOwner(file2, runId) {
   if (!file2) return;
   try {
-    if (fs24.readFileSync(file2, "utf8").trim() === runId) fs24.rmSync(file2, { force: true });
+    if (fs26.readFileSync(file2, "utf8").trim() === runId) fs26.rmSync(file2, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file2 = path20.join(slotsDir(), `slot-${n}`);
+    const file2 = path22.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file2, runId)) return file2;
   }
   return void 0;
 }
 var releaseSlot = (file2, runId) => releaseIfOwner(file2, runId);
-var lockFile = (repoRoot2) => path20.join(locksDir(), `write-${crypto7.createHash("sha1").update(path20.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot2) => path22.join(locksDir(), `write-${crypto8.createHash("sha1").update(path22.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot2, runId) {
   const file2 = lockFile(repoRoot2);
   if (tryClaim(file2, runId)) return;
   let owner = "";
   try {
-    owner = fs24.readFileSync(file2, "utf8").trim();
+    owner = fs26.readFileSync(file2, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -4218,12 +4407,12 @@ ${task}`;
 }
 
 // src/core/refs.ts
-import fs25 from "node:fs";
-import path21 from "node:path";
+import fs27 from "node:fs";
+import path23 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
-var SKIP_DIRS = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
+var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_INDEXED = 6e4;
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
@@ -4270,13 +4459,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path21.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path23.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file2) => {
     if (!lineCache.has(file2)) {
-      const size = fs25.statSync(file2).size;
-      const lines = size > MAX_BYTES ? null : fs25.readFileSync(file2, "utf8").split("\n");
+      const size = fs27.statSync(file2).size;
+      const lines = size > MAX_BYTES ? null : fs27.readFileSync(file2, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file2, lines);
     }
@@ -4287,9 +4476,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path21.isAbsolute(ref.file)) return [];
+    if (path23.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path21.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path21.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path23.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path23.basename(f) === wanted).slice(0, 20);
   };
   const check = (file2, ref) => {
     const lines = load(file2);
@@ -4304,7 +4493,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path21.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path23.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -4325,7 +4514,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base2 = path21.basename(name);
+  const base2 = path23.basename(name);
   return !base2.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base2) || FILE_EXTENSIONS.has(base2.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -4334,19 +4523,19 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs25.readdirSync(dir, { withFileTypes: true });
+      entries = fs27.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path21.join(dir, e.name));
+        if (!SKIP_DIRS2.has(e.name)) walk(path23.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path21.join(dir, e.name));
-        else index.set(e.name, [path21.join(dir, e.name)]);
+        if (list2) list2.push(path23.join(dir, e.name));
+        else index.set(e.name, [path23.join(dir, e.name)]);
       }
     }
   };
@@ -4354,10 +4543,10 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path21.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path21.join(r, ref));
+  const candidates = path23.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path23.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs25.statSync(c).isFile() && inside(c, roots);
+      return fs27.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -4365,62 +4554,11 @@ function resolve(ref, roots) {
 }
 function inside(file2, roots) {
   return roots.some((r) => {
-    const rel = path21.relative(r, path21.resolve(file2));
-    return rel !== "" && !rel.startsWith("..") && !path21.isAbsolute(rel);
+    const rel = path23.relative(r, path23.resolve(file2));
+    return rel !== "" && !rel.startsWith("..") && !path23.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// src/core/secrets.ts
-import { execFileSync } from "node:child_process";
-import fs26 from "node:fs";
-import path22 from "node:path";
-var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
-var MAX_VISITED = 2e4;
-var MAX_DEPTH = 4;
-var TEMPLATE2 = /\.(example|sample|template|dist|defaults?|tpl)$/i;
-function looksSecret(name) {
-  if (name === ".env" || name.startsWith(".env.") && !TEMPLATE2.test(name)) return true;
-  return /\.(pem|p12|pfx)$/i.test(name) || /^id_(rsa|dsa|ecdsa|ed25519)$/.test(name) || name === ".netrc" || name === "credentials.json";
-}
-function findSecretFiles(dir) {
-  const found = [];
-  let visited = 0;
-  const walk = (d, depth) => {
-    if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
-    let entries;
-    try {
-      entries = fs26.readdirSync(d, { withFileTypes: true });
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      visited++;
-      if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path22.join(d, e.name), depth + 1);
-      } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(path22.relative(dir, path22.join(d, e.name)));
-      }
-    }
-  };
-  walk(dir, 0);
-  return found.sort();
-}
-function findSecretFilesInTree(root, dir) {
-  try {
-    const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path22.basename(f)) && !path22.relative(dir, path22.join(root, f)).startsWith("..")).map((f) => path22.relative(dir, path22.join(root, f))).sort();
-  } catch {
-    return [];
-  }
-}
-function secretWarning(files, mode) {
-  if (!files.length) return void 0;
-  const shown = files.slice(0, 3).join(", ") + (files.length > 3 ? `, +${files.length - 3} more` : "");
-  const where = mode === "isolate" ? "would be copied into the isolated copy" : "sit in the directory the worker runs in";
-  const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
-  return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
-}
 
 // src/core/run.ts
 var VERSION2 = true ? "0.12.0" : "0.0.0-dev";
@@ -4455,7 +4593,7 @@ function prepareRun(o) {
     parent = readMeta(o.continueFrom);
     if (o.worker || o.tier || o.effort) throw new UserError("a follow-up runs on the same worker as its parent; drop --worker/--tier/--effort");
     if (!parent.sessionId) throw new UserError(`run ${parent.id} has no worker session to continue`, 3);
-    if (parent.mode === "isolate" && (!parent.worktree || !fs27.existsSync(parent.worktree))) {
+    if (parent.mode === "isolate" && (!parent.worktree || !fs28.existsSync(parent.worktree))) {
       throw new UserError(`the isolated copy of run ${parent.id} is gone (applied or discarded)`, 3);
     }
     const ran = parent.ran ?? parent.worker;
@@ -4474,16 +4612,21 @@ function prepareRun(o) {
     throw new UserError(`the ${backend.name} worker cannot attach files; put the content in the task`);
   }
   const mode = parent?.mode ?? o.mode;
-  const dir = path23.resolve(parent?.dir ?? o.dir);
-  if (!fs27.existsSync(dir) || !fs27.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
+  const dir = path24.resolve(parent?.dir ?? o.dir);
+  if (!fs28.existsSync(dir) || !fs28.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
   if (mode === "write" && !root && !o.allowNonGit) {
     throw new UserError("--write outside a git repo cannot be tracked or reverted; pass --allow-non-git to accept that", 3);
   }
-  const files = o.files.map((f) => path23.resolve(f));
-  for (const f of files) if (!fs27.existsSync(f)) throw new UserError(`file not found: ${f}`);
-  if (!parent && !process.env.PITROOM_NO_SECRET_WARNING) {
+  const files = o.files.map((f) => path24.resolve(f));
+  for (const f of files) if (!fs28.existsSync(f)) throw new UserError(`file not found: ${f}`);
+  const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
+  const snap = mode === "read" && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn2, root, dir) : void 0;
+  if (parent?.snapshot?.dir && !fs28.existsSync(parent.snapshot.dir)) {
+    throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
+  }
+  if (!parent && !snap && !process.env.PITROOM_NO_SECRET_WARNING) {
     const secrets = mode === "isolate" && root ? findSecretFilesInTree(root, dir) : findSecretFiles(dir);
     const note = secretWarning(secrets, mode);
     if (note) warnings.push(note);
@@ -4515,6 +4658,8 @@ function prepareRun(o) {
     reviewOf: o.review?.of,
     auditOf: o.audit?.of,
     auditRate: o.auditRate,
+    inPlace: o.inPlace || void 0,
+    snapshot: parent?.snapshot ?? (snap ? { dir: "", tree: "", left: snap.secrets } : void 0),
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
     packageFile: o.review?.packageFile
@@ -4524,13 +4669,13 @@ function prepareRun(o) {
     try {
       acquireWriteLock(root, meta.id);
     } catch (e) {
-      fs27.rmSync(runDir(meta.id), { recursive: true, force: true });
+      fs28.rmSync(runDir(meta.id), { recursive: true, force: true });
       throw e;
     }
   }
-  fs27.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
+  fs28.writeFileSync(runFile(meta.id, "task.md"), `${meta.task}
 `);
-  if (work.brief) fs27.writeFileSync(runFile(meta.id, "brief.md"), work.brief);
+  if (work.brief) fs28.writeFileSync(runFile(meta.id, "brief.md"), work.brief);
   return meta;
 }
 var sleep2 = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -4610,7 +4755,7 @@ async function execute(meta) {
       (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
-        if (fs27.existsSync(from)) fs27.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
+        if (fs28.existsSync(from)) fs28.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
       }
       writeMeta(meta);
     }
@@ -4668,12 +4813,26 @@ function settleAudit(a) {
 }
 function prepareTree(meta) {
   const root = meta.repoRoot;
+  if (root && meta.mode === "read" && meta.snapshot && !meta.snapshot.dir) {
+    const shown = meta.snapshot.left.slice(0, 3).join(", ") + (meta.snapshot.left.length > 3 ? `, +${meta.snapshot.left.length - 3} more` : "");
+    try {
+      const s = readSnapshot(root);
+      meta.snapshot.dir = s.dir;
+      meta.snapshot.tree = s.tree;
+      meta.cwd = path24.join(s.dir, path24.relative(root, meta.dir));
+      if (!fs28.existsSync(meta.cwd)) meta.cwd = s.dir;
+      if (shown) meta.warnings.push(`read in a clean snapshot of your project: the secret-looking files (${shown}) and git-ignored files are not in it; --in-place reads the directory itself`);
+    } catch (e) {
+      meta.snapshot = void 0;
+      meta.warnings.push(`could not make a clean snapshot (${e.message.slice(0, 120)}): the worker reads the directory itself${shown ? `, where secret-looking files sit (${shown})` : ""}`);
+    }
+  }
   if (root && meta.mode === "write") meta.baseTree = snapshotTree(root);
   if (root && meta.mode === "isolate" && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
-    meta.worktree = path23.join(worktreesDir(), meta.id);
+    meta.worktree = path24.join(worktreesDir(), meta.id);
     createIsolatedCopy(root, meta.baseTree, meta.worktree);
-    meta.cwd = path23.join(meta.worktree, path23.relative(root, meta.dir));
+    meta.cwd = path24.join(meta.worktree, path24.relative(root, meta.dir));
     const linked = linkIntoWorktree(root, meta.worktree, meta.link);
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(", ")}`);
   }
@@ -4696,7 +4855,7 @@ function attempt(meta, backend, target) {
     timeoutSec: meta.timeoutSec
   });
 }
-var read2 = (f) => fs27.existsSync(f) ? fs27.readFileSync(f, "utf8") : "";
+var read2 = (f) => fs28.existsSync(f) ? fs28.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
   const run = backend.parse(read2(runFile(meta.id, "events.jsonl")));
   if (run.usage.steps > 0) return void 0;
@@ -4713,14 +4872,15 @@ function finalize(meta, res) {
   const ran = meta.ran ?? meta.worker;
   const backend = getBackend(ran.backend);
   const run = backend.parse(read2(runFile(meta.id, "events.jsonl")));
+  if (meta.snapshot?.dir && meta.repoRoot) run.finalText = backToProject(run.finalText, meta.snapshot.dir, meta.repoRoot);
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
-  fs27.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
+  fs28.writeFileSync(runFile(meta.id, "summary.md"), `${run.finalText}
 `);
   if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run.finalText);
   if (meta.reviewOf) {
     meta.verdict = parseVerdict(run.finalText);
-    if (meta.packageFile) fs27.rmSync(meta.packageFile, { force: true });
+    if (meta.packageFile) fs28.rmSync(meta.packageFile, { force: true });
   }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read2(runFile(meta.id, "stderr.log")), res.code);
@@ -4768,7 +4928,7 @@ function captureChanges(meta) {
   const d = diffTrees(target, meta.baseTree, meta.afterTree);
   meta.changes = d.changes;
   meta.stats = d.stats;
-  fs27.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
+  fs28.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
 function runVerify(meta) {
   const r = spawnSync6(meta.verify, {
@@ -4781,7 +4941,7 @@ function runVerify(meta) {
     env: { ...process.env, PWD: meta.cwd, PITROOM_ACTIVE: "1" }
   });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
-  fs27.writeFileSync(runFile(meta.id, "verify.log"), output);
+  fs28.writeFileSync(runFile(meta.id, "verify.log"), output);
   return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
 function applyRun(meta, allowDelete = false) {
@@ -4826,7 +4986,7 @@ function discardRun(meta) {
   return `discarded the isolated copy of ${meta.id}; the patch stays in ${runFile(meta.id, "changes.patch")}`;
 }
 function cleanupWorktree(meta) {
-  if (meta.worktree && fs27.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
+  if (meta.worktree && fs28.existsSync(meta.worktree)) removeIsolatedCopy(meta.worktree, worktreesDir());
 }
 
 // src/cli/commands.ts
@@ -4861,7 +5021,7 @@ async function cmdReview(p) {
   let meta;
   try {
     meta = prepareRun({
-      ...runOptions(p, fill(loadTemplate(TEMPLATE[job.kind]), { PACKAGE_FILE: packageFile })),
+      ...runOptions(p, fill(loadTemplate(TEMPLATE2[job.kind]), { PACKAGE_FILE: packageFile })),
       mode: "read",
       dir: job.dir,
       worker: flag(p, "worker") ?? (flag(p, "tier") ? void 0 : pickReviewer(job)),
@@ -4876,10 +5036,10 @@ async function cmdReview(p) {
       writeMeta(meta);
     }
   } catch (e) {
-    fs28.rmSync(packageFile, { force: true });
+    fs29.rmSync(packageFile, { force: true });
     throw e;
   }
-  fs28.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  fs29.writeFileSync(runFile(meta.id, "package.md"), job.package);
   return launch(p, meta);
 }
 async function cmdAudit(p) {
@@ -4947,7 +5107,7 @@ function cmdPlan(p) {
 }
 function cmdCrew(p) {
   const file2 = flag(p, "task-file");
-  const tasks = (file2 ? fs28.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  const tasks = (file2 ? fs29.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
@@ -5148,7 +5308,7 @@ function sinceMs(s) {
   if (!m) throw new UserError("--since takes 7d, 30d, \u2026 or all");
   return Date.now() - Number(m[1]) * 864e5;
 }
-var readStdin = () => process.stdin.isTTY ? "" : fs28.readFileSync(0, "utf8");
+var readStdin = () => process.stdin.isTTY ? "" : fs29.readFileSync(0, "utf8");
 function cmdStatusline(p) {
   const input = readStdin();
   const lines = [];
@@ -5188,8 +5348,8 @@ function cmdModels(p) {
   return 0;
 }
 function cmdHookStart() {
-  const script = path24.join(path24.dirname(path24.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
-  if (fs28.existsSync(script)) spawnSync7(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
+  const script = path25.join(path25.dirname(path25.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
+  if (fs29.existsSync(script)) spawnSync7(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
   return 0;
 }
 function cmdInit(p) {
@@ -5229,8 +5389,8 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs28.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path24.resolve(out)}`);
+    fs29.writeFileSync(out, card(t, period));
+    console.log(`card written to ${path25.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -5250,7 +5410,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs28.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs29.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -5274,9 +5434,10 @@ function cmdClean(p) {
     const m = readMeta(id);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
     recordRun(m);
-    fs28.rmSync(runDir(id), { recursive: true, force: true });
+    fs29.rmSync(runDir(id), { recursive: true, force: true });
   }
-  console.log(`removed ${old.length} run(s); the history and the savings ledger are kept`);
+  const snapshots = prune(Date.now(), 0);
+  console.log(`removed ${old.length} run(s)${snapshots ? ` and ${snapshots} read snapshot${snapshots === 1 ? "" : "s"}` : ""}; the history and the savings ledger are kept`);
   return 0;
 }
 var cmdRevert = (p) => (console.log(revertRun(freshMeta(resolveRun(p.positional[0])))), 0);
@@ -5284,9 +5445,9 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 
 // src/core/doctor.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
-import fs29 from "node:fs";
+import fs30 from "node:fs";
 import os10 from "node:os";
-import path25 from "node:path";
+import path26 from "node:path";
 var MARK = { ok: () => green("\u2714"), warn: () => yellow("!"), fail: () => red("\u2718") };
 var NEXT = [
   { when: /no default model|no fallback workers/, command: "pitroom init", why: "propose a starter config (fallback models from your catalogue)" },
@@ -5296,10 +5457,10 @@ var NEXT = [
   { when: /Gemini CLI is not signed in|IneligibleTierError/, command: "export GEMINI_API_KEY=\u2026", why: "a Google AI Studio key for the Gemini worker" }
 ];
 function firstNodeOnPath() {
-  for (const dir of (process.env.PATH ?? "").split(path25.delimiter).filter(Boolean)) {
-    const file2 = path25.join(dir, process.platform === "win32" ? "node.exe" : "node");
+  for (const dir of (process.env.PATH ?? "").split(path26.delimiter).filter(Boolean)) {
+    const file2 = path26.join(dir, process.platform === "win32" ? "node.exe" : "node");
     try {
-      if (!fs29.statSync(file2).isFile()) continue;
+      if (!fs30.statSync(file2).isFile()) continue;
     } catch {
       continue;
     }
@@ -5326,12 +5487,12 @@ function doctor5(probe) {
   const addAll = (list2) => list2.forEach((c) => add(c.level, c.message));
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   const onPath = firstNodeOnPath();
-  if (onPath && onPath.version && tooOld(onPath.version) && path25.resolve(onPath.path) !== path25.resolve(process.execPath)) {
+  if (onPath && onPath.version && tooOld(onPath.version) && path26.resolve(onPath.path) !== path26.resolve(process.execPath)) {
     add("warn", `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
   }
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs29.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs30.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
   if (process.platform !== "win32") {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
@@ -5479,19 +5640,19 @@ function skillChecks() {
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
   if (geminiExtensionInstalled()) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path25.sep}.agents${path25.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path26.sep}.agents${path26.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`" } : { level: "ok", message: "Gemini CLI extension installed (skills + context)" }
     );
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path25.sep}.claude${path25.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path26.sep}.claude${path26.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
   }
   const launcher = launcherPath();
-  if (fs29.existsSync(launcher)) {
+  if (fs30.existsSync(launcher)) {
     const r = spawnSync8(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
@@ -5503,12 +5664,12 @@ function skillChecks() {
 }
 function geminiExtensionInstalled() {
   const home2 = process.env.GEMINI_CLI_HOME ?? os10.homedir();
-  return fs29.existsSync(path25.join(home2, ".gemini", "extensions", "pitroom"));
+  return fs30.existsSync(path26.join(home2, ".gemini", "extensions", "pitroom"));
 }
 function pluginInstalled() {
   try {
-    const f = path25.join(os10.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs29.readFileSync(f, "utf8")).plugins ?? {};
+    const f = path26.join(os10.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const plugins = JSON.parse(fs30.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
@@ -5525,24 +5686,24 @@ function superpowersActive() {
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
-  for (const base2 of [path25.join(os10.homedir(), ".agents", "skills"), path25.join(os10.homedir(), ".claude", "skills")]) {
-    const dir = path25.join(base2, "using-superpowers");
-    if (fs29.existsSync(path25.join(dir, "SKILL.md"))) found.push(dir);
+  for (const base2 of [path26.join(os10.homedir(), ".agents", "skills"), path26.join(os10.homedir(), ".claude", "skills")]) {
+    const dir = path26.join(base2, "using-superpowers");
+    if (fs30.existsSync(path26.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
 }
 function claudePlugins() {
   try {
-    const f = path25.join(os10.homedir(), ".claude", "plugins", "installed_plugins.json");
-    return Object.keys(JSON.parse(fs29.readFileSync(f, "utf8")).plugins ?? {});
+    const f = path26.join(os10.homedir(), ".claude", "plugins", "installed_plugins.json");
+    return Object.keys(JSON.parse(fs30.readFileSync(f, "utf8")).plugins ?? {});
   } catch {
     return [];
   }
 }
 function claudePluginEnabled(key) {
   try {
-    const f = path25.join(os10.homedir(), ".claude", "settings.json");
-    return JSON.parse(fs29.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
+    const f = path26.join(os10.homedir(), ".claude", "settings.json");
+    return JSON.parse(fs30.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
   } catch {
     return true;
   }
@@ -5551,7 +5712,7 @@ function codexPlugins() {
   const plugins = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs29.readFileSync(path25.join(process.env.CODEX_HOME ?? path25.join(os10.homedir(), ".codex"), "config.toml"), "utf8");
+    text = fs30.readFileSync(path26.join(process.env.CODEX_HOME ?? path26.join(os10.homedir(), ".codex"), "config.toml"), "utf8");
   } catch {
     return plugins;
   }
@@ -5569,11 +5730,11 @@ function codexPlugins() {
   return plugins;
 }
 function openCodePlugins() {
-  const dir = path25.join(process.env.XDG_CONFIG_HOME ?? path25.join(os10.homedir(), ".config"), "opencode");
+  const dir = path26.join(process.env.XDG_CONFIG_HOME ?? path26.join(os10.homedir(), ".config"), "opencode");
   const plugins = [];
   for (const name of ["opencode.json", "opencode.jsonc"]) {
     try {
-      const text = fs29.readFileSync(path25.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const text = fs30.readFileSync(path26.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
       const list2 = JSON.parse(text).plugin;
       if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
     } catch {
@@ -5581,7 +5742,7 @@ function openCodePlugins() {
   }
   for (const folder of ["plugin", "plugins"]) {
     try {
-      for (const f of fs29.readdirSync(path25.join(dir, folder))) plugins.push(path25.join(dir, folder, f));
+      for (const f of fs30.readdirSync(path26.join(dir, folder))) plugins.push(path26.join(dir, folder, f));
     } catch {
     }
   }
@@ -5652,6 +5813,8 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --in-place        a read run reads the directory itself, not a clean snapshot (default: a snapshot without secret-looking
+                        files when the directory has any; config "readIn": auto | snapshot | project)
       --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, \u2026 (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes

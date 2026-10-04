@@ -243,19 +243,24 @@ test('references written as a bare file name or a partial path are found; method
   assert.doesNotMatch(/── refs:.*/.exec(r.stdout)[0], /Schema\.parse|orchestrator\.start/);
 });
 
-test('secret-looking files in the worker directory are called out', () => {
+test('secret-looking files in the worker directory are called out: a read run reads a snapshot without them, in place the heads-up stays', () => {
   const s = sandbox();
   fs.mkdirSync(path.join(s.repo, 'apps', 'brain'), { recursive: true });
   fs.writeFileSync(path.join(s.repo, 'apps', 'brain', '.env'), 'PLACEHOLDER=1\n');
   fs.writeFileSync(path.join(s.repo, '.env.example'), 'PLACEHOLDER=\n');
   const r = s.run(['run', 'look around'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /warning: secret-looking files sit in the directory the worker runs in \(apps\/brain\/\.env\)/);
+  assert.match(r.stdout, /warning: read in a clean snapshot of your project: the secret-looking files \(apps\/brain\/\.env\)/);
   assert.doesNotMatch(r.stdout, /\.env\.example/);
-  // it also shows when a run starts in the background, and can be silenced
-  const bg = s.run(['run', '--bg', 'look around again'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  // read in place (config "readIn": "project", or --in-place) the worker could open them: the heads-up stays,
+  // shows when a run starts in the background, and can be silenced
+  const place = { MOCK_ACTIONS: 'answer:SUMMARY: ok', PITROOM_READ_IN: 'project' };
+  const inPlace = s.run(['run', 'look around'], place);
+  assert.match(inPlace.stdout, /warning: secret-looking files sit in the directory the worker runs in \(apps\/brain\/\.env\)/);
+  assert.doesNotMatch(inPlace.stdout, /\.env\.example/);
+  const bg = s.run(['run', '--bg', 'look around again'], place);
   assert.match(bg.stdout, /warning: secret-looking files/);
-  const quiet = s.run(['run', 'look around'], { MOCK_ACTIONS: 'answer:SUMMARY: ok', PITROOM_NO_SECRET_WARNING: '1' });
+  const quiet = s.run(['run', 'look around'], { ...place, PITROOM_NO_SECRET_WARNING: '1' });
   assert.doesNotMatch(quiet.stdout, /secret-looking/);
 });
 

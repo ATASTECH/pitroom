@@ -14,6 +14,7 @@ import { DeletionRefused, UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
+import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
 import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
@@ -50,6 +51,8 @@ export interface RunOptions {
   web: boolean;
   noFallback: boolean;
   group?: string;
+  /** `--in-place`: a read run reads the directory itself, never a clean snapshot (see snapshot.ts). */
+  inPlace?: boolean;
   /** Set when Pitroom audits a run's answer (see audit.ts). */
   audit?: { of: string };
   /** This run's own audit chance, 0 to 1: --audit is 1, --no-audit is 0. */
@@ -125,8 +128,14 @@ export function prepareRun(o: RunOptions): RunMeta {
   const files = o.files.map((f) => path.resolve(f));
   for (const f of files) if (!fs.existsSync(f)) throw new UserError(`file not found: ${f}`);
 
+  // A read run in a directory with secret-looking files reads a clean snapshot instead (made when it starts).
+  const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
+  const snap = mode === 'read' && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn, root, dir) : undefined;
+  if (parent?.snapshot?.dir && !fs.existsSync(parent.snapshot.dir)) {
+    throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
+  }
   // Said once per run, on the report and when it starts in the background.
-  if (!parent && !process.env.PITROOM_NO_SECRET_WARNING) {
+  if (!parent && !snap && !process.env.PITROOM_NO_SECRET_WARNING) {
     const secrets = mode === 'isolate' && root ? findSecretFilesInTree(root, dir) : findSecretFiles(dir);
     const note = secretWarning(secrets, mode);
     if (note) warnings.push(note);
@@ -159,6 +168,8 @@ export function prepareRun(o: RunOptions): RunMeta {
     reviewOf: o.review?.of,
     auditOf: o.audit?.of,
     auditRate: o.auditRate,
+    inPlace: o.inPlace || undefined,
+    snapshot: parent?.snapshot ?? (snap ? { dir: '', tree: '', left: snap.secrets } : undefined),
     plan: work.plan ?? o.review?.plan ?? parent?.plan,
     reviewKind: o.review?.kind,
     packageFile: o.review?.packageFile,
@@ -333,6 +344,21 @@ function settleAudit(a: RunMeta): void {
 
 function prepareTree(meta: RunMeta): void {
   const root = meta.repoRoot;
+  if (root && meta.mode === 'read' && meta.snapshot && !meta.snapshot.dir) {
+    const shown = meta.snapshot.left.slice(0, 3).join(', ') + (meta.snapshot.left.length > 3 ? `, +${meta.snapshot.left.length - 3} more` : '');
+    try {
+      const s = readSnapshot(root);
+      meta.snapshot.dir = s.dir;
+      meta.snapshot.tree = s.tree;
+      meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
+      if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
+      if (shown) meta.warnings.push(`read in a clean snapshot of your project: the secret-looking files (${shown}) and git-ignored files are not in it; --in-place reads the directory itself`);
+    } catch (e) {
+      // not worth failing the run: read the directory, and say what is exposed
+      meta.snapshot = undefined;
+      meta.warnings.push(`could not make a clean snapshot (${(e as Error).message.slice(0, 120)}): the worker reads the directory itself${shown ? `, where secret-looking files sit (${shown})` : ''}`);
+    }
+  }
   if (root && meta.mode === 'write') meta.baseTree = snapshotTree(root);
   if (root && meta.mode === 'isolate' && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
@@ -385,6 +411,8 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   const ran = meta.ran ?? meta.worker;
   const backend = getBackend(ran.backend);
   const run = backend.parse(read(runFile(meta.id, 'events.jsonl')));
+  // what the worker says about its files is about the project's, not the snapshot's, paths
+  if (meta.snapshot?.dir && meta.repoRoot) run.finalText = backToProject(run.finalText, meta.snapshot.dir, meta.repoRoot);
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
   fs.writeFileSync(runFile(meta.id, 'summary.md'), `${run.finalText}\n`);

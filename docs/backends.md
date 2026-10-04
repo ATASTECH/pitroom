@@ -109,7 +109,7 @@ What was checked live:
 
 What is **not** enforced, so do not rely on it:
 
-- **Secret files.** `policies/gemini/base.toml` has deny rules for `.env`, `*.pem` and SSH keys, and the CLI loads them without errors, but in live tests Gemini 0.62 still read `server.pem` and `prod.env` (even a plain deny-all `read_file` rule was ignored). It does refuse a bare `.env`. The worker is also told not to read secrets, and Pitroom warns when secret-looking files sit in the directory: use `--isolate` (git-ignored files are left out) or a clean checkout.
+- **Secret files.** `policies/gemini/base.toml` has deny rules for `.env`, `*.pem` and SSH keys, and the CLI loads them without errors, but in live tests Gemini 0.62 still read `server.pem` and `prod.env` (even a plain deny-all `read_file` rule was ignored). It does refuse a bare `.env`. What protects a Gemini read run is Pitroom's **read snapshot**: when the directory holds secret-looking files the worker reads a clean snapshot without them (checked live: the files come back as "File not found"). Edit runs (`-i`, `-w`) and reviews still rely on the worker being told not to read them, and Pitroom warns when such files sit there: for an isolated copy, git-ignore them.
 - **Shell rules are prefix based** (an unusual spelling of a forbidden command may pass), and a shell `cat .env` is not caught. Use read mode (no shell) when that matters.
 - **Web**: `no-web.toml` denies `google_web_search` and `web_fetch` unless `--web`; this was not verified live.
 
