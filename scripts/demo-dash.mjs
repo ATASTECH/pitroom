@@ -123,12 +123,14 @@ function addRun(o) {
     dir: PROJECT, cwd: PROJECT, repoRoot: PROJECT, worker: { backend: w.backend, model: w.model }, fallback: [], ran: { backend: w.backend, model: w.model }, resolvedModel: w.model,
     files: [], link: [], timeoutSec: 1800, state: o.state, startedAt: startedAt.toISOString(), warnings: [], sessionId: 'ses_demo',
     ...(o.group ? { group: o.group } : {}),
+    ...(o.attempts ? { attempts: o.attempts } : {}),
+    ...(o.auditOf ? { auditOf: o.auditOf, auditVerdict: o.auditVerdict, auditDisputed: o.auditDisputed ?? [] } : {}),
     ...(endedAt ? { endedAt: endedAt.toISOString(), exitCode: o.state === 'done' ? 0 : 1 } : { pid: o.pid }),
     ...(o.state === 'failed' ? { error: o.error } : {}),
     ...(kind === 'review' ? { reviewOf: task, reviewKind: 'range', verdict: o.verdict } : {}),
     ...(kind === 'change' && o.state === 'done' ? { changes: files.map((p) => ({ status: p.startsWith('test/') ? 'A' : 'M', path: p })), stats: { files: files.length, insertions: files.length * 9, deletions: files.length * 2 }, afterTree: 'demo', baseTree: 'demo', applied: o.applied ?? false } : {}),
     usage: { input: Math.round(tokens * 0.93), output: Math.round(tokens * 0.01), reasoning: 0, cacheRead: Math.round(tokens * 0.06), cacheWrite: 0, total: tokens, cost: w.backend === 'opencode' ? 0 : w.backend === 'claude' ? 0.04 : undefined, steps: between(3, 9), toolCalls: between(4, 12), denied: 0 },
-    returnedTokens: between(400, 1400), savedUsd: Math.round((tokens / 1e6) * 3 * 100 * (0.8 + rnd() * 0.5)) / 100,
+    returnedTokens: between(400, 1400), savedUsd: o.auditOf ? 0 : Math.round((tokens / 1e6) * 3 * 100 * (0.8 + rnd() * 0.5)) / 100,
     ...(o.state === 'done' && kind !== 'change' ? { refs: { total: 4, valid: o.refsOk ?? 4, invalid: o.refsOk === 3 ? [{ ref: 'src/orders/total.ts:154', reason: 'file has 120 lines' }] : [] } } : {}),
   };
   const dir = path.join(HOME, 'runs', id);
@@ -143,6 +145,20 @@ function addRun(o) {
   if (kind === 'change' && o.state === 'done') fs.writeFileSync(path.join(dir, 'changes.patch'), PATCH(files));
   runs.push(meta);
   return meta;
+}
+
+// An audit: another worker re-checks a research answer; the verdict is kept on the audited run too.
+const AUDITORS = [WORKERS[2], WORKERS[5], WORKERS[0]];
+function audit(parent, verdict, disputed = [], auditor = pick(AUDITORS)) {
+  const w = auditor.model === (parent.worker.model) ? WORKERS[2] : auditor;
+  const a = addRun({
+    kind: 'research', worker: w, startedAt: Date.parse(parent.endedAt) + 20_000 + between(0, 30_000), state: 'done', seconds: between(25, 80),
+    task: `of ${parent.id}`, files: [pick(FILES)], tokens: between(40_000, 160_000), auditOf: parent.id, auditVerdict: verdict, auditDisputed: disputed,
+    answer: `AUDIT: ${verdict.toUpperCase()}\nCHECKED: ${between(2, 6)}\nDISPUTED:\n${disputed.length ? disputed.map((d) => `- ${d}`).join('\n') : '- (none)'}`,
+  });
+  parent.audit = { id: a.id, state: 'done', verdict, disputed };
+  fs.writeFileSync(path.join(HOME, 'runs', parent.id, 'meta.json'), JSON.stringify(parent, null, 2));
+  return a;
 }
 
 const now = Date.now();
@@ -167,13 +183,18 @@ for (let day = 21; day >= 1; day--) {
     const when = now - day * 86_400_000 + between(8, 19) * 3_600_000 + between(0, 59) * 60_000;
     const state = rnd() < 0.86 ? 'done' : rnd() < 0.7 ? 'failed' : 'timeout';
     const r = pick(RESEARCH), c = pick(CHANGES);
-    addRun({
+    const made = addRun({
       kind, startedAt: when, state: state === 'timeout' ? 'timeout' : state,
       task: kind === 'review' ? pick(REVIEWS) : kind === 'change' ? c[0] : r[0], files: kind === 'change' ? c[1] : [pick(FILES), pick(FILES)],
       answer: state === 'done' ? (kind === 'review' ? 'STRENGTHS: small, focused change.\nIMPORTANT: none.\nMINOR: one comment is out of date.' : kind === 'change' ? undefined : r[1]) : undefined,
       error: state === 'failed' ? 'Rate limit exceeded: free-models-per-day' : undefined, seconds: state === 'timeout' ? 1800 : undefined,
       verdict: kind === 'review' ? { spec: 'pass', quality: rnd() < 0.6 ? 'approved' : 'needs-fixes', critical: 0, important: rnd() < 0.4 ? 1 : 0, minor: between(0, 2) } : undefined,
     });
+    // about one finished research answer in nine is audited by another worker
+    if (kind === 'research' && made.state === 'done' && rnd() < 0.11) {
+      const v = rnd();
+      audit(made, v < 0.9 ? 'agree' : v < 0.96 ? 'partial' : 'disagree', v < 0.9 ? [] : ['one of the cited lines does not say that']);
+    }
   }
 }
 
@@ -186,10 +207,13 @@ addRun({ kind: 'research', worker: WORKERS[5], startedAt: now - 11_000, state: '
 addRun({ kind: 'research', worker: muse, startedAt: now - 26_000, state: 'running', pid: sleeper.pid, task: RESEARCH[0][0], files: ['src/config/rate-limit.ts'], answer: 'Reading where the limiter is configured.', tokens: 22_000 });
 addRun({ kind: 'change', worker: muse, startedAt: mins(7), seconds: 118, state: 'done', task: CHANGES[1][0], files: CHANGES[1][1], applied: true, tokens: 520_000, group: 'rename-user' });
 addRun({ kind: 'review', worker: bunny, startedAt: mins(12), seconds: 142, state: 'done', task: REVIEWS[0], verdict: { spec: 'pass', quality: 'approved', critical: 0, important: 0, minor: 1 }, answer: 'STRENGTHS: the backoff is bounded and tested.\nIMPORTANT: none.\nMINOR: `retry.ts:31` could name the jitter constant.', tokens: 940_000 });
-addRun({ kind: 'research', worker: mimo, startedAt: mins(24), seconds: 64, state: 'done', task: RESEARCH[2][0], files: ['src/orders/routes.ts'], answer: RESEARCH[2][1], tokens: 310_000 });
+const audited = addRun({ kind: 'research', worker: mimo, startedAt: mins(10), seconds: 64, state: 'done', task: RESEARCH[2][0], files: ['src/orders/routes.ts'], answer: RESEARCH[2][1], tokens: 310_000,
+  // gemini hit its daily quota a moment ago: the run skipped it and went to the next worker
+  attempts: [{ target: 'gemini:gemini-3.8-flash', error: 'cooling down until 14:05: You have exhausted your daily quota on this model.', skipped: true }] });
+audit(audited, 'disagree', ['`src/billing/invoice.ts:57` reads the cookie through `getSession`, not directly', 'there are four places, not three: `src/jobs/cleanup.ts:12` also reads it'], WORKERS[5]);
 addRun({ kind: 'review', worker: mimo, startedAt: mins(41), seconds: 207, state: 'done', task: REVIEWS[1], verdict: { spec: 'pass', quality: 'needs-fixes', critical: 0, important: 2, minor: 1 }, answer: 'STRENGTHS: the fix is minimal.\nIMPORTANT:\n- src/orders/total.ts:63 — the discount is applied before tax in one branch only.\n- test/orders/total.test.ts:40 — no case for a 100% coupon.\nMINOR: stale comment at total.ts:18.', refsOk: 3, tokens: 1_180_000 });
 addRun({ kind: 'research', worker: bunny, startedAt: mins(58), state: 'failed', task: RESEARCH[1][0], error: 'Rate limit exceeded: free-models-per-day', seconds: 9, tokens: 3_000 });
-addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 260_000 });
+audit(addRun({ kind: 'research', worker: muse, startedAt: mins(75), seconds: 41, state: 'done', task: RESEARCH[3][0], files: ['src/orders/total.ts'], answer: RESEARCH[3][1], tokens: 260_000 }), 'agree', [], bunny);
 
 // the savings ledger (this week's total on the Live tab)
 console.log(`sample week: $${runs.filter((m) => m.endedAt && now - Date.parse(m.startedAt) < 7 * 86_400_000).reduce((a, m) => a + m.savedUsd, 0).toFixed(0)} saved, ${runs.length} runs`);
@@ -215,6 +239,8 @@ const send = (method, params = {}) => new Promise((r) => { const i = ++n; waitin
 const evaluate = (expression) => send('Runtime.evaluate', { expression });
 
 const OPEN_CARD = "[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('Rename the legacy'))?.click()";
+const OPEN_AUDITED = "[...document.querySelectorAll('[data-slot=\"expandable-card-body\"]')].find((e) => e.textContent.includes('List every place where the session cookie'))?.click()";
+const SCROLL_END = "document.querySelector('[data-slot=\"scroll-area-viewport\"]')?.scrollTo({ top: 100000 })";
 // Opens the Changes section and its second file, and scrolls that file into view.
 const SHOW_DIFF = "(() => { const h = [...document.querySelectorAll('button[aria-expanded]')].find((b) => /^Changes/.test(b.textContent)); if (h?.getAttribute('aria-expanded') === 'false') h.click(); setTimeout(() => { const f = h?.closest('section')?.querySelectorAll('[data-slot=\"file-diff\"] > button')[1]; if (f?.getAttribute('aria-expanded') === 'false') f.click(); setTimeout(() => f?.scrollIntoView({ block: 'center' }), 500); }, 700); })()";
 async function shot(file, { hash = '', height = 900, click, wait = 2200, then, wait2 = 0 }) {
@@ -234,8 +260,9 @@ await send('Page.enable');
 await send('Page.navigate', { url });
 await sleep(1000);
 await evaluate("localStorage.setItem('pitroom-theme','dark')");
-await shot('dash-live.png', { height: 1020 });
+await shot('dash-live.png', { height: 1330 });
 await shot('dash-card.png', { height: 1240, click: OPEN_CARD, wait: 3000, then: SHOW_DIFF, wait2: 1200 });
+await shot('dash-audit.png', { height: 1000, click: OPEN_AUDITED, wait: 3000, then: SCROLL_END, wait2: 900 });
 await shot('dash-history.png', { hash: '#history', height: 940 });
 await shot('dash-stats.png', { hash: '#stats', height: 980 });
 
@@ -267,6 +294,13 @@ if (hasFfmpeg) {
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
   await grab(10);
+  await evaluate(OPEN_AUDITED);                          // an audited answer, a skipped worker
+  await grab(14);
+  await evaluate(SCROLL_END);
+  await grab(14);
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 });
+  await grab(8);
   await click('History'); await sleep(500); await grab(12);
   await click('Stats'); await sleep(500); await grab(14);
   const out = path.join(root, 'docs', 'dash-demo.gif');

@@ -162,9 +162,13 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 
 <p align="center"><img src="docs/dash-card.png" width="100%" alt="An expanded run card: the task, a ten-step activity list, the result, five changed files with one opened to its highlighted diff, and the details"></p>
 
+**Audits and skipped workers show on the card.** A research answer that another worker re-checked ([Audits](#audits)) carries an `audited · agrees / partly agrees / disagrees` badge and, when it disagrees, the claims it disputes; a worker left out because its quota ran out is listed under the details ("Skipped … cooling down until 14:05", see `pitroom cooldown`).
+
+<p align="center"><img src="docs/dash-audit.png" width="100%" alt="An expanded research card whose answer was audited by another worker, which disagrees and lists two disputed claims with file:line, and a note that a worker was skipped because its daily quota was used up"></p>
+
 **History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period; each run opens as the same card as on Live. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
 
-<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day and success rate per worker and model, each with its logo"></p>
+<p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day, and per worker and model its logo, success rate and how many of its audited answers another worker confirmed"></p>
 
 The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 
