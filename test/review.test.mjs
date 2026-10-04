@@ -167,3 +167,22 @@ test('review --range in a linked worktree: the package sits inside the worktree,
   s.run(['review', '--range', 'HEAD~1..HEAD'], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
   assert.match(lastPrompt(s), new RegExp(`${fs.realpathSync(s.repo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.git/pitroom/review-`));
 });
+
+test('review --range shows the branch\'s own change even when the base moved on since (as a pull request does)', () => {
+  const s = sandbox();
+  s.git('add', '-A');
+  s.git('commit', '-qm', 'base');
+  s.git('checkout', '-qb', 'feature');
+  fs.writeFileSync(path.join(s.repo, 'feature.txt'), 'new\n');
+  s.git('add', 'feature.txt');
+  s.git('commit', '-qm', 'feat: feature');
+  s.git('checkout', '-q', '-');
+  fs.writeFileSync(path.join(s.repo, 'later.txt'), 'on the base\n');
+  s.git('add', 'later.txt');
+  s.git('commit', '-qm', 'base moved on');
+  const r = s.run(['review', '--range', 'HEAD..feature'], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const pkg = pkgOf(s, runId(r));
+  assert.match(pkg, /feature\.txt/);
+  assert.doesNotMatch(pkg, /later\.txt/, 'the base\'s newer commit is not shown as undone');
+});

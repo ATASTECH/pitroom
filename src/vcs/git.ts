@@ -147,11 +147,14 @@ export function reviewDiff(root: string, a: string, b: string): string {
 /** Commit list, stat and wide-context diff of the commits in a..b, for a reviewer. */
 export function rangeDiff(root: string, a: string, b: string): string {
   const range = `${a}..${b}`;
+  // the change since the branch left A (as a pull request shows it): when A moved on since, A..B would also show
+  // A's newer commits, undone
+  const since = `${a}...${b}`;
   const log = must(root, ['log', '--oneline', '--no-decorate', range]).trim();
   return [
     `## COMMITS\n\n${log || '(none)'}`,
-    `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', range]).trim() || '(none)'}`,
-    `## DIFF\n\n${must(root, [...DIFF, '-U10', range])}`,
+    `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', since]).trim() || '(none)'}`,
+    `## DIFF\n\n${must(root, [...DIFF, '-U10', since])}`,
   ].join('\n\n');
 }
 

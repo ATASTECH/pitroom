@@ -1811,6 +1811,7 @@ ${must(root, [...DIFF, "-U10", a, b])}`;
 }
 function rangeDiff(root, a, b) {
   const range = `${a}..${b}`;
+  const since2 = `${a}...${b}`;
   const log2 = must(root, ["log", "--oneline", "--no-decorate", range]).trim();
   return [
     `## COMMITS
@@ -1818,10 +1819,10 @@ function rangeDiff(root, a, b) {
 ${log2 || "(none)"}`,
     `## FILES CHANGED
 
-${must(root, [...DIFF, "--stat", range]).trim() || "(none)"}`,
+${must(root, [...DIFF, "--stat", since2]).trim() || "(none)"}`,
     `## DIFF
 
-${must(root, [...DIFF, "-U10", range])}`
+${must(root, [...DIFF, "-U10", since2])}`
   ].join("\n\n");
 }
 function commitOf(root, ref) {
