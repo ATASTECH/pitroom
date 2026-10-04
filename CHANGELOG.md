@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.14.1
+
+### Docs
+- The dashboard images and the GIF show audits (an `audited · agrees / disagrees` badge, the audit run's own card, the disputed claims on an opened card) and a worker skipped because its quota ran out ("Skipped … cooling down until 14:05"); the Stats image has the new Audited column (confirmed / audited per worker). The README's Dashboard section explains them. The npm page shows the README of the published package, so this is where it reaches it.
+
 ## 0.14.0
 
 ### MCP server
