@@ -651,8 +651,8 @@ function freshMeta(id) {
   if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
     const latest = readMeta(id);
     if (TERMINAL.includes(latest.state)) return latest;
-    latest.state = "failed";
-    latest.error ??= "worker process exited unexpectedly";
+    latest.state = latest.stopRequested ? "stopped" : "failed";
+    if (!latest.stopRequested) latest.error ??= "worker process exited unexpectedly";
     latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
     writeMeta(latest);
     return latest;
@@ -5295,6 +5295,8 @@ function cmdStop(p) {
   for (const id of ids) {
     const meta = freshMeta(id);
     if (!isActive(meta.state) || !isAlive(meta.pid)) continue;
+    meta.stopRequested = true;
+    writeMeta(meta);
     process.kill(meta.pid, "SIGTERM");
     console.log(`stopping ${meta.id} (${meta.state})`);
     stopped++;

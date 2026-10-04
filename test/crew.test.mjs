@@ -139,3 +139,20 @@ test('maxParallel defaults to 20 and no setting goes above 30', () => {
   assert.match(s.run(['config'], { PITROOM_MAX_PARALLEL: '12' }).stdout, /maxParallel\s+12\s+\(env\)/);
   void value;
 });
+
+test('stop: a worker process that dies on the signal before it can answer is stopped, not "exited unexpectedly"', () => {
+  const s = sandbox();
+  const fake = (id, extra) => {
+    const dir = path.join(s.base, 'home', 'runs', id);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+      id, version: '0', mode: 'read', task: 'x', dir: s.repo, cwd: s.repo, worker: { backend: 'opencode' }, fallback: [], files: [], link: [],
+      timeoutSec: 60, state: 'queued', pid: 2 ** 22 + 7, startedAt: new Date().toISOString(), warnings: [], ...extra,
+    }));
+  };
+  fake('20260101-000001-aaaa', { stopRequested: true }); // asked to stop, and its process is gone
+  fake('20260101-000002-bbbb', {}); // gone without anyone asking: a crash
+  assert.match(s.run(['status', '20260101-000001-aaaa']).stdout, /stopped/);
+  assert.doesNotMatch(s.run(['status', '20260101-000001-aaaa']).stdout, /exited unexpectedly/);
+  assert.match(s.run(['status', '20260101-000002-bbbb']).stdout, /exited unexpectedly/);
+});

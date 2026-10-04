@@ -367,6 +367,10 @@ export function cmdStop(p: Parsed): number {
   for (const id of ids) {
     const meta = freshMeta(id);
     if (!isActive(meta.state) || !isAlive(meta.pid)) continue;
+    // Said first: a process that is still starting up has no handler yet and dies on the signal, and then it is
+    // "stopped", not "exited unexpectedly".
+    meta.stopRequested = true;
+    writeMeta(meta);
     process.kill(meta.pid!, 'SIGTERM');
     console.log(`stopping ${meta.id} (${meta.state})`);
     stopped++;

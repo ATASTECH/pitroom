@@ -40,6 +40,8 @@ export interface RunMeta {
   web?: boolean;
   state: State;
   pid?: number;
+  /** `pitroom stop` was asked for: a process that dies before it can say so is stopped, not crashed. */
+  stopRequested?: boolean;
   startedAt: string;
   endedAt?: string;
   exitCode?: number;
@@ -194,8 +196,8 @@ export function freshMeta(id: string): RunMeta {
     // (with its usage and savings) is never overwritten by this stale copy.
     const latest = readMeta(id);
     if (TERMINAL.includes(latest.state)) return latest;
-    latest.state = 'failed';
-    latest.error ??= 'worker process exited unexpectedly';
+    latest.state = latest.stopRequested ? 'stopped' : 'failed';
+    if (!latest.stopRequested) latest.error ??= 'worker process exited unexpectedly';
     latest.endedAt ??= new Date().toISOString();
     writeMeta(latest);
     return latest;
