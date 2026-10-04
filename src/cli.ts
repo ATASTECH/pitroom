@@ -1,6 +1,8 @@
+import fs from 'node:fs';
 import { backendIds } from './backends/index.js';
-import { parse, exitCodeFor, has } from './cli/args.js';
+import { parse, exitCodeFor, flag, has } from './cli/args.js';
 import { serveMcp } from './cli/mcp.js';
+import { DEFAULT_PORT, serveMcpHttp } from './cli/mcp-http.js';
 import * as cmd from './cli/commands.js';
 import { doctor } from './core/doctor.js';
 import { UserError } from './core/errors.js';
@@ -54,7 +56,9 @@ Usage
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
   pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
                                         --clear tries them again
-  pitroom mcp                           serve Pitroom as MCP tools on stdio (Cursor, Claude Desktop, Gemini CLI, …)
+  pitroom mcp [-d DIR] [--http [--port N]]
+                                        serve Pitroom as MCP tools on stdio (Cursor, Claude Desktop, Gemini CLI, …),
+                                        or with --http at http://127.0.0.1:7117/mcp (bearer token, local only)
   pitroom doctor [--probe]              check workers, models, permissions, skills
   pitroom config                        effective settings, where each comes from, config file path
   pitroom init [--model ID] [--fallback A,B] [--yes] [--force]
@@ -113,7 +117,19 @@ const COMMANDS: Record<string, Command> = {
   review: cmd.cmdReview,
   audit: cmd.cmdAudit,
   cooldown: cmd.cmdCooldown,
-  mcp: () => serveMcp(),
+  mcp: (p) => {
+    const port = flag(p, 'port');
+    if (port !== undefined && !has(p, 'http')) throw new UserError('--port goes with --http (on stdio there is no port)');
+    if (port !== undefined && !(/^\d+$/.test(port) && Number(port) <= 65535)) throw new UserError('--port takes a number from 0 to 65535 (0 picks a free one)');
+    const dir = flag(p, 'dir');
+    if (dir !== undefined) {
+      if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new UserError(`-d ${dir}: no such directory`);
+      // the tools run the CLI in this directory, so it is the project a run works on unless a call names another
+      process.chdir(dir);
+      process.env.PWD = process.cwd();
+    }
+    return has(p, 'http') ? serveMcpHttp({ port: port === undefined ? DEFAULT_PORT : Number(port) }) : serveMcp();
+  },
   plan: cmd.cmdPlan,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,

@@ -3,11 +3,13 @@
 ## Unreleased
 
 ### MCP server
-- **Progress notifications.** A call that waits for a run reports how it is doing every few seconds (`notifications/progress`, when the client sent a progress token), which also keeps clients with a per-call timeout from giving up on a long run.
+- **Progress notifications.** A call that waits for a run reports how it is doing every few seconds (`notifications/progress`, when the client sent a progress token), so the agent sees what the worker is doing; a client that resets its timeout when progress comes in (the protocol allows it, not every client does) does not give up on a long run.
 - **Cancellation.** A client that cancels `pitroom_run`, `pitroom_crew`, `pitroom_review` or `pitroom_audit` (`notifications/cancelled`) stops the run or group it started and gets no answer, as the protocol says; a cancelled `pitroom_wait` only stops waiting. A client that sends its requests and closes the pipe still gets the answers.
 - **Resources.** The latest runs are resources, `pitroom://run/<id>` (the report) and `pitroom://run/<id>/patch` (the exact diff), with resource templates; anything else is "not found" (-32002).
 - **Prompts.** `research`, `implement`, `review` and `crew`, with their arguments checked.
 - **Nine new tools** (18 in all): `pitroom_crew` (independent tasks in parallel as one group), `pitroom_list`, `pitroom_history` (search earlier answers), `pitroom_stats`, `pitroom_savings`, `pitroom_models`, `pitroom_cooldown`, `pitroom_doctor` and `pitroom_revert` (undo a write run); `pitroom_run` takes `continue` for a follow-up in the same worker session, and `pitroom_apply` can apply a group.
+- **HTTP transport.** `pitroom mcp --http [--port N]` serves the same server over Streamable HTTP at `http://127.0.0.1:7117/mcp`, for clients that connect to a URL. Local by construction: 127.0.0.1 only, a bearer token (generated on first start into `<state dir>/mcp-token`, mode 0600, or `PITROOM_MCP_TOKEN`; compared in constant time), and a Host or Origin that is not local is refused with 403 (DNS rebinding). Sessions per client (`Mcp-Session-Id`), so a cancel only touches the cancelling client's request even when two clients use the same request id; a call that sends a progress token is answered as an event stream. Ending a session (DELETE) or stopping the server ends the waiting, not the runs. When 64 sessions are open, the one unused longest makes room for a new one. Checked with the real Claude Code client (`claude mcp add --transport http …`, `claude mcp list`: connected).
+- `pitroom mcp -d DIR` (stdio or HTTP) works in that project, for clients such as Claude Desktop that start the server somewhere else; `--port` without `--http` is a usage error.
 - The server is split into protocol (`mcp.ts`), tools (`mcp-tools.ts`), resources and prompts (`mcp-extras.ts`) and what they share (`mcp-support.ts`).
 
 ## 0.15.0
