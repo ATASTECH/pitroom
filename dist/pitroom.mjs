@@ -5922,11 +5922,24 @@ function pickReviewer(job) {
 }
 function writePackage(job) {
   const g = gitDir(job.dir);
-  if (!g) throw new UserError(`not a git repository: ${job.dir}`);
-  const file2 = path26.join(g, "pitroom", `review-${crypto9.randomBytes(4).toString("hex")}.md`);
+  const root = repoRoot(job.dir);
+  if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
+  const name = `review-${crypto9.randomBytes(4).toString("hex")}.md`;
+  const inside2 = !path26.relative(fs30.realpathSync(root), fs30.realpathSync(g)).startsWith("..");
+  const file2 = inside2 ? path26.join(g, "pitroom", name) : path26.join(root, ".pitroom", name);
+  if (!inside2) ignoreInGit(root, "/.pitroom/");
   fs30.mkdirSync(path26.dirname(file2), { recursive: true });
   fs30.writeFileSync(file2, job.package);
   return file2;
+}
+function ignoreInGit(root, pattern) {
+  const exclude = path26.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
+  const text = fs30.existsSync(exclude) ? fs30.readFileSync(exclude, "utf8") : "";
+  if (text.split(/\r?\n/).includes(pattern)) return;
+  fs30.mkdirSync(path26.dirname(exclude), { recursive: true });
+  fs30.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
+${pattern}
+`);
 }
 
 // src/core/models.ts

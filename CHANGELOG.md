@@ -5,6 +5,9 @@
 ### MCP server
 - **Smaller tool definitions.** Ten tools instead of eighteen, nothing lost: parallel work is `pitroom_run` with `tasks` (was `pitroom_crew`), every report is `pitroom_info` with a `topic` (`runs`, `history`, `stats`, `savings`, `models`, `cooldown`, `config` (new), `doctor`; were seven tools), `pitroom_show` gives a running run's progress (was `pitroom_status`, and `run` now defaults to the latest), and `pitroom_stop` with `cooldowns` clears the cooldowns. Descriptions are shorter. The definitions sit in the client's context for the whole session: about 1.9k tokens now, 3.3k before. An option that does not go with a topic is an error that names the ones that do.
 
+### Fixes
+- `pitroom review` in a linked git worktree: the review package was written to the worktree's git directory, which lies outside the worktree, and a sandboxed reviewer (OpenCode) was refused reading it, so the review had nothing to review. There it now goes to `<worktree>/.pitroom/` (added once to the repository's `info/exclude`, so `git status` stays clean) and is removed when the review ends. Found by having Pitroom review its own branches from a worktree.
+
 ## 0.16.0
 
 ### MCP server

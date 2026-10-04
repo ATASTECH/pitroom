@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_BACKEND } from '../backends/index.js';
 import type { Target } from '../backends/types.js';
-import { commitOf, gitDir, rangeDiff, repoRoot, reviewDiff } from '../vcs/git.js';
+import { commitOf, git, gitDir, rangeDiff, repoRoot, reviewDiff } from '../vcs/git.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
 import { loadPlan, planName } from './plan.js';
@@ -170,9 +170,25 @@ export function pickReviewer(job: ReviewJob): string | undefined {
 /** Writes the package where the reviewer can read it: <git dir of its workspace>/pitroom/. */
 export function writePackage(job: ReviewJob): string {
   const g = gitDir(job.dir);
-  if (!g) throw new UserError(`not a git repository: ${job.dir}`);
-  const file = path.join(g, 'pitroom', `review-${crypto.randomBytes(4).toString('hex')}.md`);
+  const root = repoRoot(job.dir);
+  if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
+  const name = `review-${crypto.randomBytes(4).toString('hex')}.md`;
+  // Inside the git directory, which is inside the project, so the reviewer may read it. In a linked worktree (or
+  // with GIT_DIR elsewhere) the git directory is outside the project, where a sandboxed reviewer cannot read: there
+  // it goes to <worktree>/.pitroom/, which git is told to ignore.
+  const inside = !path.relative(fs.realpathSync(root), fs.realpathSync(g)).startsWith('..');
+  const file = inside ? path.join(g, 'pitroom', name) : path.join(root, '.pitroom', name);
+  if (!inside) ignoreInGit(root, '/.pitroom/');
   fs.mkdirSync(path.dirname(file), { recursive: true });
   fs.writeFileSync(file, job.package);
   return file;
+}
+
+/** Adds a pattern to the repository's own ignore list (info/exclude, shared by its worktrees), once. */
+function ignoreInGit(root: string, pattern: string): void {
+  const exclude = path.resolve(root, git(root, ['rev-parse', '--git-path', 'info/exclude']).stdout.trim());
+  const text = fs.existsSync(exclude) ? fs.readFileSync(exclude, 'utf8') : '';
+  if (text.split(/\r?\n/).includes(pattern)) return;
+  fs.mkdirSync(path.dirname(exclude), { recursive: true });
+  fs.appendFileSync(exclude, `${text && !text.endsWith('\n') ? '\n' : ''}# Pitroom review packages in worktrees (removed after each review)\n${pattern}\n`);
 }

@@ -1,5 +1,6 @@
 // `pitroom review`: the package, the reviewer's backend, scoped re-reviews, ranges, refusals.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -137,4 +138,32 @@ test('a configured review tier picks the reviewer of a run and needs no same-bac
   const last = s.calls().filter((c) => c.argv[0] === 'run').at(-1);
   assert.equal(last.argv[last.argv.indexOf('--model') + 1], 'mock/reviewer');
   assert.doesNotMatch(r.stdout, /same backend as the implementer/, 'a review tier is the user\'s own choice');
+});
+
+test('review --range in a linked worktree: the package sits inside the worktree, where a sandboxed reviewer can read it, and git does not see it', () => {
+  const s = sandbox();
+  s.git('add', '-A');
+  s.git('commit', '-qm', 'base');
+  const wt = path.join(s.base, 'wt');
+  s.git('worktree', 'add', '-q', '-b', 'side', wt);
+  fs.appendFileSync(path.join(wt, 'app.txt'), 'line2\n');
+  execFileSync('git', ['-C', wt, 'commit', '-qam', 'feat: line2']);
+  const r = s.run(['review', '--range', 'HEAD~1..HEAD', '-d', wt], { MOCK_ACTIONS: `exec:git status --porcelain && ls .pitroom;${verdict('PASS', 'APPROVED', 0, 0, 0)}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const file = /\/\S*review-[0-9a-f]{8}\.md/.exec(lastPrompt(s))[0];
+  assert.equal(path.dirname(file), path.join(fs.realpathSync(wt), '.pitroom'), 'inside the worktree');
+  const seen = s.execs().at(-1);
+  assert.equal(seen.code, 0);
+  assert.match(seen.output, /^review-[0-9a-f]{8}\.md$/m, 'there while the reviewer works');
+  assert.doesNotMatch(seen.output, /\.pitroom/, 'and git status does not list it');
+  assert.ok(!fs.existsSync(file), 'removed afterwards');
+  const exclude = fs.readFileSync(path.join(s.repo, '.git', 'info', 'exclude'), 'utf8');
+  assert.equal(exclude.split('\n').filter((l) => l === '/.pitroom/').length, 1);
+  s.run(['review', '--range', 'HEAD~1..HEAD', '-d', wt], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.equal(fs.readFileSync(path.join(s.repo, '.git', 'info', 'exclude'), 'utf8'), exclude, 'added once');
+  // in the main checkout it stays in the git directory, as before
+  fs.appendFileSync(path.join(s.repo, 'app.txt'), 'line3\n');
+  s.git('commit', '-qam', 'feat: line3');
+  s.run(['review', '--range', 'HEAD~1..HEAD'], { MOCK_ACTIONS: verdict('PASS', 'APPROVED', 0, 0, 0) });
+  assert.match(lastPrompt(s), new RegExp(`${fs.realpathSync(s.repo).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/\\.git/pitroom/review-`));
 });
