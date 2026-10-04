@@ -72,6 +72,8 @@ Run options
   -W, --worker T        worker target "backend[:model]" (default: config "worker", else opencode)
   -m, --model M         model for that worker (default: the worker CLI's own default)
       --tier NAME       a worker from the config's "tiers" (e.g. cheap, standard, capable); -W wins
+      --in-place        a read run reads the directory itself, not a clean snapshot (default: a snapshot without secret-looking
+                        files when the directory has any; config "readIn": auto | snapshot | project)
       --audit           have another worker re-check this read run's answer; --no-audit skips it (default: the config's "audit")
       --effort LEVEL    reasoning effort for the worker: low, medium, high, xhigh, … (model#level)
       --plan PLAN       with --step N: implement Task N of a plan (-i or -w); the task text is your notes

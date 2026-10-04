@@ -12,6 +12,7 @@ import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
+import { prune as pruneSnapshots } from '../core/snapshot.js';
 import { activeCooldowns, clearCooldowns, untilText } from '../core/cooldown.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
 import { fill, loadTemplate } from '../core/templates.js';
@@ -538,7 +539,8 @@ export function cmdClean(p: Parsed): number {
     recordRun(m); // the history keeps what the directory held
     fs.rmSync(runDir(id), { recursive: true, force: true });
   }
-  console.log(`removed ${old.length} run(s); the history and the savings ledger are kept`);
+  const snapshots = pruneSnapshots(Date.now(), 0);
+  console.log(`removed ${old.length} run(s)${snapshots ? ` and ${snapshots} read snapshot${snapshots === 1 ? '' : 's'}` : ''}; the history and the savings ledger are kept`);
   return 0;
 }
 

@@ -68,6 +68,10 @@ export interface RunMeta {
   plan?: { file: string; step: number; title: string };
   /** The implementer's STATUS line. */
   taskStatus?: TaskStatus;
+  /** A read run that read a clean snapshot of the project instead of the directory (see snapshot.ts). */
+  snapshot?: { dir: string; tree: string; left: string[] };
+  /** `--in-place`: read the directory itself, never a snapshot. */
+  inPlace?: boolean;
   /** For an audit: the audited run's id. An audit re-checks a read run's answer with another worker. */
   auditOf?: string;
   auditVerdict?: AuditVerdict;

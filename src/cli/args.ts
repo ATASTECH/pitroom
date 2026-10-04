@@ -22,7 +22,7 @@ const VALUE_FLAGS: Record<string, string> = {
 
 const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
-  '--bg': 'bg', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
+  '--bg': 'bg', '--in-place': 'in-place', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe', '--clear': 'clear',
   '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running', '--detach': 'detach', '--stop': 'stop', '--open': 'open', '--serve': 'serve',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
@@ -100,6 +100,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
   return {
     mode: modes[0] ?? 'read',
     auditRate: has(p, 'no-audit') ? 0 : has(p, 'audit') ? 1 : undefined,
+    inPlace: has(p, 'in-place'),
     task,
     dir: flag(p, 'dir') ?? process.cwd(),
     files: p.flags.get('file') ?? [],

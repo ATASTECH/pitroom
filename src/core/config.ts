@@ -21,6 +21,8 @@ export interface PitroomConfig {
   models?: Record<string, string>;
   /** Worker targets by tier, for --tier and plan tasks: {"cheap": "opencode", "capable": "claude"}. */
   tiers?: Record<string, string>;
+  /** Where read runs read: "auto" (a clean snapshot when the directory holds secret-looking files), "snapshot" or "project". */
+  readIn?: string;
   /** Chance (0 to 1) that a finished read run is re-checked by another worker in the background (default 0: off). */
   audit?: number;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
@@ -40,6 +42,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   tiers: 'record',
   costs: 'numbers',
   audit: 'number',
+  readIn: 'string',
 };
 
 export function configPath(): string {
@@ -117,6 +120,8 @@ const rate = (v: unknown) => {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : undefined;
 };
 
+const readIn = (v: unknown) => (v === 'auto' || v === 'snapshot' || v === 'project' ? v : undefined);
+
 const list = (s: string | undefined) => s?.split(',').map((x) => x.trim()).filter(Boolean);
 
 export function setting<T>(flag: T | undefined, env: T | undefined, conf: T | undefined, fallback: T): Setting<T> {
@@ -145,5 +150,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
     costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),
     audit: setting<number>(undefined, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
+    readIn: setting<string>(undefined, readIn(e.PITROOM_READ_IN), readIn(c.readIn), 'auto'),
   };
 }
