@@ -4313,13 +4313,17 @@ async function startAndWait(start, seconds, ctx, task) {
   const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]]);
   if (started.code !== 0) return asResult(started);
   let id;
+  let cached3 = false;
   try {
-    id = JSON.parse(started.out).id;
+    ({ id, cached: cached3 = false } = JSON.parse(started.out));
   } catch {
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
   const result = await waitFor([id], seconds, ctx);
-  if (cancelled(ctx)) await stopQuietly(["stop", id]);
+  if (cancelled(ctx) && !cached3) await stopQuietly(["stop", id]);
+  if (cached3) result.text = `Cached answer: the same question on the same code as run ${id}; no worker ran (fresh: true asks one).
+
+${result.text}`;
   return result;
 }
 async function startCrew(flags, tasks, seconds, ctx) {
@@ -4500,6 +4504,7 @@ var TOOLS2 = [
         continue: { type: "string", description: "A finished run to follow up in the same worker session." },
         inPlace: { type: "boolean", description: "Read: read the directory itself, not a snapshot without secret-looking files." },
         audit: { type: "boolean", description: "Read: have another worker re-check the answer (each one, with tasks)." },
+        fresh: { type: "boolean", description: "Read: ask a worker even if this question was answered on the same code." },
         ...WORKER_PROPS,
         ...WAIT_PROP
       }
@@ -4515,6 +4520,7 @@ var TOOLS2 = [
       if (mode === "read") {
         if (bool(a, "inPlace")) flags.push("--in-place");
         if (bool(a, "audit")) flags.push("--audit");
+        if (bool(a, "fresh")) flags.push("--fresh");
       }
       const follow = str(a, "continue");
       if (tasks.length) {

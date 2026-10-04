@@ -82,6 +82,7 @@ export const TOOLS: Tool[] = [
         continue: { type: 'string', description: 'A finished run to follow up in the same worker session.' },
         inPlace: { type: 'boolean', description: 'Read: read the directory itself, not a snapshot without secret-looking files.' },
         audit: { type: 'boolean', description: 'Read: have another worker re-check the answer (each one, with tasks).' },
+        fresh: { type: 'boolean', description: 'Read: ask a worker even if this question was answered on the same code.' },
         ...WORKER_PROPS,
         ...WAIT_PROP,
       },
@@ -97,6 +98,7 @@ export const TOOLS: Tool[] = [
       if (mode === 'read') {
         if (bool(a, 'inPlace')) flags.push('--in-place');
         if (bool(a, 'audit')) flags.push('--audit');
+        if (bool(a, 'fresh')) flags.push('--fresh');
       }
       const follow = str(a, 'continue');
       if (tasks.length) {

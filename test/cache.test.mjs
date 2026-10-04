@@ -112,3 +112,35 @@ test('cache: an answer read in a clean snapshot is not reused for a question rea
   assert.equal(ask(s, 'q').status, 0);
   assert.equal(workerRuns(s), 2, 'each is reused where it was read');
 });
+
+test('cache: through MCP, a repeated question says it is a cached answer, and fresh asks a worker', async () => {
+  const { spawn } = await import('node:child_process');
+  const readline = await import('node:readline');
+  const { CLI } = await import('./helpers.mjs');
+  const s = sandbox();
+  const proc = spawn(process.execPath, [CLI, 'mcp'], { cwd: s.repo, env: { ...s.env, PWD: s.repo, ...ANSWER }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const waiting = new Map();
+  readline.createInterface({ input: proc.stdout }).on('line', (l) => {
+    const m = JSON.parse(l);
+    waiting.get(m.id)?.(m);
+  });
+  let n = 0;
+  const call = (args) =>
+    new Promise((resolve) => {
+      const id = ++n;
+      waiting.set(id, (m) => resolve(m.result.content[0].text));
+      proc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'pitroom_run', arguments: args } })}\n`);
+    });
+  try {
+    const first = await call({ task: 'where is app.txt?' });
+    assert.doesNotMatch(first, /Cached answer/);
+    const again = await call({ task: 'where is app.txt?' });
+    assert.match(again, /^Cached answer: the same question on the same code as run \d{8}-\d{6}-[0-9a-f]{4}; no worker ran/);
+    assert.match(again, /SUMMARY: app\.txt holds line1/);
+    assert.equal(workerRuns(s), 1);
+    assert.doesNotMatch(await call({ task: 'where is app.txt?', fresh: true }), /Cached answer/);
+    assert.equal(workerRuns(s), 2);
+  } finally {
+    await new Promise((resolve) => { proc.once('close', resolve); proc.stdin.end(); });
+  }
+});
