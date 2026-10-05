@@ -21,7 +21,7 @@ A read-only worker reviews the change against what was asked, on another backend
 | A worker's change (`-i` or `-w` run) | `pitroom review <run>` | the task (for plan runs: the plan brief), the worker's report, the diff |
 | A follow-up that fixed review findings | `pitroom review <fix run>` | the previous findings, the fix report, only the fix diff |
 | Your branch, or any commit range | `pitroom review --range main..HEAD [--plan PLAN]` | the commits, stat and diff; with `--plan`, the plan's goal, constraints, tasks and notes |
-| A pull request | `git fetch origin pull/123/head:pr-123` then `pitroom review --range "$(git merge-base main pr-123)..pr-123"` | the same, without checking the PR out |
+| A pull request | `git fetch origin pull/123/head:pr-123` then `pitroom review --range main..pr-123` (the diff starts where the PR left main) | the same, without checking the PR out |
 
 `--tier capable` or `-W claude` picks the reviewer; `--bg` keeps you working meanwhile. The report's first line gives `SPEC PASS|FAIL · QUALITY APPROVED|NEEDS-FIXES` and the counts; `pitroom show <review> --full` has every finding. The whole-branch rubric is [code-reviewer.md](code-reviewer.md).
 

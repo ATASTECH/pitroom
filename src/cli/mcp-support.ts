@@ -134,7 +134,8 @@ export function pit(args: string[], timeoutMs = 60 * 60_000, signal?: AbortSigna
 export function asResult(r: Ran, still?: string): ToolResult {
   const text = [r.out, r.err && r.code !== 0 ? r.err : ''].filter(Boolean).join('\n\n') || '(no output)';
   if (r.code === 75 && still) return { text: clip(`${text}\n\n${still}`) };
-  return { text: clip(text), isError: r.code === 2 || r.code === 3 || (r.code === 1 && !r.out) };
+  // a read-only violation (5) and a failed --verify (6) are reports, but ones an agent must not take as success
+  return { text: clip(text), isError: r.code === 2 || r.code === 3 || r.code === 5 || r.code === 6 || (r.code === 1 && !r.out) };
 }
 
 /** Plain CLI command as a tool: its text, with a time limit and the client's cancel. */

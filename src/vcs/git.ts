@@ -144,14 +144,17 @@ export function reviewDiff(root: string, a: string, b: string): string {
   return `${must(root, [...DIFF, '--stat', a, b]).trim()}\n\n${must(root, [...DIFF, '-U10', a, b])}`;
 }
 
-/** Commit list, stat and wide-context diff of the commits in a..b, for a reviewer. */
+/** The commits in a..b, and the stat and wide-context diff of B since it left A (as a pull request shows them), for a reviewer. */
 export function rangeDiff(root: string, a: string, b: string): string {
   const range = `${a}..${b}`;
+  // since the merge base: when A moved on since, A..B would also show A's newer commits, undone. Without a merge
+  // base (unrelated histories, a shallow clone) the two trees are compared as before.
+  const since = git(root, ['merge-base', a, b]).code === 0 ? `${a}...${b}` : range;
   const log = must(root, ['log', '--oneline', '--no-decorate', range]).trim();
   return [
     `## COMMITS\n\n${log || '(none)'}`,
-    `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', range]).trim() || '(none)'}`,
-    `## DIFF\n\n${must(root, [...DIFF, '-U10', range])}`,
+    `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', since]).trim() || '(none)'}`,
+    `## DIFF\n\n${must(root, [...DIFF, '-U10', since])}`,
   ].join('\n\n');
 }
 

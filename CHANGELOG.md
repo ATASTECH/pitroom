@@ -13,6 +13,14 @@
 ### Fixes
 - `pitroom review` in a linked git worktree: the review package was written to the worktree's git directory, which lies outside the worktree, and a sandboxed reviewer (OpenCode) was refused reading it, so the review had nothing to review. There it now goes to `<worktree>/.pitroom/` (added once to the repository's `info/exclude`, so `git status` stays clean) and is removed when the review ends. Found by having Pitroom review its own branches from a worktree.
 
+### From real-world tests (Codex driving Pitroom over MCP)
+- **`--verify` under an MCP client.** An app that starts Pitroom often passes a bare `PATH`, and `npm test` was "command not found" (exit 127). The verify command now also finds the Node running Pitroom (npm and npx sit next to it) and the usual install places, after your own `PATH`; a command that still is not found is reported as "could not run (exit 127: command not found)" with what to do, not as a failing test.
+- **A failed `--verify` is no longer shown as success.** The report says `⚠ done · verify failed` instead of `✔ done`, an MCP result is an error (`isError`, as is a read-only violation), and the dashboard shows a warning icon on the card and lists the run under **Needs attention**.
+- **Audits check the question, not only the references.** The auditor must check every condition the question sets (scope, exclusions, "all", "only", counts), look for missing and extra items in a list and recount a count; AGREE needs all of them. In the tests an answer that listed 8 files outside the asked directory got AGREE from two of three auditors, because its references were valid.
+- **Skills over MCP.** An agent using the MCP tools did not think of Pitroom's skills. The server's instructions now name them and say to use the matching one, `pitroom_run` points to `using-pitroom`, and every skill is also a prompt of the same name (its text, with how the CLI commands in it map to the tools), for clients that have no skills.
+- **`pitroom review --range A..B` shows the branch's own change**, from where it left A, as a pull request does. When A had moved on since (another PR merged), the diff also showed A's newer commits as if the branch undid them.
+- An OpenCode model answering "Endpoint is unavailable" (HTTP 400) is treated as rate-limited: it cools down and the next worker runs (this already worked; it now has a test).
+
 ## 0.16.0
 
 ### MCP server

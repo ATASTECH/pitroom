@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import readline from 'node:readline';
-import { CLI, sandbox } from './helpers.mjs';
+import { CLI, root, sandbox } from './helpers.mjs';
 
 /** A client for one server process. */
 function connect(s, extra = {}) {
@@ -215,10 +215,11 @@ test('mcp: pitroom_audit re-checks a read run with another worker, and a review 
     await c.close();
   }
   const s2 = sandbox();
-  const c2 = connect(s2, { MOCK_ACTIONS: 'append:app.txt:more;answer:SUMMARY: SPEC: PASS · QUALITY: APPROVED · ISSUES: critical=0 important=0 minor=0' });
+  const c2 = connect(s2, { MOCK_ACTIONS: 'answer:SUMMARY: SPEC: PASS · QUALITY: APPROVED · ISSUES: critical=0 important=0 minor=0' });
   try {
     await handshake(c2);
-    const change = await c2.call('pitroom_run', { task: 'extend', mode: 'isolate' });
+    // the change's own actions ride in its task, so the reviewer only answers
+    const change = await c2.call('pitroom_run', { task: 'extend [[mock:append:app.txt:more;answer:SUMMARY: extended]]', mode: 'isolate' });
     const id = RUN_ID.exec(change.text)[0];
     const rev = await c2.call('pitroom_review', { run: id, waitSeconds: 60 });
     assert.equal(rev.isError, false, rev.text);
@@ -309,7 +310,18 @@ test('mcp: prompts say how to use Pitroom, with their arguments checked', async 
   try {
     await handshake(c);
     const { prompts } = (await c.rpc('prompts/list', {})).result;
-    assert.deepEqual(prompts.map((p) => p.name), ['research', 'implement', 'review', 'crew']);
+    assert.deepEqual(prompts.slice(0, 4).map((p) => p.name), ['research', 'implement', 'review', 'crew']);
+    const skillNames = fs.readdirSync(path.join(root, 'skills')).filter((d) => fs.existsSync(path.join(root, 'skills', d, 'SKILL.md'))).sort();
+    assert.deepEqual(prompts.slice(4).map((p) => p.name), skillNames, 'every skill is a prompt too');
+    const using = prompts.find((p) => p.name === 'using-pitroom');
+    assert.match(using.description, /^Skill: /);
+    const skill = (await c.rpc('prompts/get', { name: 'pitroom-research', arguments: { task: 'where is login handled?' } })).result.messages[0].content.text;
+    assert.match(skill, /^Through this MCP server the `pitroom` commands below are tools: `pitroom run` is pitroom_run/);
+    assert.match(skill, /# Research with a Pitroom worker/);
+    assert.match(skill, /The task: where is login handled\?$/);
+    assert.doesNotMatch(skill, /^---\nname:/m, 'without the front matter');
+    const init = await c.rpc('initialize', { protocolVersion: '2025-06-18' });
+    assert.match(init.result.instructions, /skills \(using-pitroom, pitroom-research/);
     const research = (await c.rpc('prompts/get', { name: 'research', arguments: { question: 'where is login handled?' } })).result;
     assert.equal(research.messages[0].role, 'user');
     assert.match(research.messages[0].content.text, /pitroom_run[\s\S]*where is login handled\?/);
@@ -464,6 +476,20 @@ test('mcp: a new run is announced, a subscribed run tells when it ends, and unsu
     assert.equal((await c.rpc('resources/subscribe', { uri: 'file:///etc/passwd' })).error.code, -32602);
     assert.equal((await c.rpc('resources/subscribe', { uri: 'pitroom://run/19990101-000000-0000' })).error.code, -32002);
     assert.equal((await c.rpc('resources/subscribe', {})).error.code, -32602);
+  } finally {
+    await c.close();
+  }
+});
+
+test('mcp: a run whose --verify failed is an error result, not a plain success', async () => {
+  const s = sandbox();
+  const c = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: ok' });
+  try {
+    await handshake(c);
+    const r = await c.call('pitroom_run', { task: 'check', verify: 'false' });
+    assert.equal(r.isError, true, r.text);
+    assert.match(r.text, /pitroom ⚠ done · verify failed/);
+    assert.equal((await c.call('pitroom_run', { task: 'check again', verify: 'true' })).isError, false);
   } finally {
     await c.close();
   }

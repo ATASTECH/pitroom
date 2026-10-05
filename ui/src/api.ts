@@ -20,6 +20,8 @@ export interface DashRun {
   audit?: string;
   changes?: number;
   applied?: boolean;
+  /** Finished, but its --verify command failed. */
+  verifyFailed?: boolean;
   note: string;
 }
 
@@ -76,6 +78,8 @@ export interface HistoryRow {
   saved?: number;
   files: number;
   applied: boolean;
+  /** Finished, but its --verify command failed. */
+  verifyFailed?: boolean;
 }
 
 export interface Stats {

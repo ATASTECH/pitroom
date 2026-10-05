@@ -1,5 +1,8 @@
 // What `pitroom mcp` offers besides tools: the runs as resources (a client can attach a report or a patch to a
 // conversation), and a few prompts (the way to use Pitroom for research, a change, a review, parallel work).
+import fs from 'node:fs';
+import path from 'node:path';
+import { packageRoot, skillNames } from '../core/install.js';
 import { type Json, type Ctx, clip, pit } from './mcp-support.js';
 import { freshMeta, listRunIds } from '../core/store.js';
 
@@ -105,10 +108,47 @@ const PROMPTS: Prompt[] = [
   },
 ];
 
-export const listPrompts = (): { prompts: Json[] } => ({ prompts: PROMPTS.map(({ name, title, description, arguments: args }) => ({ name, title, description, arguments: args })) });
+/** How the skills' CLI commands map to this server's tools, put before a skill served as a prompt. */
+const TOOL_MAP =
+  'Through this MCP server the `pitroom` commands below are tools: `pitroom run` is pitroom_run (`-i` is mode "isolate", `-w` mode "write", `--continue` is continue, `--verify` is verify), ' +
+  '`pitroom crew` is pitroom_run with tasks, `pitroom wait` pitroom_wait, `pitroom show`/`status` pitroom_show, `pitroom review` pitroom_review, `pitroom audit` pitroom_audit, ' +
+  '`pitroom apply`/`discard`/`revert`/`stop` the tools of those names, `pitroom history`/`ls`/`models`/`doctor` pitroom_info. With a shell the commands work as well.';
+
+/** Pitroom's skills, each served as a prompt of the same name: the same guidance for clients that have no skills. */
+let skills: Prompt[] | undefined;
+function skillPrompts(): Prompt[] {
+  if (skills) return skills;
+  const found: Prompt[] = [];
+  const root = packageRoot();
+  for (const name of skillNames(root)) {
+    try {
+      const text = fs.readFileSync(path.join(root, 'skills', name, 'SKILL.md'), 'utf8');
+      const front = /^---\n([\s\S]*?)\n---\n/.exec(text);
+      const body = (front ? text.slice(front[0].length) : text).trim();
+      const description = /^description:\s*(.+)$/m.exec(front?.[1] ?? '')?.[1]?.trim() ?? `The ${name} skill.`;
+      const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? name;
+      found.push({
+        name,
+        title,
+        // the first sentence: prompts/list is read whole by some clients, so it stays short
+        description: `Skill: ${description.split(/(?<=\.)\s/)[0]}`,
+        arguments: [{ name: 'task', description: 'What you are about to do (optional).' }],
+        text: (a) => `${TOOL_MAP}\n\n${body}${a.task ? `\n\n---\n\nThe task: ${a.task}` : ''}`,
+      });
+    } catch {
+      // a skill that cannot be read is left out
+    }
+  }
+  skills = found.filter((p) => !PROMPTS.some((b) => b.name === p.name)); // a built-in prompt keeps its name
+  return skills;
+}
+
+const allPrompts = (): Prompt[] => [...PROMPTS, ...skillPrompts()];
+
+export const listPrompts = (): { prompts: Json[] } => ({ prompts: allPrompts().map(({ name, title, description, arguments: args }) => ({ name, title, description, arguments: args })) });
 
 export function getPrompt(name: unknown, given: unknown): Json {
-  const p = PROMPTS.find((x) => x.name === name);
+  const p = allPrompts().find((x) => x.name === name);
   if (!p) throw new RpcError(-32602, `unknown prompt: ${String(name)}`);
   const args: Record<string, string> = {};
   const raw = given && typeof given === 'object' && !Array.isArray(given) ? (given as Json) : {};

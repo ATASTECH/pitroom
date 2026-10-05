@@ -247,6 +247,8 @@ export interface HistoryRow {
   verdict?: string;
   /** On an audited run: what its audit found (AGREE, PARTIAL, DISAGREE, UNCLEAR), PENDING while it runs. */
   audit?: string;
+  /** Finished, but its --verify command failed. */
+  verifyFailed?: boolean;
   seconds?: number;
   steps?: number;
   tokens?: number;
@@ -267,6 +269,9 @@ export interface HistoryQuery {
   limit?: number;
 }
 
+/** SQL: the run finished, but its --verify command failed. */
+const VERIFY_FAILED = "(r.state = 'done' AND json_extract(r.meta_json, '$.verifyResult.ok') = 0)";
+
 /** FTS5 query from free text: every word a prefix match, so "login bu" finds "login bug". */
 const ftsQuery = (text: string) => text.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"*`).join(' ');
 
@@ -281,14 +286,15 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
   }
   if (q.model) { where.push('r.model = ?'); args.push(q.model); }
   if (q.backend) { where.push('r.backend = ?'); args.push(q.backend); }
-  if (q.state) { where.push(q.state === 'problem' ? "r.state IN ('failed','timeout','stopped')" : 'r.state = ?'); if (q.state !== 'problem') args.push(q.state); }
+  // "problem" is what needs attention: a run that did not finish, or one whose --verify failed
+  if (q.state) { where.push(q.state === 'problem' ? `(r.state IN ('failed','timeout','stopped') OR ${VERIFY_FAILED})` : 'r.state = ?'); if (q.state !== 'problem') args.push(q.state); }
   if (q.group) { where.push('r.grp = ?'); args.push(q.group); }
   if (q.sinceMs) { where.push('r.started_at >= ?'); args.push(new Date(q.sinceMs).toISOString()); }
   const base = where.length ? `WHERE ${where.join(' AND ')}` : '';
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base}`).get(...args).n as number;
     const page = q.beforeId ? `${base ? `${base} AND` : 'WHERE'} r.id < ?` : base;
-    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r: any) => ({
@@ -296,6 +302,7 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
         task: r.review_of ? `of ${r.review_of.replace(/\b([0-9a-f]{9})[0-9a-f]{31}\b/g, '$1')}` : (r.task as string).split('\n').find((l: string) => l.trim()) ?? '',
         group: r.grp ?? undefined, verdict: r.verdict ?? undefined,
         audit: auditBadge({ audit: r.audit_state ? { id: '', state: r.audit_state, verdict: r.audit_verdict ?? undefined } : undefined }),
+        verifyFailed: r.verify_failed ? true : undefined,
         seconds: r.seconds ?? undefined, steps: r.steps ?? undefined,
         tokens: r.tokens ?? undefined, saved: r.saved ?? undefined, files: r.files_changed ?? 0, applied: !!r.applied,
       })),
