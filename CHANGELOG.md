@@ -1,9 +1,15 @@
 # Changelog
 
-## Unreleased
+## 0.19.0
 
 ### Doctor
 - `pitroom doctor` has a **Use** section: with no runs yet it says so and how to start ("ask your agent to use Pitroom", or `pitroom run "where is <something> defined?"`); afterwards it says how many runs there have been and when the last one was. Skills can be installed and an agent may still never think of Pitroom: this is the first thing a new user sees.
+
+### Fixes
+- **`pitroom dash --detach` could not find a dash that was up.** The registry entry (`dash.json`) was deleted whenever the dash did not answer within 1.5 s, or when the file was read while the server was writing it; the command then reported "did not start" with the server running (seen as a flake on Windows and once on macOS). The entry is now removed only when its process is gone, and is written through a temp file.
+
+### Docs
+- Cursor has its own entry in the Quick start (`pitroom install --mcp --client cursor`), with what is and is not verified: Cursor's documentation lists `~/.agents/skills` and `~/.claude/skills`, where `pitroom install` links the skills; we have not run it in a Cursor session, and a forum report says its CLI does not load `~/.agents/skills`.
 
 ## 0.18.0
 
