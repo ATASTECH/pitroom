@@ -1718,7 +1718,7 @@ import readline from "node:readline";
 // src/core/run.ts
 import { spawn as spawn2, spawnSync as spawnSync6 } from "node:child_process";
 import fs25 from "node:fs";
-import path20 from "node:path";
+import path21 from "node:path";
 
 // src/vcs/git.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -2386,6 +2386,7 @@ function backToProject(text, snapshotDir, root) {
 
 // src/core/audit.ts
 import crypto4 from "node:crypto";
+import path13 from "node:path";
 var ANSWER_MAX = 8e3;
 function auditRate(meta) {
   return meta.auditRate ?? effective().audit.value;
@@ -2408,13 +2409,24 @@ function pickAuditor(meta) {
   const candidates = [tiers.audit, tiers.cheap, ...eff.fallback.value, eff.worker.value].filter((s) => !!s);
   return candidates.find((c) => !sameTarget(parseTarget(c, def), ran));
 }
+function relativeToAuditor(answer, meta) {
+  let out = answer;
+  const roots = [...new Set([meta.dir, meta.repoRoot].filter((r) => !!r))].sort((a, b) => b.length - a.length);
+  for (const root of roots) {
+    const rel = path13.relative(meta.dir, root);
+    const prefix = rel ? `${rel.split(path13.sep).join("/")}/` : "";
+    out = out.split(`${root}${path13.sep}`).join(prefix).replace(new RegExp(`${root.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![\\w.-])`, "g"), rel || ".");
+  }
+  return out;
+}
 function auditTask(meta, answer) {
-  const text = answer.trim();
+  const text = relativeToAuditor(answer, meta).trim();
   const shown = text.length > ANSWER_MAX ? `${text.slice(0, ANSWER_MAX)}
 \u2026 (cut: ${text.length - ANSWER_MAX} more characters)` : text;
   return [
     "You are auditing another worker's answer to a read-only question about this project. Do not take the answer on trust:",
     "check its key claims yourself against the files here (open the cited files and lines, search for what it says exists or is missing).",
+    "Paths in the answer are relative to your working directory.",
     "Check the answer against the QUESTION, not only its own claims: every condition the question sets (a directory or scope,",
     'what to leave out, "all", "only", "exactly", a count) must hold. Valid references do not make an answer right:',
     "for a list, look for items that are missing and items that do not belong; for a count, count again yourself.",
@@ -2458,7 +2470,7 @@ function auditBadge(meta) {
 
 // src/core/plan.ts
 import fs16 from "node:fs";
-import path13 from "node:path";
+import path14 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -2505,7 +2517,7 @@ function parsePlan(text, file2 = "") {
   return { file: file2, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file2) {
-  const abs = path13.resolve(file2);
+  const abs = path14.resolve(file2);
   if (!fs16.existsSync(abs) || !fs16.statSync(abs).isFile()) throw new UserError(`plan not found: ${file2}`);
   const plan = parsePlan(fs16.readFileSync(abs, "utf8"), fs16.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file2} has no "Task N" headings (see pitroom-writing-plans)`);
@@ -2526,33 +2538,33 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file2) => path13.basename(file2).replace(/\.md$/i, "");
+var planName = (file2) => path14.basename(file2).replace(/\.md$/i, "");
 
 // src/core/templates.ts
 import fs18 from "node:fs";
-import path15 from "node:path";
+import path16 from "node:path";
 
 // src/core/install.ts
 import fs17 from "node:fs";
 import os9 from "node:os";
-import path14 from "node:path";
+import path15 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 var LEGACY = ["pitroom", "opencode-worker"];
 function packageRoot() {
-  return path14.resolve(path14.dirname(fileURLToPath2(import.meta.url)), "..");
+  return path15.resolve(path15.dirname(fileURLToPath2(import.meta.url)), "..");
 }
 function skillNames(root = packageRoot()) {
-  const dir = path14.join(root, "skills");
+  const dir = path15.join(root, "skills");
   if (!fs17.existsSync(dir)) return [];
-  return fs17.readdirSync(dir).filter((d) => fs17.existsSync(path14.join(dir, d, "SKILL.md"))).sort();
+  return fs17.readdirSync(dir).filter((d) => fs17.existsSync(path15.join(dir, d, "SKILL.md"))).sort();
 }
 function skillTargets() {
   const home3 = os9.homedir();
-  const targets = [path14.join(home3, ".agents", "skills")];
-  if (fs17.existsSync(path14.join(home3, ".claude"))) targets.push(path14.join(home3, ".claude", "skills"));
+  const targets = [path15.join(home3, ".agents", "skills")];
+  if (fs17.existsSync(path15.join(home3, ".claude"))) targets.push(path15.join(home3, ".claude", "skills"));
   return targets;
 }
-var launcherPath = () => path14.join(os9.homedir(), ".local", "bin", process.platform === "win32" ? "pitroom.cmd" : "pitroom");
+var launcherPath = () => path15.join(os9.homedir(), ".local", "bin", process.platform === "win32" ? "pitroom.cmd" : "pitroom");
 var LAUNCHER_MARK = "# pitroom launcher";
 function launcherScript(bundle) {
   if (process.platform === "win32") {
@@ -2597,7 +2609,7 @@ function isPitroomLauncher(file2) {
 }
 function placeLauncher(bundle, root, force) {
   const dest = launcherPath();
-  fs17.mkdirSync(path14.dirname(dest), { recursive: true });
+  fs17.mkdirSync(path15.dirname(dest), { recursive: true });
   const exists = fs17.lstatSync(dest, { throwIfNoEntry: false });
   if (exists && !isOurLauncher(dest, root)) {
     if (!force) return `! ${dest} exists and is not Pitroom's launcher; kept (use --force to back it up and replace)`;
@@ -2611,12 +2623,12 @@ function placeLauncher(bundle, root, force) {
 function linksInto(link, dir) {
   const st = fs17.lstatSync(link, { throwIfNoEntry: false });
   if (!st?.isSymbolicLink()) return false;
-  const target = path14.resolve(path14.dirname(link), fs17.readlinkSync(link));
-  const rel = path14.relative(dir, target);
-  return !rel.startsWith("..") && !path14.isAbsolute(rel);
+  const target = path15.resolve(path15.dirname(link), fs17.readlinkSync(link));
+  const rel = path15.relative(dir, target);
+  return !rel.startsWith("..") && !path15.isAbsolute(rel);
 }
 function place(src, dest, opts) {
-  fs17.mkdirSync(path14.dirname(dest), { recursive: true });
+  fs17.mkdirSync(path15.dirname(dest), { recursive: true });
   const st = fs17.lstatSync(dest, { throwIfNoEntry: false });
   if (st && !st.isSymbolicLink()) {
     if (!opts.force) return `! ${dest} exists and is not a link; kept (use --force to back it up and replace)`;
@@ -2631,23 +2643,23 @@ function place(src, dest, opts) {
 function install(opts) {
   const root = packageRoot();
   const skills2 = opts.skills === false ? [] : skillNames(root);
-  if (opts.skills !== false && !skills2.length) throw new Error(`no skills found under ${path14.join(root, "skills")}`);
+  if (opts.skills !== false && !skills2.length) throw new Error(`no skills found under ${path15.join(root, "skills")}`);
   const out = [];
   for (const base2 of opts.skills === false ? [] : skillTargets()) {
     for (const legacy of LEGACY) {
-      const l = path14.join(base2, legacy);
+      const l = path15.join(base2, legacy);
       if (!skills2.includes(legacy) && linksInto(l, root)) {
         fs17.unlinkSync(l);
         out.push(`\u2714 removed old link ${l}`);
       }
     }
-    for (const name of skills2) out.push(place(path14.join(root, "skills", name), path14.join(base2, name), opts));
+    for (const name of skills2) out.push(place(path15.join(root, "skills", name), path15.join(base2, name), opts));
   }
-  const bundle = path14.join(root, "dist", "pitroom.mjs");
+  const bundle = path15.join(root, "dist", "pitroom.mjs");
   if (fs17.existsSync(bundle)) {
     out.push(placeLauncher(bundle, root, opts.force));
-    const onPath = (process.env.PATH ?? "").split(path14.delimiter).some((d) => path14.resolve(d) === path14.dirname(launcherPath()));
-    if (!onPath) out.push(`! ${path14.dirname(launcherPath())} is not on PATH; add it, or run ${launcherPath()} directly`);
+    const onPath = (process.env.PATH ?? "").split(path15.delimiter).some((d) => path15.resolve(d) === path15.dirname(launcherPath()));
+    if (!onPath) out.push(`! ${path15.dirname(launcherPath())} is not on PATH; add it, or run ${launcherPath()} directly`);
   }
   return out;
 }
@@ -2657,7 +2669,7 @@ function uninstall() {
   for (const base2 of skillTargets()) {
     if (!fs17.existsSync(base2)) continue;
     for (const name of fs17.readdirSync(base2)) {
-      const l = path14.join(base2, name);
+      const l = path15.join(base2, name);
       if (linksInto(l, root)) {
         fs17.unlinkSync(l);
         out.push(`\u2714 removed ${l}`);
@@ -2672,7 +2684,7 @@ function uninstall() {
 }
 function installedSkills() {
   const names = skillNames();
-  return skillTargets().map((base2) => ({ base: base2, names: names.filter((n) => fs17.existsSync(path14.join(base2, n, "SKILL.md"))) }));
+  return skillTargets().map((base2) => ({ base: base2, names: names.filter((n) => fs17.existsSync(path15.join(base2, n, "SKILL.md"))) }));
 }
 
 // src/core/templates.ts
@@ -2683,7 +2695,7 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file2 = path15.join(root, "skills", FILES[name]);
+  const file2 = path16.join(root, "skills", FILES[name]);
   if (!fs18.existsSync(file2)) throw new UserError(`template missing: ${file2} (broken install? run pitroom doctor)`, 3);
   return fs18.readFileSync(file2, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
@@ -2696,9 +2708,9 @@ function fill(template, values) {
 // src/core/slots.ts
 import crypto5 from "node:crypto";
 import fs19 from "node:fs";
-import path16 from "node:path";
-var slotsDir = () => path16.join(home(), "slots");
-var locksDir = () => path16.join(home(), "locks");
+import path17 from "node:path";
+var slotsDir = () => path17.join(home(), "slots");
+var locksDir = () => path17.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -2712,7 +2724,7 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file2, runId) {
-  fs19.mkdirSync(path16.dirname(file2), { recursive: true });
+  fs19.mkdirSync(path17.dirname(file2), { recursive: true });
   try {
     fs19.writeFileSync(file2, runId, { flag: "wx" });
     return true;
@@ -2743,13 +2755,13 @@ function releaseIfOwner(file2, runId) {
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file2 = path16.join(slotsDir(), `slot-${n}`);
+    const file2 = path17.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file2, runId)) return file2;
   }
   return void 0;
 }
 var releaseSlot = (file2, runId) => releaseIfOwner(file2, runId);
-var lockFile = (repoRoot2) => path16.join(locksDir(), `write-${crypto5.createHash("sha1").update(path16.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot2) => path17.join(locksDir(), `write-${crypto5.createHash("sha1").update(path17.resolve(repoRoot2)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot2, runId) {
   const file2 = lockFile(repoRoot2);
   if (tryClaim(file2, runId)) return;
@@ -2803,7 +2815,7 @@ ${task}`;
 
 // src/core/receipt.ts
 import fs20 from "node:fs";
-import path17 from "node:path";
+import path18 from "node:path";
 var PRESETS = {
   sonnet: { name: "Claude Sonnet", input: 3, output: 15, cachedInput: 0.3 },
   opus: { name: "Claude Opus", input: 5, output: 25, cachedInput: 0.5 },
@@ -2839,7 +2851,7 @@ function record(meta) {
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name
   };
-  fs20.mkdirSync(path17.dirname(ledgerFile()), { recursive: true });
+  fs20.mkdirSync(path18.dirname(ledgerFile()), { recursive: true });
   fs20.appendFileSync(ledgerFile(), `${JSON.stringify(entry)}
 `);
 }
@@ -2921,7 +2933,7 @@ ${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.rou
 
 // src/core/refs.ts
 import fs21 from "node:fs";
-import path18 from "node:path";
+import path19 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -2972,7 +2984,7 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path18.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path19.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file2) => {
@@ -2989,9 +3001,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path18.isAbsolute(ref.file)) return [];
+    if (path19.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path18.basename(wanted)) ?? []).filter((f) => f.split(path18.sep).join("/").endsWith(`/${wanted}`) || path18.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path19.basename(wanted)) ?? []).filter((f) => f.split(path19.sep).join("/").endsWith(`/${wanted}`) || path19.basename(f) === wanted).slice(0, 20);
   };
   const check = (file2, ref) => {
     const lines = load(file2);
@@ -3006,7 +3018,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path18.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path19.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -3027,7 +3039,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base2 = path18.basename(name);
+  const base2 = path19.basename(name);
   return !base2.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base2) || FILE_EXTENSIONS.has(base2.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -3043,12 +3055,12 @@ function indexFiles(roots) {
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path18.join(dir, e.name));
+        if (!SKIP_DIRS2.has(e.name)) walk(path19.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path18.join(dir, e.name));
-        else index.set(e.name, [path18.join(dir, e.name)]);
+        if (list2) list2.push(path19.join(dir, e.name));
+        else index.set(e.name, [path19.join(dir, e.name)]);
       }
     }
   };
@@ -3056,7 +3068,7 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path18.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path18.join(r, ref));
+  const candidates = path19.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path19.join(r, ref));
   return candidates.find((c) => {
     try {
       return fs21.statSync(c).isFile() && inside(c, roots);
@@ -3067,8 +3079,8 @@ function resolve(ref, roots) {
 }
 function inside(file2, roots) {
   return roots.some((r) => {
-    const rel = path18.relative(r, path18.resolve(file2));
-    return rel !== "" && !rel.startsWith("..") && !path18.isAbsolute(rel);
+    const rel = path19.relative(r, path19.resolve(file2));
+    return rel !== "" && !rel.startsWith("..") && !path19.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -3076,7 +3088,7 @@ var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 // src/core/history.ts
 import fs23 from "node:fs";
 import { createRequire } from "node:module";
-import path19 from "node:path";
+import path20 from "node:path";
 import zlib from "node:zlib";
 
 // src/core/ui.ts
@@ -3209,7 +3221,7 @@ var SCHEMA_VERSION = 1;
 var PATCH_MAX = 1e6;
 var ANSWER_MAX2 = 2e5;
 var cached2;
-var historyFile = () => path19.join(home(), "history.db");
+var historyFile = () => path20.join(home(), "history.db");
 function openDb() {
   const file2 = historyFile();
   if (cached2?.file === file2) return cached2.db;
@@ -3223,7 +3235,7 @@ function openDb() {
     } finally {
       process.emitWarning = emit;
     }
-    fs23.mkdirSync(path19.dirname(file2), { recursive: true });
+    fs23.mkdirSync(path20.dirname(file2), { recursive: true });
     db = new DatabaseSync(file2);
     db.exec("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;");
     migrate(db);
@@ -3271,7 +3283,7 @@ function gzipFile(f) {
 }
 function compactRun(meta) {
   if (!TERMINAL.includes(meta.state)) return;
-  const dir = path19.dirname(runFile(meta.id, "meta.json"));
+  const dir = path20.dirname(runFile(meta.id, "meta.json"));
   let names;
   try {
     names = fs23.readdirSync(dir);
@@ -3279,10 +3291,10 @@ function compactRun(meta) {
     return;
   }
   for (const n of names) {
-    if (/^events(\.attempt-\d+)?\.jsonl$/.test(n)) gzipFile(path19.join(dir, n));
+    if (/^events(\.attempt-\d+)?\.jsonl$/.test(n)) gzipFile(path20.join(dir, n));
     else if (/^stderr(\.attempt-\d+)?\.log$/.test(n)) {
-      if (meta.state === "done" && !/attempt/.test(n)) fs23.rmSync(path19.join(dir, n), { force: true });
-      else gzipFile(path19.join(dir, n));
+      if (meta.state === "done" && !/attempt/.test(n)) fs23.rmSync(path20.join(dir, n), { force: true });
+      else gzipFile(path20.join(dir, n));
     }
   }
 }
@@ -3748,14 +3760,14 @@ function prepareRun(o) {
     throw new UserError(`the ${backend.name} worker cannot attach files; put the content in the task`);
   }
   const mode = parent?.mode ?? o.mode;
-  const dir = canonical(path20.resolve(parent?.dir ?? o.dir));
+  const dir = canonical(path21.resolve(parent?.dir ?? o.dir));
   if (!fs25.existsSync(dir) || !fs25.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
   if (mode === "write" && !root && !o.allowNonGit) {
     throw new UserError("--write outside a git repo cannot be tracked or reverted; pass --allow-non-git to accept that", 3);
   }
-  const files = o.files.map((f) => path20.resolve(f));
+  const files = o.files.map((f) => path21.resolve(f));
   for (const f of files) if (!fs25.existsSync(f)) throw new UserError(`file not found: ${f}`);
   const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
   const snap = mode === "read" && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn2, root, dir) : void 0;
@@ -3956,7 +3968,7 @@ function prepareTree(meta) {
       const s = readSnapshot(root);
       meta.snapshot.dir = s.dir;
       meta.snapshot.tree = s.tree;
-      meta.cwd = path20.join(s.dir, path20.relative(root, meta.dir));
+      meta.cwd = path21.join(s.dir, path21.relative(root, meta.dir));
       if (!fs25.existsSync(meta.cwd)) meta.cwd = s.dir;
       if (shown) meta.warnings.push(`read in a clean snapshot of your project: the secret-looking files (${shown}) and git-ignored files are not in it; --in-place reads the directory itself`);
     } catch (e) {
@@ -3967,9 +3979,9 @@ function prepareTree(meta) {
   if (root && meta.mode === "write") meta.baseTree = snapshotTree(root);
   if (root && meta.mode === "isolate" && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
-    meta.worktree = path20.join(worktreesDir(), meta.id);
+    meta.worktree = path21.join(worktreesDir(), meta.id);
     createIsolatedCopy(root, meta.baseTree, meta.worktree);
-    meta.cwd = path20.join(meta.worktree, path20.relative(root, meta.dir));
+    meta.cwd = path21.join(meta.worktree, path21.relative(root, meta.dir));
     const linked = linkIntoWorktree(root, meta.worktree, meta.link);
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(", ")}`);
   }
@@ -4071,10 +4083,10 @@ function captureChanges(meta) {
   fs25.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
 function verifyPath() {
-  const extra = [path20.dirname(process.execPath), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
-  const parts = (process.env.PATH ?? "").split(path20.delimiter).filter(Boolean);
-  for (const d of process.platform === "win32" ? [path20.dirname(process.execPath)] : extra) if (!parts.includes(d)) parts.push(d);
-  return parts.join(path20.delimiter);
+  const extra = [path21.dirname(process.execPath), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
+  const parts = (process.env.PATH ?? "").split(path21.delimiter).filter(Boolean);
+  for (const d of process.platform === "win32" ? [path21.dirname(process.execPath)] : extra) if (!parts.includes(d)) parts.push(d);
+  return parts.join(path21.delimiter);
 }
 function runVerify(meta) {
   const r = spawnSync6(meta.verify, {
@@ -4147,7 +4159,7 @@ function cleanupWorktree(meta) {
 
 // src/cli/mcp-extras.ts
 import fs26 from "node:fs";
-import path21 from "node:path";
+import path22 from "node:path";
 
 // src/cli/mcp-support.ts
 import { spawn as spawn3 } from "node:child_process";
@@ -4506,7 +4518,7 @@ function skillPrompts() {
   const root = packageRoot();
   for (const name of skillNames(root)) {
     try {
-      const text = fs26.readFileSync(path21.join(root, "skills", name, "SKILL.md"), "utf8");
+      const text = fs26.readFileSync(path22.join(root, "skills", name, "SKILL.md"), "utf8");
       const front = /^---\n([\s\S]*?)\n---\n/.exec(text);
       const body = (front ? text.slice(front[0].length) : text).trim();
       const description = /^description:\s*(.+)$/m.exec(front?.[1] ?? "")?.[1]?.trim() ?? `The ${name} skill.`;
@@ -5025,20 +5037,20 @@ async function serveMcp() {
 import crypto7 from "node:crypto";
 import fs28 from "node:fs";
 import http2 from "node:http";
-import path23 from "node:path";
+import path24 from "node:path";
 
 // src/core/dash.ts
 import { spawn as spawn4 } from "node:child_process";
 import crypto6 from "node:crypto";
 import fs27 from "node:fs";
 import http from "node:http";
-import path22 from "node:path";
+import path23 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 
 // src/core/file-diff.ts
 var PREVIEW_LINES = 300;
 function gitPath(value, prefix = true) {
-  let path31 = value;
+  let path32 = value;
   if (value.startsWith('"') && value.endsWith('"')) {
     const bytes = [];
     const escapes = { t: "	", n: "\n", r: "\r", b: "\b", f: "\f", v: "\v" };
@@ -5046,9 +5058,9 @@ function gitPath(value, prefix = true) {
       if (match[1] && /^[0-7]+$/.test(match[1])) bytes.push(parseInt(match[1], 8));
       else bytes.push(...new TextEncoder().encode(match[2] ?? escapes[match[1]] ?? match[1]));
     }
-    path31 = new TextDecoder().decode(new Uint8Array(bytes));
+    path32 = new TextDecoder().decode(new Uint8Array(bytes));
   }
-  return prefix ? path31.replace(/^[ab]\//, "") : path31;
+  return prefix ? path32.replace(/^[ab]\//, "") : path32;
 }
 function headerPath(header) {
   const quoted = header.match(/^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|\S+)$/);
@@ -5299,7 +5311,7 @@ var assetsDir = () => fileURLToPath3(new URL("./ui/", import.meta.url));
 var assetCache = /* @__PURE__ */ new Map();
 function readAsset(route) {
   try {
-    const file2 = path22.join(assetsDir(), path22.basename(route));
+    const file2 = path23.join(assetsDir(), path23.basename(route));
     const { mtimeMs } = fs27.statSync(file2);
     const hit = assetCache.get(route);
     if (hit && hit.mtimeMs === mtimeMs) return hit.data;
@@ -5409,7 +5421,7 @@ function startDash(opts) {
     });
   });
 }
-var registryFile = () => path22.join(home(), "dash.json");
+var registryFile = () => path23.join(home(), "dash.json");
 async function ping(port) {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/api/state?limit=1`, { signal: AbortSignal.timeout(1500) });
@@ -5504,7 +5516,7 @@ var MAX_BODY = 4e6;
 var MAX_SESSIONS = 64;
 var IDLE_MS = 60 * 6e4;
 var PATH = "/mcp";
-var tokenFile = () => path23.join(home(), "mcp-token");
+var tokenFile = () => path24.join(home(), "mcp-token");
 var readToken = (file2) => {
   try {
     const kept = fs28.readFileSync(file2, "utf8").trim();
@@ -5522,7 +5534,7 @@ function mcpToken() {
   const file2 = tokenFile();
   let token = readToken(file2);
   if (!token) {
-    fs28.mkdirSync(path23.dirname(file2), { recursive: true });
+    fs28.mkdirSync(path24.dirname(file2), { recursive: true });
     token = crypto7.randomBytes(32).toString("hex");
     try {
       fs28.writeFileSync(file2, `${token}
@@ -5717,15 +5729,15 @@ async function serveMcpHttp(opts) {
 // src/cli/commands.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
 import fs34 from "node:fs";
-import path29 from "node:path";
+import path30 from "node:path";
 import { fileURLToPath as fileURLToPath4 } from "node:url";
 
 // src/core/init.ts
 import fs29 from "node:fs";
-import path24 from "node:path";
+import path25 from "node:path";
 var FREE = /-free$/;
 var TIER_ORDER = [["cheap", "opencode"], ["standard", "codex"], ["capable", "claude"]];
-var isFound = (binary5) => path24.isAbsolute(binary5) && fs29.existsSync(binary5);
+var isFound = (binary5) => path25.isAbsolute(binary5) && fs29.existsSync(binary5);
 function planInit(opts = {}) {
   const file2 = configPath();
   const workers = backendIds().map((id) => {
@@ -5776,8 +5788,8 @@ function planInit(opts = {}) {
 function writeInit(plan, force) {
   if (plan.blocked) throw new UserError(plan.blocked);
   if (!Object.keys(plan.config).length) throw new UserError("nothing to write: the proposal is empty");
-  if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path24.basename(plan.path)}.bak)`);
-  fs29.mkdirSync(path24.dirname(plan.path), { recursive: true });
+  if (plan.exists && !force) throw new UserError(`${plan.path} already exists: pass --force to replace it (the old file is kept as ${path25.basename(plan.path)}.bak)`);
+  fs29.mkdirSync(path25.dirname(plan.path), { recursive: true });
   if (plan.exists) fs29.copyFileSync(plan.path, `${plan.path}.bak`);
   fs29.writeFileSync(plan.path, `${JSON.stringify(plan.config, null, 2)}
 `);
@@ -5802,15 +5814,15 @@ function formatInit(plan, written) {
 import { spawnSync as spawnSync7 } from "node:child_process";
 import fs30 from "node:fs";
 import os10 from "node:os";
-import path25 from "node:path";
+import path26 from "node:path";
 var CLIENT_IDS = ["claude-code", "codex", "gemini", "cursor", "claude-desktop"];
 var NAME = "pitroom";
 function mcpCommand() {
   const launcher = launcherPath();
   if (isPitroomLauncher(launcher)) return { command: launcher, args: ["mcp"] };
-  for (const dir of (process.env.PATH ?? "").split(path25.delimiter).filter(Boolean)) {
-    const p = path25.join(dir, process.platform === "win32" ? "pitroom.cmd" : "pitroom");
-    if (fs30.existsSync(p)) return { command: path25.resolve(p), args: ["mcp"] };
+  for (const dir of (process.env.PATH ?? "").split(path26.delimiter).filter(Boolean)) {
+    const p = path26.join(dir, process.platform === "win32" ? "pitroom.cmd" : "pitroom");
+    if (fs30.existsSync(p)) return { command: path26.resolve(p), args: ["mcp"] };
   }
   return { command: process.execPath, args: [process.argv[1] ?? "pitroom", "mcp"] };
 }
@@ -5836,7 +5848,7 @@ var jsonState = (file2, c) => {
   return entry === void 0 ? "absent" : same(c, entry) ? "same" : "different";
 };
 var home2 = () => os10.homedir();
-var geminiDir = () => path25.join(process.env.GEMINI_CLI_HOME ?? home2(), ".gemini");
+var geminiDir = () => path26.join(process.env.GEMINI_CLI_HOME ?? home2(), ".gemini");
 function cliClient(id, backend, name, where, o) {
   return {
     id,
@@ -5870,7 +5882,7 @@ function jsonClient(id, name, file2, dir) {
         if (!fs30.existsSync(backup)) fs30.copyFileSync(file2(), backup);
       }
       config.mcpServers = { ...config.mcpServers ?? {}, [NAME]: { command: c.command, args: c.args } };
-      fs30.mkdirSync(path25.dirname(file2()), { recursive: true });
+      fs30.mkdirSync(path26.dirname(file2()), { recursive: true });
       const tmp = `${file2()}.${process.pid}.tmp`;
       fs30.writeFileSync(tmp, `${JSON.stringify(config, null, 2)}
 `);
@@ -5888,14 +5900,14 @@ function jsonClient(id, name, file2, dir) {
   };
 }
 function desktopFile() {
-  if (process.platform === "darwin") return path25.join(home2(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
-  if (process.platform === "win32") return path25.join(process.env.APPDATA ?? path25.join(home2(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
-  return path25.join(process.env.XDG_CONFIG_HOME ?? path25.join(home2(), ".config"), "Claude", "claude_desktop_config.json");
+  if (process.platform === "darwin") return path26.join(home2(), "Library", "Application Support", "Claude", "claude_desktop_config.json");
+  if (process.platform === "win32") return path26.join(process.env.APPDATA ?? path26.join(home2(), "AppData", "Roaming"), "Claude", "claude_desktop_config.json");
+  return path26.join(process.env.XDG_CONFIG_HOME ?? path26.join(home2(), ".config"), "Claude", "claude_desktop_config.json");
 }
 function codexState(c) {
   let text;
   try {
-    text = fs30.readFileSync(path25.join(process.env.CODEX_HOME ?? path25.join(home2(), ".codex"), "config.toml"), "utf8");
+    text = fs30.readFileSync(path26.join(process.env.CODEX_HOME ?? path26.join(home2(), ".codex"), "config.toml"), "utf8");
   } catch {
     return "absent";
   }
@@ -5913,7 +5925,7 @@ function codexState(c) {
 function clients() {
   return [
     cliClient("claude-code", "claude", "Claude Code", "user settings (~/.claude.json)", {
-      state: (c) => jsonState(path25.join(home2(), ".claude.json"), c),
+      state: (c) => jsonState(path26.join(home2(), ".claude.json"), c),
       add: (c) => ["mcp", "add", "--scope", "user", NAME, "--", c.command, ...c.args],
       remove: () => ["mcp", "remove", NAME, "--scope", "user"]
     }),
@@ -5923,12 +5935,12 @@ function clients() {
       remove: () => ["mcp", "remove", NAME]
     }),
     cliClient("gemini", "gemini", "Gemini CLI", "user settings (~/.gemini/settings.json)", {
-      state: (c) => jsonState(path25.join(geminiDir(), "settings.json"), c),
+      state: (c) => jsonState(path26.join(geminiDir(), "settings.json"), c),
       add: (c) => ["mcp", "add", "--scope", "user", NAME, c.command, ...c.args],
       remove: () => ["mcp", "remove", "--scope", "user", NAME]
     }),
-    jsonClient("cursor", "Cursor", () => path25.join(home2(), ".cursor", "mcp.json"), () => path25.join(home2(), ".cursor")),
-    jsonClient("claude-desktop", "Claude Desktop", desktopFile, () => path25.dirname(desktopFile()))
+    jsonClient("cursor", "Cursor", () => path26.join(home2(), ".cursor", "mcp.json"), () => path26.join(home2(), ".cursor")),
+    jsonClient("claude-desktop", "Claude Desktop", desktopFile, () => path26.dirname(desktopFile()))
   ];
 }
 function attempt2(f) {
@@ -6000,10 +6012,10 @@ var parseClients = (value) => {
 // src/core/plan-status.ts
 import crypto8 from "node:crypto";
 import fs31 from "node:fs";
-import path26 from "node:path";
+import path27 from "node:path";
 function notesFile(plan) {
   const id = crypto8.createHash("sha1").update(plan.file).digest("hex").slice(0, 12);
-  return path26.join(home(), "plans", id, "notes.md");
+  return path27.join(home(), "plans", id, "notes.md");
 }
 function readNotes(plan) {
   const f = notesFile(plan);
@@ -6016,7 +6028,7 @@ function readNotes(plan) {
 function addNote(planFile, text) {
   const plan = loadPlan(planFile);
   const f = notesFile(plan);
-  fs31.mkdirSync(path26.dirname(f), { recursive: true });
+  fs31.mkdirSync(path27.dirname(f), { recursive: true });
   if (!fs31.existsSync(f)) fs31.writeFileSync(f, `# plan: ${plan.file}
 `);
   const at = (/* @__PURE__ */ new Date()).toISOString().slice(0, 16).replace("T", " ");
@@ -6089,25 +6101,25 @@ ${rulings}`,
 // src/core/cache.ts
 import crypto9 from "node:crypto";
 import fs32 from "node:fs";
-import path27 from "node:path";
+import path28 from "node:path";
 var SCAN2 = 500;
 function cacheKey(o) {
   if (o.verify || o.mode !== "read" || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return void 0;
   if (!(effective().cacheDays.value > 0)) return void 0;
-  const dir = canonical(path27.resolve(o.dir));
+  const dir = canonical(path28.resolve(o.dir));
   const root = repoRoot(dir);
   if (!root) return void 0;
   try {
     const tree = snapshotTree(root);
     const head = commitOf(root, "HEAD") ?? "";
     const files = o.files.map((f) => {
-      const abs = path27.resolve(f);
+      const abs = path28.resolve(f);
       return [abs, crypto9.createHash("sha256").update(fs32.readFileSync(abs)).digest("hex")];
     });
     const question = o.task.replace(/\s+/g, " ").trim();
     const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
     const where = !o.inPlace && wantSnapshot(readIn2, root, dir) ? "snapshot" : "project";
-    const key = crypto9.createHash("sha256").update(JSON.stringify([question, path27.relative(root, dir), files, where])).digest("hex");
+    const key = crypto9.createHash("sha256").update(JSON.stringify([question, path28.relative(root, dir), files, where])).digest("hex");
     return { key, state: `${head}:${tree}` };
   } catch {
     return void 0;
@@ -6152,7 +6164,7 @@ var cachedNote = (m) => `pitroom \u27F2 cached answer \xB7 the same question on 
 // src/core/review.ts
 import crypto10 from "node:crypto";
 import fs33 from "node:fs";
-import path28 from "node:path";
+import path29 from "node:path";
 var TEMPLATE2 = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
 var section = (title, body) => `## ${title}
 
@@ -6274,18 +6286,18 @@ function writePackage(job) {
   const root = repoRoot(job.dir);
   if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
   const name = `review-${crypto10.randomBytes(4).toString("hex")}.md`;
-  const inside2 = !path28.relative(fs33.realpathSync(root), fs33.realpathSync(g)).startsWith("..");
-  const file2 = inside2 ? path28.join(g, "pitroom", name) : path28.join(root, ".pitroom", name);
+  const inside2 = !path29.relative(fs33.realpathSync(root), fs33.realpathSync(g)).startsWith("..");
+  const file2 = inside2 ? path29.join(g, "pitroom", name) : path29.join(root, ".pitroom", name);
   if (!inside2) ignoreInGit(root, "/.pitroom/");
-  fs33.mkdirSync(path28.dirname(file2), { recursive: true });
+  fs33.mkdirSync(path29.dirname(file2), { recursive: true });
   fs33.writeFileSync(file2, job.package);
   return file2;
 }
 function ignoreInGit(root, pattern) {
-  const exclude = path28.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
+  const exclude = path29.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
   const text = fs33.existsSync(exclude) ? fs33.readFileSync(exclude, "utf8") : "";
   if (text.split(/\r?\n/).includes(pattern)) return;
-  fs33.mkdirSync(path28.dirname(exclude), { recursive: true });
+  fs33.mkdirSync(path29.dirname(exclude), { recursive: true });
   fs33.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
 ${pattern}
 `);
@@ -6754,7 +6766,7 @@ function cmdModels(p) {
   return 0;
 }
 function cmdHookStart() {
-  const script = path29.join(path29.dirname(path29.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
+  const script = path30.join(path30.dirname(path30.dirname(fileURLToPath4(import.meta.url))), "hooks", "session-start.mjs");
   if (fs34.existsSync(script)) spawnSync8(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
   return 0;
 }
@@ -6796,7 +6808,7 @@ function cmdSavings(p) {
   const out = flag(p, "card");
   if (out) {
     fs34.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path29.resolve(out)}`);
+    console.log(`card written to ${path30.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -6875,7 +6887,7 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 import { spawnSync as spawnSync9 } from "node:child_process";
 import fs35 from "node:fs";
 import os11 from "node:os";
-import path30 from "node:path";
+import path31 from "node:path";
 var MARK = { ok: () => green("\u2714"), warn: () => yellow("!"), fail: () => red("\u2718") };
 var NEXT = [
   { when: /no default model|no fallback workers/, command: "pitroom init", why: "propose a starter config (fallback models from your catalogue)" },
@@ -6898,8 +6910,8 @@ function usageLine() {
   return `${ids.length} run${ids.length === 1 ? "" : "s"} so far${when2} (pitroom savings shows what they saved)`;
 }
 function firstNodeOnPath() {
-  for (const dir of (process.env.PATH ?? "").split(path30.delimiter).filter(Boolean)) {
-    const file2 = path30.join(dir, process.platform === "win32" ? "node.exe" : "node");
+  for (const dir of (process.env.PATH ?? "").split(path31.delimiter).filter(Boolean)) {
+    const file2 = path31.join(dir, process.platform === "win32" ? "node.exe" : "node");
     try {
       if (!fs35.statSync(file2).isFile()) continue;
     } catch {
@@ -6928,7 +6940,7 @@ function doctor5(probe) {
   const addAll = (list2) => list2.forEach((c) => add(c.level, c.message));
   add("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   const onPath = firstNodeOnPath();
-  if (onPath && onPath.version && tooOld(onPath.version) && path30.resolve(onPath.path) !== path30.resolve(process.execPath)) {
+  if (onPath && onPath.version && tooOld(onPath.version) && path31.resolve(onPath.path) !== path31.resolve(process.execPath)) {
     add("warn", `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
   }
   add(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
@@ -7090,13 +7102,13 @@ function skillChecks() {
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
   if (geminiExtensionInstalled()) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path30.sep}.agents${path30.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path31.sep}.agents${path31.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`" } : { level: "ok", message: "Gemini CLI extension installed (skills + context)" }
     );
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path30.sep}.claude${path30.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path31.sep}.claude${path31.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
@@ -7114,11 +7126,11 @@ function skillChecks() {
 }
 function geminiExtensionInstalled() {
   const home3 = process.env.GEMINI_CLI_HOME ?? os11.homedir();
-  return fs35.existsSync(path30.join(home3, ".gemini", "extensions", "pitroom"));
+  return fs35.existsSync(path31.join(home3, ".gemini", "extensions", "pitroom"));
 }
 function pluginInstalled() {
   try {
-    const f = path30.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const f = path31.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
     const plugins = JSON.parse(fs35.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
@@ -7136,15 +7148,15 @@ function superpowersActive() {
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
-  for (const base2 of [path30.join(os11.homedir(), ".agents", "skills"), path30.join(os11.homedir(), ".claude", "skills")]) {
-    const dir = path30.join(base2, "using-superpowers");
-    if (fs35.existsSync(path30.join(dir, "SKILL.md"))) found.push(dir);
+  for (const base2 of [path31.join(os11.homedir(), ".agents", "skills"), path31.join(os11.homedir(), ".claude", "skills")]) {
+    const dir = path31.join(base2, "using-superpowers");
+    if (fs35.existsSync(path31.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
 }
 function claudePlugins() {
   try {
-    const f = path30.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const f = path31.join(os11.homedir(), ".claude", "plugins", "installed_plugins.json");
     return Object.keys(JSON.parse(fs35.readFileSync(f, "utf8")).plugins ?? {});
   } catch {
     return [];
@@ -7152,7 +7164,7 @@ function claudePlugins() {
 }
 function claudePluginEnabled(key) {
   try {
-    const f = path30.join(os11.homedir(), ".claude", "settings.json");
+    const f = path31.join(os11.homedir(), ".claude", "settings.json");
     return JSON.parse(fs35.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
   } catch {
     return true;
@@ -7162,7 +7174,7 @@ function codexPlugins() {
   const plugins = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs35.readFileSync(path30.join(process.env.CODEX_HOME ?? path30.join(os11.homedir(), ".codex"), "config.toml"), "utf8");
+    text = fs35.readFileSync(path31.join(process.env.CODEX_HOME ?? path31.join(os11.homedir(), ".codex"), "config.toml"), "utf8");
   } catch {
     return plugins;
   }
@@ -7180,11 +7192,11 @@ function codexPlugins() {
   return plugins;
 }
 function openCodePlugins() {
-  const dir = path30.join(process.env.XDG_CONFIG_HOME ?? path30.join(os11.homedir(), ".config"), "opencode");
+  const dir = path31.join(process.env.XDG_CONFIG_HOME ?? path31.join(os11.homedir(), ".config"), "opencode");
   const plugins = [];
   for (const name of ["opencode.json", "opencode.jsonc"]) {
     try {
-      const text = fs35.readFileSync(path30.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const text = fs35.readFileSync(path31.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
       const list2 = JSON.parse(text).plugin;
       if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
     } catch {
@@ -7192,7 +7204,7 @@ function openCodePlugins() {
   }
   for (const folder of ["plugin", "plugins"]) {
     try {
-      for (const f of fs35.readdirSync(path30.join(dir, folder))) plugins.push(path30.join(dir, folder, f));
+      for (const f of fs35.readdirSync(path31.join(dir, folder))) plugins.push(path31.join(dir, folder, f));
     } catch {
     }
   }

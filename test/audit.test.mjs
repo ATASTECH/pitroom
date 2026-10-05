@@ -138,3 +138,23 @@ test('audit: the auditor is told to check the question\'s conditions, extra and 
   assert.match(prompt, /for a count, count again yourself/);
   assert.match(prompt, /QUESTION:\nlist the files under src\/ only/);
 });
+
+test('audit: paths of the project in the answer reach the auditor as paths it can open from its own directory', () => {
+  const s = sandbox();
+  two(s);
+  // a secret-looking file makes read runs (the audit's too) work in a clean snapshot, not in the project itself
+  fs.writeFileSync(path.join(s.repo, '.env'), 'TOKEN=1\n');
+  // and a sibling directory that merely starts like the project's must stay as it is
+  const answer = `SUMMARY: app.txt holds line1 (${path.join(s.repo, 'app.txt')}:1); not ${s.repo}-other/x.ts:1`;
+  const first = s.run(['run', 'what is in app.txt?'], { MOCK_ACTIONS: `answer:${answer}` });
+  assert.equal(first.status, 0, first.stdout + first.stderr);
+  assert.match(first.stdout, new RegExp(`${s.repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}[/\\\\]app\\.txt:1`), 'the answer names the project path, as the user sees it');
+  const id = RUN_ID.exec(first.stdout)[0];
+  const r = s.run(['audit', id, '-W', 'opencode:mock/other'], { MOCK_ACTIONS: 'answer:AUDIT: AGREE\nCHECKED: 1\nDISPUTED:\n- (none)' });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const prompt = s.calls().filter((c) => c.argv[0] === 'run').at(-1).argv.at(-1);
+  assert.ok(prompt.includes('ANSWER TO AUDIT:'), 'it is the audit prompt');
+  assert.ok(prompt.includes('app.txt holds line1 (app.txt:1)'), `the cited path is relative to the auditor's directory: ${prompt.slice(prompt.indexOf('ANSWER TO AUDIT:'))}`);
+  assert.ok(prompt.includes(`${s.repo}-other/x.ts:1`), 'a path that only starts like the project directory is left alone');
+  assert.ok(!prompt.replace(`${s.repo}-other`, '').includes(s.repo), 'the project directory itself is not in the answer the auditor reads');
+});
