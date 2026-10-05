@@ -7,6 +7,7 @@
 // gave the answer: a model grading itself proves little. The result is kept on the run, shown in the dashboard and
 // counted per worker in the stats, so a worker that keeps being disputed shows up.
 import crypto from 'node:crypto';
+import path from 'node:path';
 import { DEFAULT_BACKEND } from '../backends/index.js';
 import { effective } from './config.js';
 import { type RunMeta } from './store.js';
@@ -48,13 +49,32 @@ export function pickAuditor(meta: RunMeta): string | undefined {
   return candidates.find((c) => !sameTarget(parseTarget(c, def), ran));
 }
 
+/**
+ * The answer was written for the user, with the worker's snapshot paths turned back into the project's. The
+ * auditor reads in a snapshot of its own (or in place), where the project's absolute path may not exist: given
+ * `/Users/me/proj/src/a.ts:3` it said the file was not there. So the project's paths become relative to the
+ * directory the auditor works in (the audited run's `dir`), which holds for a snapshot and for the project.
+ */
+export function relativeToAuditor(answer: string, meta: Pick<RunMeta, 'dir' | 'repoRoot'>): string {
+  let out = answer;
+  const roots = [...new Set([meta.dir, meta.repoRoot].filter((r): r is string => !!r))].sort((a, b) => b.length - a.length);
+  for (const root of roots) {
+    const rel = path.relative(meta.dir, root); // '' for the directory itself, '..' or '../..' for a parent of it
+    const prefix = rel ? `${rel.split(path.sep).join('/')}/` : '';
+    // the bare root only where it is the whole path (not the start of `/a/proj-other`)
+    out = out.split(`${root}${path.sep}`).join(prefix).replace(new RegExp(`${root.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?![\\w.-])`, 'g'), rel || '.');
+  }
+  return out;
+}
+
 /** What the auditor is asked: check the claims yourself, read only, answer in a fixed form. */
 export function auditTask(meta: RunMeta, answer: string): string {
-  const text = answer.trim();
+  const text = relativeToAuditor(answer, meta).trim();
   const shown = text.length > ANSWER_MAX ? `${text.slice(0, ANSWER_MAX)}\n… (cut: ${text.length - ANSWER_MAX} more characters)` : text;
   return [
     "You are auditing another worker's answer to a read-only question about this project. Do not take the answer on trust:",
     "check its key claims yourself against the files here (open the cited files and lines, search for what it says exists or is missing).",
+    'Paths in the answer are relative to your working directory.',
     'Check the answer against the QUESTION, not only its own claims: every condition the question sets (a directory or scope,',
     'what to leave out, "all", "only", "exactly", a count) must hold. Valid references do not make an answer right:',
     'for a list, look for items that are missing and items that do not belong; for a count, count again yourself.',

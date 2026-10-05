@@ -6,6 +6,9 @@
 - **Rate limits no longer count against a worker.** Runs that failed on a rate limit or quota are left out of `pitroom history stats` and the dashboard's Stats (run counts, success rates, times, tokens) and shown apart as rate-limited: they say nothing about the worker's work, and on free models they made good workers look bad (in one history, 257 of 286 failures were rate limits). The config's `"countRateLimits": true` counts them as before.
 - A run records why its worker failed (`failureKind`: `rate-limited`, `model-unavailable`, `auth`, `other`); older records are recognised by the hint Pitroom adds to a rate-limit error.
 
+### Fixes
+- **An audit read the answer's paths as missing.** An answer is written for you, with the paths turned back into your project's (`/Users/me/proj/src/a.ts:3`); the auditor works in a clean snapshot of its own, where that path does not exist, and disputed it ("this path does not exist in this project"). The project's paths now reach the auditor relative to its working directory, and the prompt says so. In one history, 2 of 12 non-agreeing audits were this; re-auditing them: one now agrees, the other still disputes a real claim.
+
 ## 0.19.0
 
 ### Doctor
