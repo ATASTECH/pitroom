@@ -31,6 +31,8 @@ export interface RunMeta {
   resolvedModel?: string; // what the worker CLI actually used
   /** Targets that did not give the answer: failed, or (skipped) left out while cooling down. */
   attempts?: { target: string; error: string; skipped?: boolean }[];
+  /** Why the last worker failed, as its backend classified it (a rate limit is about the provider, not the work). */
+  failureKind?: 'model-unavailable' | 'rate-limited' | 'auth' | 'other';
   parent?: string;
   group?: string; // runs started together (`pitroom crew`, `--group`)
   sessionId?: string;

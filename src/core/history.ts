@@ -12,6 +12,7 @@ import type { Step } from '../backends/types.js';
 import { type LedgerEntry, readLedger, totals } from './receipt.js';
 import { type RunMeta, TERMINAL, home, listRunIds, readMeta, runFile } from './store.js';
 import { auditBadge } from './audit.js';
+import { effective } from './config.js';
 import { kind } from './ui.js';
 
 type Db = {
@@ -343,11 +344,16 @@ function auditStats(db: Db, since: string): { total: Stats['audits']; byWorker: 
 }
 
 export interface Stats {
-  totals: { runs: number; ok: number; failed: number; seconds: number; tokens: number; saved: number };
+  /**
+   * `limited`: runs that failed on a rate limit or quota, which says nothing about the work. Unless the config's
+   * `countRateLimits` is on (`rateLimits: 'counted'`), they are left out of `runs`, `failed`, the times and tokens.
+   */
+  totals: { runs: number; ok: number; failed: number; limited: number; seconds: number; tokens: number; saved: number };
+  rateLimits: 'excluded' | 'counted';
   /** Audits are not counted as runs above: they are overhead. `audited` and `agreed` per worker count audits of its answers. */
   audits: { runs: number; agree: number; partial: number; disagree: number; unclear: number; tokens: number };
-  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
-  byDay: { day: string; runs: number; ok: number; saved: number }[];
+  byWorker: { backend: string; model?: string; runs: number; ok: number; limited: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
+  byDay: { day: string; runs: number; ok: number; limited: number; saved: number }[];
 }
 
 /**
@@ -356,7 +362,7 @@ export interface Stats {
  * so the rows always add up to the total.
  */
 function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { audited: number; agreed: number }>): Stats['byWorker'] {
-  const out = rows.map((r) => ({ backend: r.backend as string, model: (r.model ?? undefined) as string | undefined, runs: r.runs as number, ok: (r.ok ?? 0) as number, avgSeconds: r.avg_s as number | null, avgTokens: r.avg_t as number | null, saved: 0, audited: 0, agreed: 0 }));
+  const out = rows.map((r) => ({ backend: r.backend as string, model: (r.model ?? undefined) as string | undefined, runs: r.runs as number, ok: (r.ok ?? 0) as number, limited: (r.limited ?? 0) as number, avgSeconds: r.avg_s as number | null, avgTokens: r.avg_t as number | null, saved: 0, audited: 0, agreed: 0 }));
   const key = (backend?: string, model?: string) => `${backend ?? ''}\0${model ?? ''}`;
   const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
   for (const e of ledger) {
@@ -364,7 +370,7 @@ function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { a
     const backend = e.backend ?? 'opencode';
     let row = index.get(key(backend, e.model)) ?? (e.model ? out.find((r) => r.backend === backend && r.model?.endsWith(`/${e.model}`)) : undefined);
     if (!row) {
-      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
+      row = { backend, model: e.model, runs: 0, ok: 0, limited: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
       index.set(key(backend, e.model), row);
       out.push(row);
     }
@@ -377,15 +383,24 @@ function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { a
   return out;
 }
 
+/**
+ * A run that failed on a rate limit or quota. Newer records say so (`failureKind`); older ones carry the hint
+ * Pitroom adds to such an error.
+ */
+const LIMITED = `(state='failed' AND (json_extract(meta_json,'$.failureKind')='rate-limited' OR error LIKE '%the model is rate-limited or overloaded%'))`;
+
 export function historyStats(sinceMs?: number): Stats {
-  const empty: Stats = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
+  const counted = effective().countRateLimits.value === true;
+  // the runs that count: all of them, or all but the rate-limited ones
+  const K = counted ? '1' : `NOT ${LIMITED}`;
+  const empty: Stats = { rateLimits: counted ? 'counted' : 'excluded', totals: { runs: 0, ok: 0, failed: 0, limited: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
   if (!db) return empty;
   const since = sinceMs ? new Date(sinceMs).toISOString() : '';
   try {
-    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
-    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
+    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
+    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
     const audits = auditStats(db, since);
     // Savings come from the ledger, the same figures the Live page, `pitroom savings` and the status line add up,
     // so one number is never calculated two ways. The database only supplies counts and times.
@@ -393,10 +408,11 @@ export function historyStats(sinceMs?: number): Stats {
     const byDay = new Map<string, number>();
     for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
     return {
-      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
+      rateLimits: counted ? 'counted' : 'excluded',
+      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, limited: t.limited, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
       audits: audits.total,
       byWorker: workerRows(w, ledger, audits.byWorker),
-      byDay: d.reverse().map((r: any) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: byDay.get(r.day) ?? 0 })),
+      byDay: d.reverse().map((r: any) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, limited: r.limited ?? 0, saved: byDay.get(r.day) ?? 0 })),
     };
   } catch {
     return empty;

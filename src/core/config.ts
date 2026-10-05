@@ -27,6 +27,8 @@ export interface PitroomConfig {
   audit?: number;
   /** Days an answer may be reused for the same read question on the same code (default 7; 0 turns the cache off). */
   cacheDays?: number;
+  /** Count runs that failed on a rate limit or quota in the stats as failures (default false: they are left out of the run counts, success rates and averages, and shown apart). */
+  countRateLimits?: boolean;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -46,6 +48,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   audit: 'number',
   readIn: 'string',
   cacheDays: 'number',
+  countRateLimits: 'boolean',
 };
 
 export function configPath(): string {
@@ -161,5 +164,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     audit: setting<number>(undefined, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
     readIn: setting<string>(undefined, readIn(e.PITROOM_READ_IN), readIn(c.readIn), 'auto'),
     cacheDays: setting<number>(undefined, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
+    countRateLimits: setting<boolean>(undefined, undefined, c.countRateLimits, false),
   };
 }
