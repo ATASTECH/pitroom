@@ -47,7 +47,8 @@ await build({
   legalComments: 'none',
   logLevel: 'warning',
 });
-execFileSync('node_modules/.bin/tailwindcss', ['-i', 'ui/src/styles.css', '-o', 'dist/ui/app.css', '--minify'], { stdio: ['ignore', 'ignore', 'inherit'] });
+// Run its entry file with this Node: node_modules/.bin/tailwindcss is a symlink on macOS and Linux but a .cmd shim on Windows.
+execFileSync(process.execPath, ['node_modules/@tailwindcss/cli/dist/index.mjs', '-i', 'ui/src/styles.css', '-o', 'dist/ui/app.css', '--minify'], { stdio: ['ignore', 'ignore', 'inherit'] });
 
 chmodSync(out, 0o755);
 console.log(`built ${out} (v${version})`);
