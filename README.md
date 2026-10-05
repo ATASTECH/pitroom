@@ -289,7 +289,7 @@ npm i -g pitroom
 pitroom install --mcp --client cursor
 ```
 
-<sub>This adds `pitroom mcp` to `~/.cursor/mcp.json` and leaves the other servers in that file alone; restart Cursor if it does not show up. Cursor gets the ten MCP tools described below. The skills are linked into `~/.agents/skills` and `~/.claude/skills` (`--no-skills` skips that); whether Cursor reads them from there has not been checked. `pitroom install --mcp --dry-run` shows what it would change first.</sub>
+<sub>This adds `pitroom mcp` to `~/.cursor/mcp.json` and leaves the other servers in that file alone; restart Cursor if it does not show up. Cursor gets the ten MCP tools described below. The skills are linked into `~/.agents/skills` and `~/.claude/skills` (`--no-skills` skips that), and [Cursor's documentation](https://cursor.com/docs/skills) lists both as places it loads skills from; we have not run that in a Cursor session, and a Cursor forum report says its CLI (`cursor-agent`) does not load `~/.agents/skills`. `pitroom install --mcp --dry-run` shows what it would change first.</sub>
 
 **Any agent that speaks MCP (Claude Desktop, and the ones above too)**
 
