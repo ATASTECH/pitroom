@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Dashboard
+- **Stop and Discard from the page.** A running card has a Stop button and a finished, not yet applied `--isolate` card has Discard, each with a confirmation. These are the dashboard's first writes, and the only ones: it still never starts a run or applies a patch. `POST /api/run/<id>/stop` and `/discard` need the secret the page was served with (random per start, compared in constant time) in `x-pitroom-token` and the dash's own `Origin`; anything else is 403, a POST elsewhere is 403, another method 405. A run that cannot be stopped or discarded (not active, not isolate, already applied or discarded) is 409.
+- `pitroom stop` and the dashboard share one `stopRun`.
+
 ## 0.17.0
 
 ### Answer cache

@@ -1,7 +1,8 @@
 // `pitroom dash`: a live page of what Pitroom is doing, for the places where hooks and status
-// lines do not reach (the Claude Code and Codex apps). A small read-only HTTP server on
-// 127.0.0.1 only; it never starts, stops or changes a run. Open the address in any browser,
-// including the browser pane of an agent app.
+// lines do not reach (the Claude Code and Codex apps). A small HTTP server on 127.0.0.1 only that
+// reads run records; the one thing it changes is a run the user stops or discards from the page
+// (POST, with the secret the page was served with). It never starts a run or applies a patch.
+// Open the address in any browser, including the browser pane of an agent app.
 import { auditBadge } from './audit.js';
 import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -13,11 +14,12 @@ import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { fileDiffs, type FileDiffData } from './file-diff.js';
-import { MISSING, PAGE, THEME_SCRIPT } from './dash-page.js';
+import { MISSING, page, THEME_SCRIPT } from './dash-page.js';
 import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
+import { discardRun, stopRun } from './run.js';
 import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds } from './store.js';
 import { describeTarget } from './target.js';
 import { elapsed, kind, what, workerName, ranTarget } from './ui.js';
@@ -47,6 +49,8 @@ export interface DashRun {
   audit?: string;
   changes?: number;
   applied?: boolean;
+  /** A finished isolate run whose copy can still be thrown away. */
+  discardable?: boolean;
   /** Finished, but its --verify command failed: it needs attention like a failed run. */
   verifyFailed?: boolean;
   note: string;
@@ -74,6 +78,8 @@ function findings(m: RunMeta): string {
   return parts.length ? parts.join(' · ') : 'no findings';
 }
 
+const canDiscard = (m: RunMeta) => m.mode === 'isolate' && !isActive(m.state) && !m.applied && !m.discarded;
+
 function toRun(m: RunMeta): DashRun {
   const l = m.state === 'running' ? live(m) : undefined;
   return {
@@ -94,6 +100,7 @@ function toRun(m: RunMeta): DashRun {
     audit: auditBadge(m),
     changes: m.changes?.length || undefined,
     applied: m.applied || undefined,
+    discardable: canDiscard(m) || undefined,
     note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verifyResult && !m.verifyResult.ok ? `verify failed: ${m.verify ?? ''}` : m.verdict ? findings(m) : m.auditOf && m.state === 'done' ? (m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : 'nothing disputed') : headline(m, 200) || oneLine(m.error ?? '', 200),
   };
 }
@@ -251,20 +258,47 @@ function readAsset(route: string): Buffer | undefined {
   }
 }
 
-function handler(touch: () => void): http.RequestListener {
+function handler(touch: () => void, token: string): http.RequestListener {
   const send = (res: http.ServerResponse, code: number, type: string, body: string) => {
     res.writeHead(code, { ...HEADERS, 'content-type': type });
     res.end(body);
   };
   const json = (res: http.ServerResponse, code: number, value: unknown) => send(res, code, 'application/json; charset=utf-8', JSON.stringify(value));
+  const tokenBuf = Buffer.from(token);
+  /** Stop or discard one run. The page's secret and its own origin are both required: a page elsewhere has neither. */
+  const act = (req: http.IncomingMessage, res: http.ServerResponse, pathname: string) => {
+    req.resume();
+    const given = Buffer.from(String(req.headers['x-pitroom-token'] ?? ''));
+    if (given.length !== tokenBuf.length || !crypto.timingSafeEqual(given, tokenBuf)) return json(res, 403, { error: 'forbidden' });
+    if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'forbidden origin' });
+    const m = /^\/api\/run\/([^/]+)\/(stop|discard)$/.exec(pathname);
+    if (!m) return json(res, 404, { error: 'not found' });
+    let meta: RunMeta;
+    try {
+      if (!RUN_ID.test(m[1]!)) throw new Error('bad id');
+      meta = freshMeta(m[1]!);
+    } catch {
+      return json(res, 404, { error: 'no such run' });
+    }
+    try {
+      if (m[2] === 'stop') {
+        return stopRun(meta.id) ? json(res, 200, { ok: true, message: `stopping ${meta.id}` }) : json(res, 409, { error: 'run is not active' });
+      }
+      if (!canDiscard(meta)) return json(res, 409, { error: 'only a finished, not yet applied isolate run can be discarded' });
+      return json(res, 200, { ok: true, message: discardRun(meta) });
+    } catch (e) {
+      return json(res, 409, { error: (e as Error).message });
+    }
+  };
   return (req, res) => {
     touch();
     // Only the machine itself, under its own name: a web page in the user's browser must not be able
     // to read run records through a rebinding trick.
     if (!LOCAL_HOST.test(req.headers.host ?? '')) return json(res, 403, { error: 'forbidden host' });
-    if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'read-only' });
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    if (url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', readAsset('/assets/app.js') ? PAGE : MISSING);
+    if (req.method === 'POST') return act(req, res, url.pathname);
+    if (req.method !== 'GET' && req.method !== 'HEAD') return json(res, 405, { error: 'read-only' });
+    if (url.pathname === '/') return send(res, 200, 'text/html; charset=utf-8', readAsset('/assets/app.js') ? page(token) : MISSING);
     const type = ASSETS[url.pathname];
     if (type) {
       const data = readAsset(url.pathname);
@@ -310,7 +344,7 @@ export interface Dash {
 /** Starts the server on 127.0.0.1. `port` 0 picks a free one; `idleMs` > 0 closes it after that long without a request. */
 export function startDash(opts: { port: number; idleMs?: number }): Promise<Dash> {
   let lastRequest = Date.now();
-  const server = http.createServer(handler(() => (lastRequest = Date.now())));
+  const server = http.createServer(handler(() => (lastRequest = Date.now()), crypto.randomBytes(24).toString('hex')));
   return new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(opts.port, '127.0.0.1', () => {

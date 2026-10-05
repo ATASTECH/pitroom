@@ -150,7 +150,7 @@ Every run prints a receipt, and `pitroom savings` adds them up (`--card` writes 
 
 ## Dashboard
 
-`pitroom dash --detach` prints the address of a live page on `127.0.0.1` (read-only, this machine only). It is for the places where hook messages and status lines do not reach, such as the Claude Code and Codex apps: open it in a browser or in the app's own browser pane. The skills tell your agent to start it and give you the address when it runs workers in the background.
+`pitroom dash --detach` prints the address of a live page on `127.0.0.1` (this machine only; it reads your runs and changes nothing but the two actions below). It is for the places where hook messages and status lines do not reach, such as the Claude Code and Codex apps: open it in a browser or in the app's own browser pane. The skills tell your agent to start it and give you the address when it runs workers in the background.
 
 The screenshots below show sample data (an imaginary `shop-api` project), not a real one.
 
@@ -169,6 +169,8 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 **History** searches everything Pitroom ever ran (the full text of tasks, answers and steps), with filters by state, model and period; each run opens as the same card as on Live. **Stats** shows runs, success rate, time, tokens and savings, per worker and model and per day.
 
 <p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day, and per worker and model its logo, success rate and how many of its audited answers another worker confirmed"></p>
+
+**Stop and Discard.** A running card has a Stop button, and a finished `--isolate` card that is not applied yet has Discard (the same as `pitroom stop` and `pitroom discard`; the patch file stays). Each asks once more. Nothing else can be done from the page: it never starts a run and never applies a patch. A POST needs the secret the page was served with (it changes every time the dashboard starts) and the page's own origin, so a web page on another site cannot press them.
 
 The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 

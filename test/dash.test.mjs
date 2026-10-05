@@ -82,7 +82,8 @@ test('dash: a read-only page of the runs, on 127.0.0.1 only, reused and stopped 
     assert.equal((await get(`${url}api/run/not-a-run`)).status, 404);
     assert.equal((await get(`${url}api/run/..%2F..%2Fetc`)).status, 404);
     assert.equal((await get(`${url}nothing`)).status, 404);
-    assert.equal((await get(url, { method: 'POST' })).status, 405, 'it only reads');
+    assert.equal((await get(url, { method: 'PUT' })).status, 405, 'it only reads');
+    assert.equal((await get(url, { method: 'POST' })).status, 403, 'a POST without the page\'s secret is refused');
     assert.equal((await get(url, { headers: { host: 'evil.example:80' } })).status, 403, 'a foreign Host is refused');
   } finally {
     const stop = s.run(['dash', '--stop']);

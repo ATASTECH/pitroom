@@ -5,9 +5,10 @@ export const THEME_SCRIPT = "(function(){try{var t=localStorage.getItem('pitroom
 
 const ICON = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff6a2b'/%3E%3Cpath d='M9 8h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4zM9 16h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4z' fill='%23fff'/%3E%3C/svg%3E";
 
-export const PAGE = `<!doctype html>
+/** `token` is the secret the page sends back with the few actions it may take (see dash.ts). */
+export const page = (token: string) => `<!doctype html>
 <html lang="en" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark light"><title>Pitroom</title><link rel="icon" href="${ICON}">
+<meta name="color-scheme" content="dark light"><meta name="pitroom-token" content="${token}"><title>Pitroom</title><link rel="icon" href="${ICON}">
 <script>${THEME_SCRIPT}</script><link rel="stylesheet" href="/assets/app.css"></head>
 <body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>`;
 

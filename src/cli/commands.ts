@@ -22,9 +22,9 @@ import { formatModels, modelTable } from '../core/models.js';
 import { dashCommand } from '../core/dash.js';
 import { archivedRun, historyFile, historyStats, importRuns, listHistory, openDb, readRunFile, recordRun } from '../core/history.js';
 import { hookCards, statusLine } from '../core/ui.js';
-import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground } from '../core/run.js';
+import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground, stopRun } from '../core/run.js';
 import {
-  type RunMeta, TERMINAL, freshMeta, isActive, isAlive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
+  type RunMeta, TERMINAL, freshMeta, isActive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
 import { type Parsed, exitCodeFor, flag, has, parseDuration, planStep, readTask, runOptions } from './args.js';
 import { dim, stateColour } from '../core/style.js';
@@ -375,13 +375,8 @@ export function cmdStop(p: Parsed): number {
   const ids = selectIds(p, () => [resolveRun(undefined)]);
   let stopped = 0;
   for (const id of ids) {
-    const meta = freshMeta(id);
-    if (!isActive(meta.state) || !isAlive(meta.pid)) continue;
-    // Said first: a process that is still starting up has no handler yet and dies on the signal, and then it is
-    // "stopped", not "exited unexpectedly".
-    meta.stopRequested = true;
-    writeMeta(meta);
-    process.kill(meta.pid!, 'SIGTERM');
+    const meta = stopRun(id);
+    if (!meta) continue;
     console.log(`stopping ${meta.id} (${meta.state})`);
     stopped++;
   }

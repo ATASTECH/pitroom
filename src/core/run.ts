@@ -24,7 +24,7 @@ import { estimateTokens, record, savedUsd } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
-import { type RunMeta, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
+import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
 import { describeTarget, sameTarget } from './target.js';
 
 declare const __VERSION__: string;
@@ -539,6 +539,18 @@ export function revertRun(meta: RunMeta): string {
   meta.reverted = true;
   writeMeta(meta);
   return `reverted ${meta.changes.length} file(s) changed by ${meta.id}`;
+}
+
+/** Asks an active run's process to stop. The run's record, or undefined when it is not active. */
+export function stopRun(id: string): RunMeta | undefined {
+  const meta = freshMeta(id);
+  if (!isActive(meta.state) || !isAlive(meta.pid)) return undefined;
+  // Said first: a process that is still starting up has no handler yet and dies on the signal, and then it is
+  // "stopped", not "exited unexpectedly".
+  meta.stopRequested = true;
+  writeMeta(meta);
+  process.kill(meta.pid!, 'SIGTERM');
+  return meta;
 }
 
 export function discardRun(meta: RunMeta): string {
