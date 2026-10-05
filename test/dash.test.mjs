@@ -171,3 +171,23 @@ test('watch --brief: one card line when a run starts, one when it ends, then a t
   assert.match(lines.at(-1), /^🏁 Pitroom: 1 run finished \(1 ok\)/);
   assert.ok(!w.stdout.includes('{'), 'cards, not JSON');
 });
+
+test('dash and history: a run whose --verify failed is marked and needs attention', async () => {
+  const s = sandbox();
+  const ok = /\d{8}-\d{6}-[0-9a-f]{4}/.exec(s.run(['run', '--verify', 'true', 'fine'], { MOCK_ACTIONS: 'answer:SUMMARY: ok' }).stdout)[0];
+  const bad = /\d{8}-\d{6}-[0-9a-f]{4}/.exec(s.run(['run', '--verify', 'false', 'broken'], { MOCK_ACTIONS: 'answer:SUMMARY: looks good' }).stdout)[0];
+  const url = s.run(['dash', '--detach', '--port', '0']).stdout.trim();
+  try {
+    const runs = JSON.parse((await get(`${url}api/state`)).body).runs;
+    const b = runs.find((r) => r.id === bad);
+    assert.equal(b.verifyFailed, true);
+    assert.match(b.note, /^verify failed: false/, 'the card does not read as success');
+    assert.equal(runs.find((r) => r.id === ok).verifyFailed, undefined);
+  } finally {
+    s.run(['dash', '--stop']);
+  }
+  const problem = JSON.parse(s.run(['history', '--state', 'problem', '--json']).stdout);
+  assert.deepEqual(problem.rows.map((r) => r.id), [bad], 'needs attention: the failed verify only');
+  assert.equal(problem.rows[0].verifyFailed, true);
+  assert.match(s.run(['history']).stdout, new RegExp(`${bad}.*verify failed`));
+});

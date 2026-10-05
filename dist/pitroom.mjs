@@ -1811,7 +1811,7 @@ ${must(root, [...DIFF, "-U10", a, b])}`;
 }
 function rangeDiff(root, a, b) {
   const range = `${a}..${b}`;
-  const since2 = `${a}...${b}`;
+  const since2 = git(root, ["merge-base", a, b]).code === 0 ? `${a}...${b}` : range;
   const log2 = must(root, ["log", "--oneline", "--no-decorate", range]).trim();
   return [
     `## COMMITS
@@ -3361,6 +3361,7 @@ function archivedId(ref) {
     return void 0;
   }
 }
+var VERIFY_FAILED = "(r.state = 'done' AND json_extract(r.meta_json, '$.verifyResult.ok') = 0)";
 var ftsQuery = (text) => text.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"*`).join(" ");
 function listHistory(q = {}) {
   const db = openDb();
@@ -3380,7 +3381,7 @@ function listHistory(q = {}) {
     args.push(q.backend);
   }
   if (q.state) {
-    where.push(q.state === "problem" ? "r.state IN ('failed','timeout','stopped')" : "r.state = ?");
+    where.push(q.state === "problem" ? `(r.state IN ('failed','timeout','stopped') OR ${VERIFY_FAILED})` : "r.state = ?");
     if (q.state !== "problem") args.push(q.state);
   }
   if (q.group) {
@@ -3395,7 +3396,7 @@ function listHistory(q = {}) {
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base2}`).get(...args).n;
     const page = q.beforeId ? `${base2 ? `${base2} AND` : "WHERE"} r.id < ?` : base2;
-    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r) => ({
@@ -3409,6 +3410,7 @@ function listHistory(q = {}) {
         group: r.grp ?? void 0,
         verdict: r.verdict ?? void 0,
         audit: auditBadge({ audit: r.audit_state ? { id: "", state: r.audit_state, verdict: r.audit_verdict ?? void 0 } : void 0 }),
+        verifyFailed: r.verify_failed ? true : void 0,
         seconds: r.seconds ?? void 0,
         steps: r.steps ?? void 0,
         tokens: r.tokens ?? void 0,
@@ -3623,7 +3625,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   }
   if (meta.verifyResult) {
     const v = meta.verifyResult;
-    const notFound = !v.ok && v.code === 127;
+    const notFound = !v.ok && v.code === 127 && /not found|no such file/i.test(v.tail);
     out.push(`\u2500\u2500 verify: \`${meta.verify}\` ${v.ok ? "\u2714 passed" : notFound ? "\u2718 could not run (exit 127: command not found)" : `\u2718 failed (exit ${v.code})`}`);
     if (notFound) out.push("   the command is not on the PATH Pitroom runs with (an app such as an MCP client may start it without your shell's PATH): give its full path, or set PATH in the command");
     if (!v.ok && v.tail) out.push(...v.tail.split("\n").map((l) => `   ${l}`));
@@ -4019,9 +4021,9 @@ function captureChanges(meta) {
   meta.stats = d.stats;
   fs24.writeFileSync(runFile(meta.id, "changes.patch"), d.patch);
 }
-function verifyPath(env = process.env) {
+function verifyPath() {
   const extra = [path20.dirname(process.execPath), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"];
-  const parts = (env.PATH ?? "").split(path20.delimiter).filter(Boolean);
+  const parts = (process.env.PATH ?? "").split(path20.delimiter).filter(Boolean);
   for (const d of process.platform === "win32" ? [path20.dirname(process.execPath)] : extra) if (!parts.includes(d)) parts.push(d);
   return parts.join(path20.delimiter);
 }
@@ -4441,7 +4443,7 @@ var TOOL_MAP = 'Through this MCP server the `pitroom` commands below are tools: 
 var skills;
 function skillPrompts() {
   if (skills) return skills;
-  skills = [];
+  const found = [];
   const root = packageRoot();
   for (const name of skillNames(root)) {
     try {
@@ -4450,10 +4452,11 @@ function skillPrompts() {
       const body = (front ? text.slice(front[0].length) : text).trim();
       const description = /^description:\s*(.+)$/m.exec(front?.[1] ?? "")?.[1]?.trim() ?? `The ${name} skill.`;
       const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? name;
-      skills.push({
+      found.push({
         name,
         title,
-        description: `Skill: ${description}`,
+        // the first sentence: prompts/list is read whole by some clients, so it stays short
+        description: `Skill: ${description.split(/(?<=\.)\s/)[0]}`,
         arguments: [{ name: "task", description: "What you are about to do (optional)." }],
         text: (a) => `${TOOL_MAP}
 
@@ -4466,6 +4469,7 @@ The task: ${a.task}` : ""}`
     } catch {
     }
   }
+  skills = found.filter((p) => !PROMPTS.some((b) => b.name === p.name));
   return skills;
 }
 var allPrompts = () => [...PROMPTS, ...skillPrompts()];
@@ -5130,7 +5134,7 @@ function toRun(m) {
     audit: auditBadge(m),
     changes: m.changes?.length || void 0,
     applied: m.applied || void 0,
-    note: l?.last ? oneLine7(String(l.last), 140) : isActive(m.state) ? "" : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine7(m.error ?? "", 200)
+    note: l?.last ? oneLine7(String(l.last), 140) : isActive(m.state) ? "" : m.verifyResult && !m.verifyResult.ok ? `verify failed: ${m.verify ?? ""}` : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine7(m.error ?? "", 200)
   };
 }
 function dashState(opts = {}) {
@@ -6537,7 +6541,7 @@ ${[fmt2(head2), ...rows2.map(fmt2)].join("\n")}`);
   const { rows, total } = listHistory({ text: p.positional.join(" "), model: flag(p, "model"), state: flag(p, "state"), group: flag(p, "group"), sinceMs: since2, limit });
   if (has(p, "json")) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
   if (!rows.length) return console.log(total ? "nothing on this page" : "no matching runs"), 0;
-  const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
+  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? "verify failed" : r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
   const head = ["RUN", "WHEN", "STATE", "WORKER", "TIME", "TASK"];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
   const fmt = (r, header = false) => r.map((c, i) => {

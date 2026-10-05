@@ -484,9 +484,9 @@ function captureChanges(meta: RunMeta): void {
  * npx sit next to it) and the usual install places. An app that starts Pitroom (an MCP client, a GUI) often passes a
  * bare PATH, and `npm test` would then be "command not found". Added at the end, so the user's own choice still wins.
  */
-export function verifyPath(env: NodeJS.ProcessEnv = process.env): string {
+function verifyPath(): string {
   const extra = [path.dirname(process.execPath), '/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin'];
-  const parts = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const parts = (process.env.PATH ?? '').split(path.delimiter).filter(Boolean);
   for (const d of process.platform === 'win32' ? [path.dirname(process.execPath)] : extra) if (!parts.includes(d)) parts.push(d);
   return parts.join(path.delimiter);
 }

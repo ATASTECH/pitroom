@@ -15,11 +15,12 @@ const ICONS = {
 const VERIFY_FAILED = { Icon: TriangleAlert, cls: 'text-destructive animate-in zoom-in-50 duration-300', hint: 'Done, but its verify command failed: open it for the output' };
 
 export function StateIcon({ state, verifyFailed, className }: { state: RunState; verifyFailed?: boolean; className?: string }) {
-  const { Icon, cls, hint } = state === 'done' && verifyFailed ? VERIFY_FAILED : ICONS[state];
+  const warn = state === 'done' && verifyFailed;
+  const { Icon, cls, hint } = warn ? VERIFY_FAILED : ICONS[state];
   return (
     <Tooltip>
       <TooltipTrigger render={<span tabIndex={0} className="inline-flex rounded-full outline-none focus-visible:ring-2 focus-visible:ring-ring" />}>
-        <Icon className={cn('size-5 shrink-0', cls, className)} aria-label={state} />
+        <Icon className={cn('size-5 shrink-0', cls, className)} aria-label={warn ? 'done, verify failed' : state} />
       </TooltipTrigger>
       <TooltipContent className="max-w-64">{hint}</TooltipContent>
     </Tooltip>

@@ -94,7 +94,7 @@ function toRun(m: RunMeta): DashRun {
     audit: auditBadge(m),
     changes: m.changes?.length || undefined,
     applied: m.applied || undefined,
-    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verdict ? findings(m) : m.auditOf && m.state === 'done' ? (m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : 'nothing disputed') : headline(m, 200) || oneLine(m.error ?? '', 200),
+    note: l?.last ? oneLine(String(l.last), 140) : isActive(m.state) ? '' : m.verifyResult && !m.verifyResult.ok ? `verify failed: ${m.verify ?? ''}` : m.verdict ? findings(m) : m.auditOf && m.state === 'done' ? (m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : 'nothing disputed') : headline(m, 200) || oneLine(m.error ?? '', 200),
   };
 }
 

@@ -110,7 +110,7 @@ Never poll with short sleeps, and never sit in one silent, open-ended wait. Whil
 After the last task:
 
 ```bash
-pitroom review --range "$(git merge-base <base> HEAD)..HEAD" --plan PLAN
+pitroom review --range <base>..HEAD --plan PLAN
 ```
 
 It runs on the `capable` tier with the whole-branch rubric, and the package carries the plan and your notes, so the reviewer triages the deferred minors and parked findings. If it returns findings: ONE fix run with the complete list, not one run per finding (`pitroom run -i --tier capable --link node_modules "<all findings>"`), exactly one review of that fix (`pitroom review <fix run>`), then apply, test and commit. Adjudicate the residual findings as in the breaker. There is no second fix wave: residual load-bearing findings go to your human partner through `pitroom-finishing`.

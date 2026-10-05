@@ -78,6 +78,8 @@ export interface HistoryRow {
   saved?: number;
   files: number;
   applied: boolean;
+  /** Finished, but its --verify command failed. */
+  verifyFailed?: boolean;
 }
 
 export interface Stats {

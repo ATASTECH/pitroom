@@ -303,7 +303,7 @@ export function cmdHistory(p: Parsed): number {
   const { rows, total } = listHistory({ text: p.positional.join(' '), model: flag(p, 'model'), state: flag(p, 'state'), group: flag(p, 'group'), sinceMs: since, limit });
   if (has(p, 'json')) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
   if (!rows.length) return console.log(total ? 'nothing on this page' : 'no matching runs'), 0;
-  const body = rows.map((r) => [r.id, when(r.startedAt), r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
+  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? 'verify failed' : r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
   const head = ['RUN', 'WHEN', 'STATE', 'WORKER', 'TIME', 'TASK'];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i]!.length)));
   const fmt = (r: string[], header = false) =>

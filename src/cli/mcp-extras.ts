@@ -118,7 +118,7 @@ const TOOL_MAP =
 let skills: Prompt[] | undefined;
 function skillPrompts(): Prompt[] {
   if (skills) return skills;
-  skills = [];
+  const found: Prompt[] = [];
   const root = packageRoot();
   for (const name of skillNames(root)) {
     try {
@@ -127,10 +127,11 @@ function skillPrompts(): Prompt[] {
       const body = (front ? text.slice(front[0].length) : text).trim();
       const description = /^description:\s*(.+)$/m.exec(front?.[1] ?? '')?.[1]?.trim() ?? `The ${name} skill.`;
       const title = /^#\s+(.+)$/m.exec(body)?.[1]?.trim() ?? name;
-      skills.push({
+      found.push({
         name,
         title,
-        description: `Skill: ${description}`,
+        // the first sentence: prompts/list is read whole by some clients, so it stays short
+        description: `Skill: ${description.split(/(?<=\.)\s/)[0]}`,
         arguments: [{ name: 'task', description: 'What you are about to do (optional).' }],
         text: (a) => `${TOOL_MAP}\n\n${body}${a.task ? `\n\n---\n\nThe task: ${a.task}` : ''}`,
       });
@@ -138,6 +139,7 @@ function skillPrompts(): Prompt[] {
       // a skill that cannot be read is left out
     }
   }
+  skills = found.filter((p) => !PROMPTS.some((b) => b.name === p.name)); // a built-in prompt keeps its name
   return skills;
 }
 
