@@ -13,6 +13,9 @@
 ### Fixes
 - `pitroom review` in a linked git worktree: the review package was written to the worktree's git directory, which lies outside the worktree, and a sandboxed reviewer (OpenCode) was refused reading it, so the review had nothing to review. There it now goes to `<worktree>/.pitroom/` (added once to the repository's `info/exclude`, so `git status` stays clean) and is removed when the review ends. Found by having Pitroom review its own branches from a worktree.
 
+### MCP Registry
+- `server.json` describes Pitroom for the [MCP Registry](https://registry.modelcontextprotocol.io) (`io.github.ATASTECH/pitroom`: the npm package, stdio, `pitroom mcp`), and `package.json` has the `mcpName` the registry checks. `npm run bump` keeps its version in step, and turns an `## Unreleased` CHANGELOG section into the version's entry.
+
 ### From real-world tests (Codex driving Pitroom over MCP)
 - **`--verify` under an MCP client.** An app that starts Pitroom often passes a bare `PATH`, and `npm test` was "command not found" (exit 127). The verify command now also finds the Node running Pitroom (npm and npx sit next to it) and the usual install places, after your own `PATH`; a command that still is not found is reported as "could not run (exit 127: command not found)" with what to do, not as a failing test.
 - **A failed `--verify` is no longer shown as success.** The report says `⚠ done · verify failed` instead of `✔ done`, an MCP result is an error (`isError`, as is a read-only violation), and the dashboard shows a warning icon on the card and lists the run under **Needs attention**.

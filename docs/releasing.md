@@ -2,10 +2,11 @@
 
 ## A new version
 
-1. `npm run bump -- patch` (or `minor`, `major`, `X.Y.Z`; add `--dry-run` to look first). It moves the version in `package.json`, `package-lock.json`, both plugin manifests and adds a heading to `CHANGELOG.md`; replace its `TODO` with the release notes. A test fails while a file disagrees or the `TODO` is still there. The docs carry no version by hand.
+1. `npm run bump -- patch` (or `minor`, `major`, `X.Y.Z`; add `--dry-run` to look first). It moves the version in `package.json`, `package-lock.json`, the plugin and extension manifests and `server.json` (the MCP Registry entry), and turns `CHANGELOG.md`'s `## Unreleased` section into the version's heading (without one it adds a heading with a `TODO` to replace). A test fails while a file disagrees or the `TODO` is still there. The docs carry no version by hand.
 2. `npm test` on Node 22 and a current Node; CI repeats it on Ubuntu and macOS.
 3. Commit, push `main`, wait for CI.
 4. Create the release: `gh release create vX.Y.Z --target <full sha> --notes-file …`. The `release` workflow then publishes to npm from CI with provenance (see below), after a check that the tag equals the version in `package.json` and a run of typecheck and tests.
+5. Once `npm view pitroom@X.Y.Z` answers, update the MCP Registry entry: `mcp-publisher publish` (from the repository root; it reads `server.json`; `brew install mcp-publisher`, and `mcp-publisher login github` once, as a member of the ATASTECH organization). The registry checks that the npm package's `mcpName` matches the entry's name.
    Without the CI setup, publish by hand instead: `npm publish --access public` (needs your npm login and one-time password; `prepublishOnly` runs typecheck and tests first), then create the release. A hand publish has no provenance.
 
 ## Publishing from CI (provenance)

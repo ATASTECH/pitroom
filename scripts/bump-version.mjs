@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Bumps the version everywhere it lives, so no file is forgotten:
 //   package.json, package-lock.json (two places), .claude-plugin/plugin.json,
-//   .codex-plugin/plugin.json, gemini-extension.json, and a new heading in CHANGELOG.md.
+//   .codex-plugin/plugin.json, gemini-extension.json, server.json (the MCP Registry entry, and its npm package),
+//   and the CHANGELOG.md heading (an `## Unreleased` section becomes the version; otherwise a new one).
 //
 //   npm run bump -- patch | minor | major | 1.2.3   [--root DIR] [--dry-run]
 //
@@ -52,6 +53,12 @@ for (const name of ['package.json', '.claude-plugin/plugin.json', '.codex-plugin
   data.version = next;
   writeJson(name, data);
 }
+if (fs.existsSync(file('server.json'))) {
+  const server = readJson('server.json');
+  server.version = next;
+  for (const p of server.packages ?? []) if (p.registryType === 'npm') p.version = next;
+  writeJson('server.json', server);
+}
 if (fs.existsSync(file('package-lock.json'))) {
   const lock = readJson('package-lock.json');
   lock.version = next;
@@ -62,8 +69,11 @@ if (fs.existsSync(file('package-lock.json'))) {
 const log = fs.existsSync(file('CHANGELOG.md')) ? fs.readFileSync(file('CHANGELOG.md'), 'utf8') : '# Changelog\n\n';
 if (!new RegExp(`^## ${next.replaceAll('.', '\\.')}\\b`, 'm').test(log)) {
   changed.push('CHANGELOG.md');
-  const stub = `## ${next}\n\nTODO: describe this release.\n\n`;
-  if (!dryRun) fs.writeFileSync(file('CHANGELOG.md'), log.replace(/^# Changelog\n\n/, `# Changelog\n\n${stub}`));
+  // what was written while it was unreleased is this version's entry; without one, a stub to fill in
+  const text = /^## Unreleased$/m.test(log)
+    ? log.replace(/^## Unreleased$/m, `## ${next}`)
+    : log.replace(/^# Changelog\n\n/, `# Changelog\n\n## ${next}\n\nTODO: describe this release.\n\n`);
+  if (!dryRun) fs.writeFileSync(file('CHANGELOG.md'), text);
 }
 
 console.log(`${dryRun ? 'would bump' : 'bumped'} ${current} → ${next}`);

@@ -1,0 +1,30 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.ATASTECH/pitroom",
+  "title": "Pitroom",
+  "description": "Hands bounded coding work to cheaper worker agents: verified answers, exact diffs, cost receipts.",
+  "websiteUrl": "https://github.com/ATASTECH/pitroom",
+  "repository": {
+    "url": "https://github.com/ATASTECH/pitroom",
+    "source": "github"
+  },
+  "version": "0.16.0",
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "pitroom",
+      "version": "0.16.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}
