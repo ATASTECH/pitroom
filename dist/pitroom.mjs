@@ -6874,6 +6874,19 @@ var NEXT = [
   { when: /not logged in/, command: "claude auth login", why: "sign in the Claude Code worker (Codex: codex login)" },
   { when: /Gemini CLI is not signed in|IneligibleTierError/, command: "export GEMINI_API_KEY=\u2026", why: "a Google AI Studio key for the Gemini worker" }
 ];
+function usageLine() {
+  const ids = listRunIds();
+  if (!ids.length) {
+    return 'no runs yet. Ask your agent to use Pitroom (for example "have a worker find where X is defined"), or try it yourself: pitroom run "where is <something> defined?"';
+  }
+  let when2 = "";
+  try {
+    const hours = Math.max(0, Math.round((Date.now() - Date.parse(readMeta(ids[ids.length - 1]).startedAt)) / 36e5));
+    when2 = hours < 1 ? ", the last one within the hour" : hours < 48 ? `, the last one ${hours} h ago` : `, the last one ${Math.round(hours / 24)} days ago`;
+  } catch {
+  }
+  return `${ids.length} run${ids.length === 1 ? "" : "s"} so far${when2} (pitroom savings shows what they saved)`;
+}
 function firstNodeOnPath() {
   for (const dir of (process.env.PATH ?? "").split(path30.delimiter).filter(Boolean)) {
     const file2 = path30.join(dir, process.platform === "win32" ? "node.exe" : "node");
@@ -6991,6 +7004,8 @@ function doctor5(probe) {
   for (const m of stale) add("warn", `${m.name} runs a different command for pitroom mcp than this install's: \`pitroom install --mcp --no-skills\` updates it`);
   section2("Skills and agents");
   addAll(skillChecks());
+  section2("Use");
+  add("ok", usageLine());
   if (probe && chain[0]) {
     section2("Live probe");
     const p = liveProbe(chain[0]);
