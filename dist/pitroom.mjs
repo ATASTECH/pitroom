@@ -666,13 +666,16 @@ function isAlive(pid) {
     return e.code === "EPERM";
   }
 }
+var STOP_FILE = "stop-requested";
+var requestStop = (id) => fs5.writeFileSync(runFile(id, STOP_FILE), "");
 function freshMeta(id) {
   const meta = readMeta(id);
   if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
     const latest = readMeta(id);
     if (TERMINAL.includes(latest.state)) return latest;
-    latest.state = latest.stopRequested ? "stopped" : "failed";
-    if (!latest.stopRequested) latest.error ??= "worker process exited unexpectedly";
+    const stopped = latest.stopRequested || fs5.existsSync(runFile(id, STOP_FILE));
+    latest.state = stopped ? "stopped" : "failed";
+    if (!stopped) latest.error ??= "worker process exited unexpectedly";
     latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
     writeMeta(latest);
     return latest;
@@ -4116,6 +4119,7 @@ ${res.message}`, 1);
 function stopRun(id) {
   const meta = freshMeta(id);
   if (!isActive(meta.state) || !isAlive(meta.pid)) return void 0;
+  requestStop(meta.id);
   meta.stopRequested = true;
   writeMeta(meta);
   process.kill(meta.pid, "SIGTERM");
@@ -5443,7 +5447,7 @@ async function dashCommand(o) {
     });
     child.on("error", () => void 0);
     child.unref();
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 200; i++) {
       await new Promise((r2) => setTimeout(r2, 100));
       const r = await runningDash();
       if (r && r.pid === child.pid) {

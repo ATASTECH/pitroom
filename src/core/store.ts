@@ -191,6 +191,13 @@ export function isAlive(pid: number | undefined): boolean {
   }
 }
 
+/**
+ * Said before the signal is sent, in a file of its own: the run's process may be writing meta.json at that moment
+ * (and, on Windows, dies at once without answering the signal), and its write would drop a flag kept in meta.json.
+ */
+export const STOP_FILE = 'stop-requested';
+export const requestStop = (id: string): void => fs.writeFileSync(runFile(id, STOP_FILE), '');
+
 /** A run marked running whose process is gone crashed; report it as failed. */
 export function freshMeta(id: string): RunMeta {
   const meta = readMeta(id);
@@ -199,8 +206,9 @@ export function freshMeta(id: string): RunMeta {
     // (with its usage and savings) is never overwritten by this stale copy.
     const latest = readMeta(id);
     if (TERMINAL.includes(latest.state)) return latest;
-    latest.state = latest.stopRequested ? 'stopped' : 'failed';
-    if (!latest.stopRequested) latest.error ??= 'worker process exited unexpectedly';
+    const stopped = latest.stopRequested || fs.existsSync(runFile(id, STOP_FILE));
+    latest.state = stopped ? 'stopped' : 'failed';
+    if (!stopped) latest.error ??= 'worker process exited unexpectedly';
     latest.endedAt ??= new Date().toISOString();
     writeMeta(latest);
     return latest;

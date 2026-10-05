@@ -438,7 +438,8 @@ export async function dashCommand(o: DashOptions): Promise<number> {
     });
     child.on('error', () => undefined);
     child.unref();
-    for (let i = 0; i < 60; i++) {
+    // The server imports old runs into the history first: on a busy machine (CI) that takes seconds.
+    for (let i = 0; i < 200; i++) {
       await new Promise((r) => setTimeout(r, 100));
       const r = await runningDash();
       if (r && r.pid === child.pid) {

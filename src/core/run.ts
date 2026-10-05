@@ -24,7 +24,7 @@ import { estimateTokens, record, savedUsd } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
-import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
+import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, requestStop, runDir, runFile, worktreesDir, writeMeta } from './store.js';
 import { describeTarget, sameTarget } from './target.js';
 
 declare const __VERSION__: string;
@@ -549,6 +549,7 @@ export function stopRun(id: string): RunMeta | undefined {
   if (!isActive(meta.state) || !isAlive(meta.pid)) return undefined;
   // Said first: a process that is still starting up has no handler yet and dies on the signal, and then it is
   // "stopped", not "exited unexpectedly".
+  requestStop(meta.id);
   meta.stopRequested = true;
   writeMeta(meta);
   process.kill(meta.pid!, 'SIGTERM');
