@@ -39,7 +39,10 @@ async function serve(s, extra = {}, args = ['--port', '0'], cwd = s.repo) {
     proc.once('exit', (code) => reject(new Error(`the server exited with ${code} (stderr: ${stderr})`)));
   });
   await new Promise((r) => setTimeout(r, 300)); // the lines after the first
-  const base = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+  // A new connection for every request. These tests block their own event loop (spawnSync while they wait for a run), so
+  // an idle keep-alive connection that the server closed after its 5 s is not noticed, and the next request on it fails
+  // with "other side closed". Fixed this way: with a blocked loop, Node's fetch reuses such a stale socket.
+  const base = { Authorization: `Bearer ${TOKEN}`, 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream', Connection: 'close' };
   const post = (body, headers = {}) => fetch(url, { method: 'POST', headers: { ...base, ...headers }, body: JSON.stringify(body) });
   let n = 0;
   const open = async () => {
