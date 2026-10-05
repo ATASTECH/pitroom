@@ -273,7 +273,7 @@ npm i -g pitroom
 
 **Any agent that speaks MCP (Cursor, Claude Desktop, and the three above too)**
 
-Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: ten tools instead of shell commands and skills (`pitroom_run`, `pitroom_wait`, `pitroom_show`, `pitroom_info`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_revert`, `pitroom_stop`), the runs as resources, and four prompts. The tool definitions sit in the client's context for the whole session, so they are kept small: about 1.9k tokens. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
+Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: ten tools instead of shell commands and skills (`pitroom_run`, `pitroom_wait`, `pitroom_show`, `pitroom_info`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_revert`, `pitroom_stop`), the runs as resources, and four prompts. The tool definitions sit in the client's context for the whole session, so they are kept small: about 1.9k tokens. It is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.ATASTECH/pitroom`, so clients that browse the registry can find it. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
 
 ```bash
 pitroom install --mcp               # also links the skills; add --no-skills to skip that
