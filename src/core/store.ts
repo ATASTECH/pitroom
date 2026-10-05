@@ -6,6 +6,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import type { Mode, Target, Usage } from '../backends/types.js';
 import { UserError } from './errors.js';
+import { renameOver } from './fs-atomic.js';
 import type { RefCheck } from './refs.js';
 import type { AuditVerdict, TaskStatus, Verdict } from './answers.js';
 
@@ -122,7 +123,7 @@ export function writeMeta(meta: RunMeta): void {
   const file = runFile(meta.id, 'meta.json');
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(meta, null, 2));
-  fs.renameSync(tmp, file);
+  renameOver(tmp, file);
   if (TERMINAL.includes(meta.state)) {
     try {
       onFinished?.(meta);

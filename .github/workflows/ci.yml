@@ -25,6 +25,3 @@ jobs:
       - run: npm install --no-audit --no-fund
       - run: npm run typecheck
       - run: npm test
-      - name: pitroom doctor (diagnostics)
-        if: always() && matrix.os == 'windows-latest'
-        run: node dist/pitroom.mjs doctor
