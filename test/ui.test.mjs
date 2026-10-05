@@ -227,6 +227,21 @@ test('ui: an audited run carries the audit\'s verdict, its disputed claims, and 
   assert.match(await evaluate('document.body.innerText'), /RUNS\s*\n?\s*2/i, 'the audit is not counted as a run');
 });
 
+test('ui: a page loaded while it counts as hidden still shows the list and a card\'s content (embedded browsers never send visibilitychange)', { skip }, async () => {
+  const hide = await send('Page.addScriptToEvaluateOnNewDocument', {
+    source: "Object.defineProperty(document, 'hidden', { get: () => true }); Object.defineProperty(document, 'visibilityState', { get: () => 'hidden' });",
+  });
+  try {
+    await open(`#${ids.research}`);
+    assert.equal(await evaluate('document.hidden'), true, 'the page counts as hidden');
+    await until("document.querySelector('[aria-label=\"Close\"]') !== null", 'the pinned card to open');
+    // the "What it did" section exists only once the card's own request (api/run/<id>) has been made and answered
+    await until('/what it did/i.test(document.body.innerText)', "the card's content instead of its placeholder", 6000);
+  } finally {
+    await send('Page.removeScriptToEvaluateOnNewDocument', { identifier: hide.identifier });
+  }
+});
+
 // Last: it discards the isolate run the tests above look at.
 test('ui: a finished isolate run can be discarded from its card, after a confirmation', { skip }, async () => {
   await open(`#${ids.change}`);
