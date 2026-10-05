@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Doctor
+- `pitroom doctor` has a **Use** section: with no runs yet it says so and how to start ("ask your agent to use Pitroom", or `pitroom run "where is <something> defined?"`); afterwards it says how many runs there have been and when the last one was. Skills can be installed and an agent may still never think of Pitroom: this is the first thing a new user sees.
+
 ## 0.18.0
 
 ### Windows

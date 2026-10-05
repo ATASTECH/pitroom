@@ -813,3 +813,13 @@ test('config "costs" must be numbers; doctor shows the cost of the models in use
   s.config({ worker: 'codex:gpt-b', costs: { 'codex:gpt-a': 1, 'codex:gpt-b': 2 } });
   assert.match(s.run(['doctor']).stdout, /cost: codex:gpt-b = 2; you priced codex:gpt-a cheaper \(1\)/);
 });
+
+test('doctor says whether Pitroom has been used: a first-run hint, then how many runs and when', () => {
+  const s = sandbox();
+  const fresh = s.run(['doctor']).stdout;
+  assert.match(fresh, /\nUse\n  ✔ no runs yet\. Ask your agent to use Pitroom .*pitroom run "where is <something> defined\?"/);
+  assert.equal(s.run(['run', 'where is app.txt?']).status, 0);
+  assert.match(s.run(['doctor']).stdout, /\nUse\n  ✔ 1 run so far, the last one within the hour \(pitroom savings shows what they saved\)/);
+  assert.equal(s.run(['run', 'what is in other.txt?']).status, 0);
+  assert.match(s.run(['doctor']).stdout, /✔ 2 runs so far/);
+});

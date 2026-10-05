@@ -15,7 +15,7 @@ import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { mcpStatus } from './mcp-install.js';
 import { VERSION } from './run.js';
-import { type RunMeta, home } from './store.js';
+import { type RunMeta, home, listRunIds, readMeta } from './store.js';
 import { bold, cyan, dim, green, red, wrapText, yellow } from './style.js';
 import { describeTarget } from './target.js';
 
@@ -31,6 +31,22 @@ const NEXT: { when: RegExp; command: string; why: string }[] = [
   { when: /not logged in/, command: 'claude auth login', why: 'sign in the Claude Code worker (Codex: codex login)' },
   { when: /Gemini CLI is not signed in|IneligibleTierError/, command: 'export GEMINI_API_KEY=…', why: 'a Google AI Studio key for the Gemini worker' },
 ];
+
+/** Whether the setup has been used at all: an agent with the skills installed may never think of Pitroom. */
+function usageLine(): string {
+  const ids = listRunIds();
+  if (!ids.length) {
+    return 'no runs yet. Ask your agent to use Pitroom (for example "have a worker find where X is defined"), or try it yourself: pitroom run "where is <something> defined?"';
+  }
+  let when = '';
+  try {
+    const hours = Math.max(0, Math.round((Date.now() - Date.parse(readMeta(ids[ids.length - 1]!).startedAt)) / 3_600_000));
+    when = hours < 1 ? ', the last one within the hour' : hours < 48 ? `, the last one ${hours} h ago` : `, the last one ${Math.round(hours / 24)} days ago`;
+  } catch {
+    // a record being written right now
+  }
+  return `${ids.length} run${ids.length === 1 ? '' : 's'} so far${when} (pitroom savings shows what they saved)`;
+}
 
 /** The first `node` a shell would run, and its version (agent apps start such shells). */
 function firstNodeOnPath(): { path: string; version: string } | undefined {
@@ -166,6 +182,9 @@ export function doctor(probe: boolean): number {
 
   section('Skills and agents');
   addAll(skillChecks());
+
+  section('Use');
+  add('ok', usageLine());
 
   if (probe && chain[0]) {
     section('Live probe');
