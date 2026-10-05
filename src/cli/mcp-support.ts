@@ -1,5 +1,6 @@
 // What the MCP tools are built from: argument checks, running the CLI, and waiting for runs with progress.
 import { spawn } from 'node:child_process';
+import { effective } from '../core/config.js';
 import { groupIds } from '../core/group.js';
 import { progress } from '../core/report.js';
 import { freshMeta, isActive } from '../core/store.js';
@@ -184,6 +185,50 @@ async function stopQuietly(args: string[]): Promise<void> {
   if (r.code !== 0) process.stderr.write(`pitroom mcp: ${args.join(' ')} failed: ${r.err || r.out}\n`);
 }
 
+/**
+ * Where the dashboard is, starting it when it is not running (`pitroom dash --detach` reuses a running one). Asked once
+ * per server: the address is kept, and a failure is not tried again for a minute. Undefined when the config's `mcpDash`
+ * is off. The system browser is not opened: the line it makes for the agent says to use the app's own browser pane.
+ */
+let dashAsked: { at: number; url: Promise<string | undefined> } | undefined;
+export function ensureDash(): Promise<string | undefined> {
+  if (effective().mcpDash.value === false) return Promise.resolve(undefined);
+  if (dashAsked && Date.now() - dashAsked.at < 60_000) return dashAsked.url;
+  const url = pit(['dash', '--detach'], 30_000).then((r) => {
+    const found = /^https?:\/\/127\.0\.0\.1:\d+\/?/m.exec(r.out)?.[0];
+    if (!found) dashAsked = undefined; // not started: ask again next time
+    return found;
+  });
+  dashAsked = { at: Date.now(), url };
+  return url;
+}
+
+/**
+ * The dashboard, started when one of the runs is still going after a few seconds: a short run never starts it, and a long
+ * one can be watched from the first seconds. Resolves to undefined when none is going (or `mcpDash` is off).
+ */
+function dashIfSlow(ids: () => string[], delayMs = 3000): Promise<string | undefined> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      try {
+        resolve(ids().some((id) => isActive(freshMeta(id).state)) ? ensureDash() : undefined);
+      } catch {
+        resolve(undefined); // a record being written right now: the wait that follows asks again
+      }
+    }, delayMs);
+    timer.unref();
+  });
+}
+
+/** The live-view line, added to a result that comes back while its runs are still going. */
+export function withLiveView(result: ToolResult, url: string | undefined): ToolResult {
+  if (!url || !result.text.includes('Not finished yet')) return result;
+  return {
+    ...result,
+    text: `${result.text}\n\nLive view of every run: ${url} (pitroom dash). If your app has a built-in browser pane (the Claude Code and Codex apps do), open it there; otherwise give the user the address.`,
+  };
+}
+
 /** Starts a run (or review, audit) in the background and waits for it a while. */
 export async function startAndWait(start: string[], seconds: number, ctx: Ctx, task?: string): Promise<ToolResult> {
   // the task goes last, after "--", so that it can start with a dash
@@ -197,7 +242,10 @@ export async function startAndWait(start: string[], seconds: number, ctx: Ctx, t
   } catch {
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
-  const result = await waitFor([id], seconds, ctx);
+  // the dashboard comes up while a long run runs, so the user can watch from the first seconds
+  const dash = cached ? Promise.resolve(undefined) : dashIfSlow(() => [id]);
+  const waited = await waitFor([id], seconds, ctx);
+  const result = withLiveView(waited, waited.text.includes('Not finished yet') ? await dash : undefined);
   if (cancelled(ctx) && !cached) await stopQuietly(['stop', id]);
   // the earlier answer to the same question on the same code: say so, it is not a new run
   if (cached) result.text = `Cached answer: the same question on the same code as run ${id}; no worker ran (fresh: true asks one).\n\n${result.text}`;
@@ -214,7 +262,9 @@ export async function startCrew(flags: string[], tasks: string[], seconds: numbe
   } catch {
     return { text: `could not read the group from: ${started.out.slice(0, 200)}`, isError: true };
   }
-  const result = await waitFor([], seconds, ctx, group);
+  const dash = dashIfSlow(() => groupIds(group));
+  const waited = await waitFor([], seconds, ctx, group);
+  const result = withLiveView(waited, waited.text.includes('Not finished yet') ? await dash : undefined);
   if (cancelled(ctx)) await stopQuietly(['stop', '-g', group]);
   return result;
 }

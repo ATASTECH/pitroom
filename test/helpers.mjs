@@ -52,6 +52,8 @@ export function sandbox() {
     PITROOM_HOME: path.join(base, 'home'),
     PITROOM_CONFIG: path.join(base, 'config.json'),
     PITROOM_OPENCODE_BIN: MOCK,
+    // an MCP call that is still running would start a dashboard that nothing stops: tests that look at it turn it on
+    PITROOM_MCP_DASH: '0',
     // the mock's `#!/usr/bin/env node` must find this Node, not an older one earlier on PATH
     PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`,
     MOCK_LOG: log,

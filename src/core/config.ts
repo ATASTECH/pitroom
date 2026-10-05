@@ -29,6 +29,8 @@ export interface PitroomConfig {
   cacheDays?: number;
   /** Count runs that failed on a rate limit or quota in the stats as failures (default false: they are left out of the run counts, success rates and averages, and shown apart). */
   countRateLimits?: boolean;
+  /** Whether a run an MCP client starts also starts the dashboard and says where it is (default true; PITROOM_MCP_DASH=0 turns it off). */
+  mcpDash?: boolean;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -49,6 +51,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   readIn: 'string',
   cacheDays: 'number',
   countRateLimits: 'boolean',
+  mcpDash: 'boolean',
 };
 
 export function configPath(): string {
@@ -132,6 +135,12 @@ const days = (v: unknown) => {
   return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
 };
 
+/** An on/off environment variable: 1/true/on/yes or 0/false/off/no. */
+const flag01 = (v: string | undefined): boolean | undefined => {
+  const t = v?.trim().toLowerCase();
+  return t === undefined || t === '' ? undefined : ['1', 'true', 'on', 'yes'].includes(t) ? true : ['0', 'false', 'off', 'no'].includes(t) ? false : undefined;
+};
+
 const readIn = (v: unknown) => (v === 'auto' || v === 'snapshot' || v === 'project' ? v : undefined);
 
 const list = (s: string | undefined) => s?.split(',').map((x) => x.trim()).filter(Boolean);
@@ -165,5 +174,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     readIn: setting<string>(undefined, readIn(e.PITROOM_READ_IN), readIn(c.readIn), 'auto'),
     cacheDays: setting<number>(undefined, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
     countRateLimits: setting<boolean>(undefined, undefined, c.countRateLimits, false),
+    mcpDash: setting<boolean>(undefined, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
   };
 }
