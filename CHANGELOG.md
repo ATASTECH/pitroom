@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.18.0
 
 ### Windows
 - The test suite runs on `windows-latest` (Node 22 and 24) in CI. Ten tests that need `sh`, POSIX file modes or the git guard are skipped there.
@@ -12,6 +12,10 @@
 ### Dashboard
 - **Stop and Discard from the page.** A running card has a Stop button and a finished, not yet applied `--isolate` card has Discard, each with a confirmation. These are the dashboard's first writes, and the only ones: it still never starts a run or applies a patch. `POST /api/run/<id>/stop` and `/discard` need the secret the page was served with (random per start, compared in constant time) in `x-pitroom-token` and the dash's own `Origin`; anything else is 403, a POST elsewhere is 403, another method 405. A run that cannot be stopped or discarded (not active, not isolate, already applied or discarded) is 409.
 - `pitroom stop` and the dashboard share one `stopRun`.
+
+### Fixes
+- A stop request is recorded in a file of its own (`stop-requested` in the run's folder), not only in `meta.json`: the run's process writes `meta.json` too, and its write could drop the flag, so a stopped run showed as "worker process exited unexpectedly" (found on Windows, where the process dies at once on the signal).
+- `pitroom dash --detach` waits up to 20 s for the server (it was 6 s) while it imports old runs into the history.
 
 ## 0.17.0
 
