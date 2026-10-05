@@ -716,7 +716,8 @@ test('statusline: the user\'s own line first, then Pitroom\'s when it has someth
   assert.equal(s.run(['statusline'], {}, '{}').stdout, '');
   assert.equal(s.run(['run', 'x']).status, 0);
   const saved = JSON.parse(s.run(['savings', '--json', '--since', '7d']).stdout).saved;
-  const out = s.run(['statusline', '--then', 'cat >/dev/null; echo base'], {}, '{"model":{}}').stdout;
+  const then = process.platform === 'win32' ? 'echo base' : 'cat >/dev/null; echo base';
+  const out = s.run(['statusline', '--then', then], {}, '{"model":{}}').stdout;
   if (saved > 0) assert.match(out, /^base\n🏁 pitroom · ~\$[\d.]+ saved this week\n$/);
   else assert.equal(out, 'base\n');
 });

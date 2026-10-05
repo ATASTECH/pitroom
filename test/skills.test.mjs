@@ -185,8 +185,10 @@ test('install links every skill and a working launcher; uninstall removes only t
   for (const base of [agents, path.join(home, '.claude', 'skills')]) {
     for (const s of skills) assert.ok(fs.existsSync(path.join(base, s, 'SKILL.md')), `${base}/${s}`);
   }
-  const launcher = path.join(home, '.local', 'bin', 'pitroom');
-  const v = spawnSync(launcher, ['--version'], { encoding: 'utf8', env: { ...env, PATH: '/usr/bin:/bin' } });
+  const win = process.platform === 'win32';
+  const launcher = path.join(home, '.local', 'bin', win ? 'pitroom.cmd' : 'pitroom');
+  // a .cmd only starts through a shell
+  const v = spawnSync(launcher, ['--version'], { encoding: 'utf8', shell: win, env: { ...env, PATH: win ? process.env.PATH : '/usr/bin:/bin' } });
   assert.equal(v.stdout.trim(), version, 'launcher finds a Node 22.13+ even when none is on PATH');
 
   const u = run('uninstall');

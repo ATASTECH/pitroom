@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { test } from 'node:test';
-import { sandbox } from './helpers.mjs';
+import { posixOnly, sandbox } from './helpers.mjs';
 
 // fetch cannot set the Host header, and the host check is part of what is tested.
 const get = (url, { method = 'GET', headers = {} } = {}) =>
@@ -134,7 +134,7 @@ test('dash: per-file previews count the full patch and also survive archiving', 
   }
 });
 
-test('dash: raw patches take precedence over clipped history, and clipped archives show incomplete counts', async () => {
+test('dash: raw patches take precedence over clipped history, and clipped archives show incomplete counts', { skip: posixOnly }, async () => {
   const s = sandbox();
   const generate = `node -e "require('fs').writeFileSync('a-large.ts', ('export const text = ' + 'x'.repeat(2600) + '\\n').repeat(450))"`;
   const run = s.run(['run', '-i', 'create a large patch'], { MOCK_ACTIONS: `exec:${generate};write:z-last.ts:export const last = true;answer:SUMMARY: done` });

@@ -24,7 +24,8 @@ process.on('exit', () => {
   for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 export function scratchDir(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // The name the file system gives it: on Windows the temp folder is otherwise spelled RUNNER~1 here and runneradmin there.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   made.push(dir);
   return dir;
 }
