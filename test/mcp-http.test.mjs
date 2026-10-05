@@ -9,6 +9,17 @@ import { CLI, root, sandbox } from './helpers.mjs';
 
 const TOKEN = 'test-token-0123456789abcdef';
 const RUN_ID = /\d{8}-\d{6}-[0-9a-f]{4}/;
+/**
+ * A run shows in `pitroom ls` as soon as it is queued; on a busy machine it may still wait for a worker slot.
+ * Tests that stop or cancel something must first see the runs really running, or they test the queue.
+ */
+async function untilRunning(s, ids) {
+  for (let i = 0; i < 120; i++) {
+    if (ids.every((id) => /running/.test(s.run(['status', id]).stdout))) return true;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  return false;
+}
 
 async function serve(s, extra = {}, args = ['--port', '0'], cwd = s.repo) {
   const proc = spawn(process.execPath, [CLI, 'mcp', '--http', ...args], { cwd, env: { ...s.env, PWD: cwd, PITROOM_MCP_TOKEN: TOKEN, ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -160,6 +171,7 @@ test('mcp http: a cancel from the same session stops the run; another session\'s
       ids = [...new Set(s.run(['ls']).stdout.match(new RegExp(RUN_ID, 'g')) ?? [])];
     }
     assert.equal(ids.length, 2, 'both runs started');
+    assert.ok(await untilRunning(s, ids), 'both runs are running');
     await h.post({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 4242 } }, { 'Mcp-Session-Id': a.sid });
     const answerA = await pendingA;
     assert.equal(answerA.status, 202, 'the cancelled request is not answered');
@@ -274,6 +286,7 @@ test('mcp http: stopping the server ends the waiting, not the runs', async () =>
     id = RUN_ID.exec(s.run(['ls']).stdout)?.[0];
   }
   assert.ok(id, 'the run started');
+  assert.ok(await untilRunning(s, [id]), 'the run is running');
   const t = Date.now();
   await h.close();
   assert.ok(Date.now() - t < 10_000, 'the server stopped promptly');
