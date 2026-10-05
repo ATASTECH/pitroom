@@ -1,13 +1,12 @@
 # Changelog
 
-## Unreleased
+## 0.17.0
 
 ### Answer cache
 - The same read question on the same code gets the earlier answer back at once instead of a new worker run (`pitroom ⟲ cached answer · … · no worker ran`). The key is the question (whitespace does not count), where it was asked, the attached files' contents, where the worker reads (a clean snapshot or in place) and the project's exact state: HEAD and a tree of every working file, uncommitted and untracked included (made with git's own index, so unchanged files are not re-hashed). Only answers that held up are reused: a finished read run with an answer, every reference verified, nothing written, and no audit still running or disagreeing, for `cacheDays` (default 7; 0 turns it off; `PITROOM_CACHE_DAYS`). Follow-ups, web runs, plan tasks, reviews, audits, `--audit`, `--verify`, crews and changes are never cached; `--fresh` asks a worker anyway and its answer is reused from then on. Git-ignored files and the worker/model are not part of the key (documented; `--fresh` for those). With `--bg --json` the earlier run comes back already done, marked `"cached": true`.
 
 ### MCP server
 - **Smaller tool definitions.** Ten tools instead of eighteen, nothing lost: parallel work is `pitroom_run` with `tasks` (was `pitroom_crew`), every report is `pitroom_info` with a `topic` (`runs`, `history`, `stats`, `savings`, `models`, `cooldown`, `config` (new), `doctor`; were seven tools), `pitroom_show` gives a running run's progress (was `pitroom_status`, and `run` now defaults to the latest), and `pitroom_stop` with `cooldowns` clears the cooldowns. Descriptions are shorter. The definitions sit in the client's context for the whole session: about 1.9k tokens now, 3.3k before. An option that does not go with a topic is an error that names the ones that do.
-
 - **Run notifications.** A client can subscribe to a run's resource (`resources/subscribe` on `pitroom://run/<id>` or its `/patch`) and is told when the run changes state (for `/patch` also when it changed more files) or is gone (`notifications/resources/updated`); every client is told when the newest run changes (`notifications/resources/list_changed`; runs starting within one check are one notification). Read from the run records every 2 s, only while a client can be told; at most 100 subscriptions per client. An event stream nobody uses (no request, no event for an hour) is closed with its session. Over HTTP a GET with `Accept: text/event-stream` opens the session's event stream, where these arrive (one stream per session, kept alive with comments); a client without one is told once it opens it. Few clients act on these yet; the tools work the same without them.
 
 ### Fixes
