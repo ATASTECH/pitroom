@@ -7,6 +7,7 @@
 - A run records why its worker failed (`failureKind`: `rate-limited`, `model-unavailable`, `auth`, `other`); older records are recognised by the hint Pitroom adds to a rate-limit error.
 
 ### Fixes
+- **A dashboard card could stay on its placeholder.** The page skipped every request while the browser said the page was hidden and waited for a `visibilitychange` that embedded browsers (the browser panes of the Claude Code and Codex apps) may never send; a card opened there showed grey boxes until the next poll, ten minutes later for a finished run. The first request is now always made; only the repeated ones are skipped while hidden.
 - **An audit read the answer's paths as missing.** An answer is written for you, with the paths turned back into your project's (`/Users/me/proj/src/a.ts:3`); the auditor works in a clean snapshot of its own, where that path does not exist, and disputed it ("this path does not exist in this project"). The project's paths now reach the auditor relative to its working directory, and the prompt says so. In one history, 2 of 12 non-agreeing audits were this; re-auditing them: one now agrees, the other still disputes a real claim.
 
 ## 0.19.0
