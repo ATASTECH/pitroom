@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { root, sandbox, scratchDir } from './helpers.mjs';
+import { posixOnly, root, sandbox, scratchDir } from './helpers.mjs';
 
 test('read mode returns the answer, a receipt, and touches nothing', () => {
   const s = sandbox();
@@ -172,7 +172,7 @@ test('doctor groups its checks, sums them up and says what to run next', () => {
   assert.match(out, /pitroom init +propose a starter config/, 'no fallback workers points to init');
 });
 
-test('doctor warns when the first node on PATH is too old for Pitroom', () => {
+test('doctor warns when the first node on PATH is too old for Pitroom', { skip: posixOnly }, () => {
   const s = sandbox();
   const bin = path.join(s.base, 'oldnode');
   fs.mkdirSync(bin);
@@ -360,7 +360,7 @@ test('--no-fallback and non-model errors do not fail over', () => {
   assert.equal(s.calls().filter((c) => c.argv[0] === 'run').length, 2);
 });
 
-test('git guard blocks history changes even through sh -c, env and aliases', () => {
+test('git guard blocks history changes even through sh -c, env and aliases', { skip: posixOnly }, () => {
   const s = sandbox();
   s.git('config', 'alias.ci', 'commit');
   const head = s.git('rev-parse', 'HEAD');
@@ -393,7 +393,7 @@ test('git guard blocks history changes even through sh -c, env and aliases', () 
   assert.doesNotMatch(s.git('status', '--porcelain'), /^A /m, 'index untouched');
 });
 
-test('git never waits for a password, editor or pager', () => {
+test('git never waits for a password, editor or pager', { skip: posixOnly }, () => {
   const s = sandbox();
   s.run(['run', 'x'], { MOCK_ACTIONS: 'exec:echo "$GIT_TERMINAL_PROMPT|$GIT_EDITOR|$GIT_PAGER";answer:ok' });
   assert.equal(s.execs()[0].output.trim(), '0|true|cat');
@@ -474,7 +474,7 @@ test('records from before pluggable workers still list and show', () => {
 
 test('fallback crosses backends: Claude Code (session expired) → OpenCode', () => {
   const s = sandbox();
-  const claudeMock = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'claude', 'mock', 'claude.mjs');
+  const claudeMock = path.join(path.join(root, 'test'), 'fixtures', 'claude', 'mock', 'claude.mjs');
   const r = s.run(['run', '-W', 'claude', 'where is login?'], {
     PITROOM_CLAUDE_BIN: claudeMock,
     PITROOM_FALLBACK: 'opencode:mock/alive',
@@ -486,7 +486,7 @@ test('fallback crosses backends: Claude Code (session expired) → OpenCode', ()
   assert.match(r.stdout, /SUMMARY: login is in auth.ts/);
 });
 
-const GEMINI_MOCK = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'gemini', 'mock', 'gemini.mjs');
+const GEMINI_MOCK = path.join(path.join(root, 'test'), 'fixtures', 'gemini', 'mock', 'gemini.mjs');
 
 test('a Gemini CLI worker runs in plan mode and its answer comes back with the model it used', () => {
   const s = sandbox();
@@ -624,7 +624,7 @@ test('doctor warns when superpowers is active too, and only while it is enabled'
   const at = (name) => {
     const dir = path.join(s.base, name);
     fs.mkdirSync(dir, { recursive: true });
-    return { dir, env: { HOME: dir, CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config') } };
+    return { dir, env: { HOME: dir, USERPROFILE: dir, CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config') } };
   };
   const write = (file, text) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -716,7 +716,8 @@ test('statusline: the user\'s own line first, then Pitroom\'s when it has someth
   assert.equal(s.run(['statusline'], {}, '{}').stdout, '');
   assert.equal(s.run(['run', 'x']).status, 0);
   const saved = JSON.parse(s.run(['savings', '--json', '--since', '7d']).stdout).saved;
-  const out = s.run(['statusline', '--then', 'cat >/dev/null; echo base'], {}, '{"model":{}}').stdout;
+  const then = process.platform === 'win32' ? 'echo base' : 'cat >/dev/null; echo base';
+  const out = s.run(['statusline', '--then', then], {}, '{"model":{}}').stdout;
   if (saved > 0) assert.match(out, /^base\n🏁 pitroom · ~\$[\d.]+ saved this week\n$/);
   else assert.equal(out, 'base\n');
 });

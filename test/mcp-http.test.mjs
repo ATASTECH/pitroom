@@ -47,7 +47,7 @@ test('mcp http: it says where it listens, with the command for Claude Code, and 
     assert.match(h.url, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
     assert.ok(h.lines.some((l) => /claude mcp add --transport http pitroom .*Bearer \$PITROOM_MCP_TOKEN/.test(l)), h.lines.join('\n'));
     assert.ok(!h.lines.join('\n').includes(TOKEN), 'the token itself is not printed');
-    assert.ok(h.lines.some((l) => l.includes(`working in ${fs.realpathSync(s.repo)}`)), 'it says which project it works in');
+    assert.ok(h.lines.some((l) => l.includes(`working in ${fs.realpathSync.native(s.repo)}`)), 'it says which project it works in');
     const busy = s.run(['mcp', '--http', '--port', new URL(h.url).port]);
     assert.equal(busy.status, 3);
     assert.match(busy.stderr, /port \d+ is in use/);
@@ -186,7 +186,7 @@ test('mcp http: without PITROOM_MCP_TOKEN a token is made once, kept private, an
     const file = path.join(s.base, 'home', 'mcp-token');
     token = fs.readFileSync(file, 'utf8').trim();
     assert.match(token, /^[0-9a-f]{64}$/);
-    assert.equal(fs.statSync(file).mode & 0o077, 0, 'only the owner can read it');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o077, 0, 'only the owner can read it'); // no POSIX modes on Windows
     assert.ok(first.lines.some((l) => l.includes(`$(cat "${file}")`)), first.lines.join('\n'));
     const r = await fetch(first.url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
     assert.equal(r.status, 200);
@@ -223,12 +223,12 @@ test('mcp http: -d starts it in another project, and the runs work there', async
   const s = sandbox();
   const h = await serve(s, { MOCK_ACTIONS: 'answer:SUMMARY: ok' }, ['--port', '0', '-d', s.repo], s.base);
   try {
-    assert.ok(h.lines.some((l) => l.includes(`working in ${fs.realpathSync(s.repo)}`)), h.lines.join('\n'));
+    assert.ok(h.lines.some((l) => l.includes(`working in ${fs.realpathSync.native(s.repo)}`)), h.lines.join('\n'));
     const { sid } = await h.open();
     const r = await h.rpc(sid, 'tools/call', { name: 'pitroom_run', arguments: { task: 'where is app.txt?' } });
     assert.equal(r.result.isError, false, JSON.stringify(r));
     const ran = s.calls().filter((c) => c.argv[0] === 'run').at(-1);
-    assert.equal(fs.realpathSync(ran.cwd), fs.realpathSync(s.repo), 'the worker ran in the -d project');
+    assert.equal(fs.realpathSync.native(ran.cwd), fs.realpathSync.native(s.repo), 'the worker ran in the -d project');
   } finally {
     await h.close();
   }

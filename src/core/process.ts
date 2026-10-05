@@ -44,7 +44,10 @@ export async function spawnWorker(
   }, opts.timeoutSec * 1000);
   res.code = await new Promise<number | null>((resolve) => {
     child.on('error', (e) => {
-      res.spawnError = (e as NodeJS.ErrnoException).code === 'ENOENT' ? `${inv.command} not found` : e.message;
+      // ENOENT is also what spawn says when the working directory is missing: say which.
+      res.spawnError = (e as NodeJS.ErrnoException).code === 'ENOENT'
+        ? fs.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist`
+        : e.message;
       resolve(127);
     });
     child.on('close', (c) => resolve(c));

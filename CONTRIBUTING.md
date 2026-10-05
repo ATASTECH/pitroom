@@ -4,7 +4,7 @@ Thanks for helping. Issues and pull requests are welcome, under the [code of con
 
 ## Set up
 
-You need Node.js 18 or newer and git. Worker CLIs are optional for development: the tests use a fake worker.
+You need Node.js 22.13 or newer and git. Worker CLIs are optional for development: the tests use a fake worker.
 
 ```bash
 git clone https://github.com/ATASTECH/pitroom && cd pitroom

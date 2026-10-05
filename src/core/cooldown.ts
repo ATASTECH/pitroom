@@ -6,6 +6,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import type { Backend, Target } from '../backends/types.js';
+import { renameOver } from './fs-atomic.js';
 import { home } from './store.js';
 
 export interface Cooldown {
@@ -62,7 +63,7 @@ function write(all: Record<string, Cooldown>): void {
   fs.mkdirSync(path.dirname(file()), { recursive: true });
   const tmp = `${file()}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, `${JSON.stringify(all, null, 2)}\n`);
-  fs.renameSync(tmp, file());
+  renameOver(tmp, file());
 }
 
 /** The cooldowns still running. */

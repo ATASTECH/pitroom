@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { sandbox } from './helpers.mjs';
+import { posixOnly, sandbox } from './helpers.mjs';
 
 const task = (script, words = 'task') => `${words} [[mock:${script}]]`;
 
@@ -104,7 +104,7 @@ test('stop -g cancels running and queued workers', () => {
   assert.equal((w.stdout.match(/pitroom stopped/g) ?? []).length, 2, w.stdout);
 });
 
-test('apply refuses a patch that deletes files until --allow-delete', () => {
+test('apply refuses a patch that deletes files until --allow-delete', { skip: posixOnly }, () => {
   const s = sandbox();
   const gone = path.join(s.repo, 'other.txt');
   assert.ok(fs.existsSync(gone));

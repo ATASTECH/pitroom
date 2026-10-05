@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Windows
+- The test suite runs on `windows-latest` (Node 22 and 24) in CI. Ten tests that need `sh`, POSIX file modes or the git guard are skipped there.
+- `pitroom install` makes a `pitroom.cmd` launcher; `pitroom doctor` starts it through a shell and warns that the git guard is not available.
+- Fixes found by running there: a directory spelled `RUNNER~1` and the same one spelled `runneradmin` were taken for two places (isolate runs started in a directory that did not exist), so paths are compared as the file system names them; a bare `ipc.ts:12` reference was not matched to `src\main\ipc.ts`; the secret-looking files in a warning used backslashes; a missing `--verify` command (`is not recognized`) was shown as a failing test; `statusline --then` needs a shell that exists; the Tailwind build step used a symlink; run records could not be replaced while `watch` or the dashboard had them open (`EPERM`), so it retries.
+- A spawn that fails because the working directory is missing says so, instead of "<command> not found".
+- `.gitattributes` checks out with LF everywhere.
+
 ### Dashboard
 - **Stop and Discard from the page.** A running card has a Stop button and a finished, not yet applied `--isolate` card has Discard, each with a confirmation. These are the dashboard's first writes, and the only ones: it still never starts a run or applies a patch. `POST /api/run/<id>/stop` and `/discard` need the secret the page was served with (random per start, compared in constant time) in `x-pitroom-token` and the dash's own `Origin`; anything else is 403, a POST elsewhere is 403, another method 405. A run that cannot be stopped or discarded (not active, not isolate, already applied or discarded) is 409.
 - `pitroom stop` and the dashboard share one `stopRun`.

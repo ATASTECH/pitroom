@@ -74,7 +74,9 @@ export function doctor(probe: boolean): number {
   const cfg = loadConfig();
   add(cfg.warnings.length ? 'warn' : 'ok', `config: ${configPath()}${fs.existsSync(configPath()) ? '' : ' (not present, defaults in use)'}`);
   for (const w of cfg.warnings) add('warn', w);
-  if (process.platform !== 'win32') {
+  if (process.platform === 'win32') {
+    add('warn', "git guard: not available on Windows yet, so Pitroom does not block a worker's git history changes or pushes there (read-only runs are still limited by each worker CLI's own rules, and --isolate keeps edits in a copy); prefer --isolate and check the patch before apply");
+  } else {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
     add(guarded ? 'ok' : 'warn', guarded ? 'git guard shim ready' : 'git guard unavailable (git not on PATH)');
   }
@@ -259,7 +261,8 @@ function skillChecks(): DoctorCheck[] {
   }
   const launcher = launcherPath();
   if (fs.existsSync(launcher)) {
-    const r = spawnSync(launcher, ['--version'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] });
+    // a .cmd file only starts through a shell on Windows
+    const r = spawnSync(launcher, ['--version'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'], shell: process.platform === 'win32' });
     checks.push(
       r.status === 0
         ? { level: 'ok', message: `launcher ${launcher} → pitroom ${r.stdout.trim()}` }

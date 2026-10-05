@@ -113,7 +113,7 @@ export function verifyRefs(refs: Ref[], dirs: string[]): RefCheck {
     if (direct) return [direct];
     if (path.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, '');
-    return (byName().get(path.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path.basename(wanted)) ?? []).filter((f) => f.split(path.sep).join('/').endsWith(`/${wanted}`) || path.basename(f) === wanted).slice(0, 20);
   };
   // Why a candidate does not hold up, or undefined when it does.
   const check = (file: string, ref: Ref): string | undefined => {

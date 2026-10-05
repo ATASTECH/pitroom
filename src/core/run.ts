@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getBackend } from '../backends/index.js';
 import type { Backend, Failure, Mode, Target } from '../backends/types.js';
-import { applyPatch, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
+import { applyPatch, canonical, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
 import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { DeletionRefused, UserError } from './errors.js';
@@ -24,7 +24,7 @@ import { estimateTokens, record, savedUsd } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
-import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, runDir, runFile, worktreesDir, writeMeta } from './store.js';
+import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, requestStop, runDir, runFile, worktreesDir, writeMeta } from './store.js';
 import { describeTarget, sameTarget } from './target.js';
 
 declare const __VERSION__: string;
@@ -120,7 +120,7 @@ export function prepareRun(o: RunOptions): RunMeta {
   }
 
   const mode = parent?.mode ?? o.mode;
-  const dir = path.resolve(parent?.dir ?? o.dir);
+  const dir = canonical(path.resolve(parent?.dir ?? o.dir));
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === 'isolate' && !root) throw new UserError('--isolate needs a git repository', 3);
@@ -503,7 +503,9 @@ function runVerify(meta: RunMeta): RunMeta['verifyResult'] {
   });
   const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
   fs.writeFileSync(runFile(meta.id, 'verify.log'), output);
-  return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split('\n').slice(-25).join('\n') };
+  // cmd.exe has no exit 127: it exits 1 and says the command "is not recognized"
+  const notFound = process.platform === 'win32' && r.status === 1 && /is not recognized as an internal or external command/.test(output);
+  return { ok: r.status === 0, code: notFound ? 127 : r.status, tail: output.trimEnd().split('\n').slice(-25).join('\n') };
 }
 
 /**
@@ -547,6 +549,7 @@ export function stopRun(id: string): RunMeta | undefined {
   if (!isActive(meta.state) || !isAlive(meta.pid)) return undefined;
   // Said first: a process that is still starting up has no handler yet and dies on the signal, and then it is
   // "stopped", not "exited unexpectedly".
+  requestStop(meta.id);
   meta.stopRequested = true;
   writeMeta(meta);
   process.kill(meta.pid!, 'SIGTERM');

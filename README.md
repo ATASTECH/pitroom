@@ -243,6 +243,15 @@ To repeat it on your own repository: `pitroom crew -d <repo> -g bench "<question
 
 ---
 
+## Platforms
+
+macOS and Linux are the main platforms. **Windows** runs the same test suite in CI (Windows Server, Node 22 and 24, with the fake workers; the worker CLIs themselves are not run there), with these differences:
+
+- **No git guard.** Pitroom's shim that blocks a worker's history changes and pushes is a `sh` script and is not available on Windows; `pitroom doctor` says so. Read-only runs are still limited by each worker CLI's own rules and `--isolate` keeps edits in a copy, so prefer `--isolate` and check the patch before `apply`.
+- **The launcher is `pitroom.cmd`** (`%USERPROFILE%\.local\bin`), started with the Node that ran `pitroom install` or the one in `PITROOM_NODE`; it does not search for another Node.
+- **Line endings.** Pitroom compares and applies patches byte for byte. Keep `core.autocrlf` off (or an `eol=lf` in `.gitattributes`, as this repository has); a checkout converted to CRLF has not been tested with `apply`.
+- A read snapshot's files are not made read-only (Windows has no POSIX modes), and a `--verify` command runs in `cmd.exe`, which reports a missing command as `is not recognized`.
+
 ## Quick start
 
 You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) or [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it).

@@ -6,6 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** For a test that needs sh scripts, POSIX file modes or the git guard (the guard is not on Windows yet): `{ skip: posixOnly }`. */
+export const posixOnly = process.platform === 'win32' ? 'POSIX-only (sh scripts, file modes, git guard)' : false;
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CLI = path.join(root, 'dist', 'pitroom.mjs');
 // Executed directly (no sh wrapper): a shell would silently repair a stale $PWD, which is
@@ -22,7 +24,8 @@ process.on('exit', () => {
   for (const d of made) fs.rmSync(d, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 });
 export function scratchDir(prefix) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  // The name the file system gives it: on Windows the temp folder is otherwise spelled RUNNER~1 here and runneradmin there.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   made.push(dir);
   return dir;
 }

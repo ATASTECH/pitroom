@@ -402,7 +402,7 @@ export function cmdStatusline(p: Parsed): number {
   const lines: string[] = [];
   const then = flag(p, 'then');
   if (then) {
-    const r = spawnSync('/bin/sh', ['-c', then], { input, encoding: 'utf8', timeout: 5000 });
+    const r = process.platform === 'win32' ? spawnSync(then, { shell: true, input, encoding: 'utf8', timeout: 5000 }) : spawnSync('/bin/sh', ['-c', then], { input, encoding: 'utf8', timeout: 5000 });
     if (r.stdout?.trimEnd()) lines.push(r.stdout.trimEnd());
   }
   try {

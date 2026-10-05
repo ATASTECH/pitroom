@@ -44,7 +44,7 @@ test('snapshot: with secret-looking files a read run reads a clean snapshot of t
   assert.doesNotMatch(r.stdout, /nothing stops it/, 'not the "nothing stops it" warning: something does');
   assert.ok(fs.existsSync(path.join(s.repo, '.env')) && fs.existsSync(path.join(s.repo, 'config', 'prod.pem')), 'the project itself is untouched');
   // its files cannot be written, so a stray write cannot change what other workers read
-  assert.equal(fs.statSync(path.join(dir, 'app.txt')).mode & 0o222, 0, 'files are read-only');
+  if (process.platform !== 'win32') assert.equal(fs.statSync(path.join(dir, 'app.txt')).mode & 0o222, 0, 'files are read-only');
 });
 
 test('snapshot: one snapshot per project state, shared by every read run on it; a changed file makes a new one', () => {

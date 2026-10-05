@@ -42,7 +42,7 @@ export function findSecretFiles(dir: string): string[] {
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name)) walk(path.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(path.relative(dir, path.join(d, e.name)));
+        found.push(slash(path.relative(dir, path.join(d, e.name))));
       }
     }
   };
@@ -57,7 +57,7 @@ export function findSecretFilesInTree(root: string, dir: string): string[] {
     return out
       .split('\0')
       .filter((f) => f && looksSecret(path.basename(f)) && !path.relative(dir, path.join(root, f)).startsWith('..'))
-      .map((f) => path.relative(dir, path.join(root, f)))
+      .map((f) => slash(path.relative(dir, path.join(root, f))))
       .sort();
   } catch {
     return [];
@@ -71,3 +71,6 @@ export function secretWarning(files: string[], mode: 'read' | 'write' | 'isolate
   const fix = mode === 'isolate' ? 'add them to .gitignore, or' : 'use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or';
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
+
+/** The paths shown to the user and compared in tests read the same on every platform. */
+const slash = (p: string) => p.split(path.sep).join('/');
