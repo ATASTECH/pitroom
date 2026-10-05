@@ -282,7 +282,16 @@ gemini extensions install https://github.com/ATASTECH/pitroom
 npm i -g pitroom
 ```
 
-**Any agent that speaks MCP (Cursor, Claude Desktop, and the three above too)**
+**Cursor**
+
+```bash
+npm i -g pitroom
+pitroom install --mcp --client cursor
+```
+
+<sub>This adds `pitroom mcp` to `~/.cursor/mcp.json` and leaves the other servers in that file alone; restart Cursor if it does not show up. Cursor gets the ten MCP tools described below. The skills are linked into `~/.agents/skills` and `~/.claude/skills` (`--no-skills` skips that); whether Cursor reads them from there has not been checked. `pitroom install --mcp --dry-run` shows what it would change first.</sub>
+
+**Any agent that speaks MCP (Claude Desktop, and the ones above too)**
 
 Pitroom is also an [MCP](https://modelcontextprotocol.io) server on stdio: ten tools instead of shell commands and skills (`pitroom_run`, `pitroom_wait`, `pitroom_show`, `pitroom_info`, `pitroom_review`, `pitroom_audit`, `pitroom_apply`, `pitroom_discard`, `pitroom_revert`, `pitroom_stop`), the runs as resources, and four prompts. The tool definitions sit in the client's context for the whole session, so they are kept small: about 1.9k tokens. It is listed in the [MCP Registry](https://registry.modelcontextprotocol.io) as `io.github.ATASTECH/pitroom`, so clients that browse the registry can find it. After `npm i -g pitroom`, let Pitroom register itself in the clients it finds (Claude Code, Codex, Gemini CLI, Cursor, Claude Desktop):
 
