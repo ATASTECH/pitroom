@@ -503,7 +503,9 @@ function runVerify(meta: RunMeta): RunMeta['verifyResult'] {
   });
   const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
   fs.writeFileSync(runFile(meta.id, 'verify.log'), output);
-  return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split('\n').slice(-25).join('\n') };
+  // cmd.exe has no exit 127: it exits 1 and says the command "is not recognized"
+  const notFound = process.platform === 'win32' && r.status === 1 && /is not recognized as an internal or external command/.test(output);
+  return { ok: r.status === 0, code: notFound ? 127 : r.status, tail: output.trimEnd().split('\n').slice(-25).join('\n') };
 }
 
 /**

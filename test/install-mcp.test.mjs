@@ -12,9 +12,9 @@ function machine(s, { cursor = true, desktop = true, clis = ['claude', 'codex', 
   const home = path.join(s.base, 'h');
   fs.mkdirSync(home, { recursive: true });
   const log = path.join(s.base, 'fake.log');
-  const env = { HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, '.config'), GEMINI_CLI_HOME: '', FAKE_MCP_LOG: log };
+  const env = { HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData', 'Roaming'), XDG_CONFIG_HOME: path.join(home, '.config'), GEMINI_CLI_HOME: '', FAKE_MCP_LOG: log };
   delete env.GEMINI_CLI_HOME;
-  const desktopDir = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Claude') : path.join(home, '.config', 'Claude');
+  const desktopDir = process.platform === 'darwin' ? path.join(home, 'Library', 'Application Support', 'Claude') : process.platform === 'win32' ? path.join(home, 'AppData', 'Roaming', 'Claude') : path.join(home, '.config', 'Claude');
   if (cursor) fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
   if (desktop) fs.mkdirSync(desktopDir, { recursive: true });
   const bin = path.join(s.base, 'bin');

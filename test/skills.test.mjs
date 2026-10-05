@@ -176,7 +176,7 @@ test('install links every skill and a working launcher; uninstall removes only t
   fs.writeFileSync(path.join(agents, 'someone-else'), 'keep me');
   // An old single-skill link from earlier versions is cleaned up.
   fs.symlinkSync(path.join(root, 'skills', 'using-pitroom'), path.join(agents, 'pitroom'));
-  const env = { ...process.env, HOME: home };
+  const env = { ...process.env, HOME: home, USERPROFILE: home };
   const run = (...args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', env });
 
   const i = run('install');

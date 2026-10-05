@@ -4,7 +4,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { root, sandbox } from './helpers.mjs';
+import { posixOnly, root, sandbox } from './helpers.mjs';
 
 const runId = (r) => /run (\S+)/.exec(r.stdout)?.[1];
 const pkgOf = (s, id) => fs.readFileSync(path.join(s.base, 'home', 'runs', id, 'package.md'), 'utf8');
@@ -30,7 +30,7 @@ test('review <run>: one package (brief, report, diff) for a read-only reviewer o
   assert.equal(oc.argv[oc.argv.indexOf('--agent') + 1], 'pitroom-read');
   const prompt = oc.argv.at(-1);
   assert.match(prompt, /You are reviewing one task's implementation/);
-  const copy = /(\S+\/\.git\/pitroom\/review-[0-9a-f]+\.md)/.exec(prompt)?.[1];
+  const copy = /(\S+[\\/]\.git[\\/]pitroom[\\/]review-[0-9a-f]+\.md)/.exec(prompt)?.[1];
   assert.ok(copy, 'the prompt names the package file');
   assert.ok(!fs.existsSync(copy), 'the package copy is removed when the review ends');
   assert.equal(fs.realpathSync(oc.cwd), fs.realpathSync(meta(s, impl).cwd), 'the reviewer works in the isolated copy');
@@ -140,7 +140,7 @@ test('a configured review tier picks the reviewer of a run and needs no same-bac
   assert.doesNotMatch(r.stdout, /same backend as the implementer/, 'a review tier is the user\'s own choice');
 });
 
-test('review --range in a linked worktree: the package sits inside the worktree, where a sandboxed reviewer can read it, and git does not see it', () => {
+test('review --range in a linked worktree: the package sits inside the worktree, where a sandboxed reviewer can read it, and git does not see it', { skip: posixOnly }, () => {
   const s = sandbox();
   s.git('add', '-A');
   s.git('commit', '-qm', 'base');

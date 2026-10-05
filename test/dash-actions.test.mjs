@@ -41,7 +41,7 @@ test('dash actions: stop needs the secret and the dash\'s own origin, then stops
   const s = sandbox();
   const bg = s.run(['run', '--bg', 'slow one'], { MOCK_ACTIONS: 'sleep:30;answer:SUMMARY: late' });
   const id = /run (\S+) in background/.exec(bg.stdout)[1];
-  await withDash(s, async ({ token, origin, post }) => {
+  await withDash(s, async ({ url, token, origin, post }) => {
     assert.equal((await post(`api/run/${id}/stop`, {})).status, 403, 'no secret');
     assert.equal((await post(`api/run/${id}/stop`, { 'x-pitroom-token': 'x'.repeat(token.length), origin })).status, 403, 'wrong secret');
     assert.equal((await post(`api/run/${id}/stop`, { 'x-pitroom-token': token })).status, 403, 'no origin');
@@ -53,7 +53,7 @@ test('dash actions: stop needs the secret and the dash\'s own origin, then stops
     assert.equal(ok.status, 200, ok.body);
     let state = '';
     for (let i = 0; i < 50 && state !== 'stopped'; i++) {
-      state = JSON.parse(fs.readFileSync(path.join(s.env.PITROOM_HOME, 'runs', id, 'meta.json'), 'utf8')).state;
+      state = JSON.parse((await send(`${url}api/run/${id}`)).body).state;
       if (state !== 'stopped') await sleep(100);
     }
     assert.equal(state, 'stopped', 'the run was stopped, not reported as a crash');

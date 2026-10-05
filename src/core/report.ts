@@ -116,7 +116,7 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
 
   if (meta.verifyResult) {
     const v = meta.verifyResult;
-    const notFound = !v.ok && v.code === 127 && /not found|no such file/i.test(v.tail);
+    const notFound = !v.ok && v.code === 127 && /not found|no such file|is not recognized as an internal or external command/i.test(v.tail);
     out.push(`── verify: \`${meta.verify}\` ${v.ok ? '✔ passed' : notFound ? '✘ could not run (exit 127: command not found)' : `✘ failed (exit ${v.code})`}`);
     if (notFound) out.push('   the command is not on the PATH Pitroom runs with (an app such as an MCP client may start it without your shell\'s PATH): give its full path, or set PATH in the command');
     if (!v.ok && v.tail) out.push(...v.tail.split('\n').map((l) => `   ${l}`));

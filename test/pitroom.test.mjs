@@ -624,7 +624,7 @@ test('doctor warns when superpowers is active too, and only while it is enabled'
   const at = (name) => {
     const dir = path.join(s.base, name);
     fs.mkdirSync(dir, { recursive: true });
-    return { dir, env: { HOME: dir, CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config') } };
+    return { dir, env: { HOME: dir, USERPROFILE: dir, CODEX_HOME: path.join(dir, '.codex'), XDG_CONFIG_HOME: path.join(dir, '.config') } };
   };
   const write = (file, text) => {
     fs.mkdirSync(path.dirname(file), { recursive: true });

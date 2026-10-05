@@ -30,7 +30,7 @@ export function skillTargets(): string[] {
   return targets;
 }
 
-export const launcherPath = () => path.join(os.homedir(), '.local', 'bin', 'pitroom');
+export const launcherPath = () => path.join(os.homedir(), '.local', 'bin', process.platform === 'win32' ? 'pitroom.cmd' : 'pitroom');
 
 const LAUNCHER_MARK = '# pitroom launcher';
 
@@ -41,6 +41,11 @@ const LAUNCHER_MARK = '# pitroom launcher';
  * PATH's node, then nvm installs, and uses the first that is Node 22.13+ (the first with a built-in SQLite that needs no flag).
  */
 function launcherScript(bundle: string): string {
+  // Windows: a .cmd. It uses PITROOM_NODE or the Node that ran `pitroom install` (no search for another one).
+  if (process.platform === 'win32') {
+    const q = (v: string) => v.replace(/%/g, '%%');
+    return `@echo off\r\nrem ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)\r\nif defined PITROOM_NODE (\r\n  "%PITROOM_NODE%" "${q(bundle)}" %*\r\n) else (\r\n  "${q(process.execPath)}" "${q(bundle)}" %*\r\n)\r\nexit /b %ERRORLEVEL%\r\n`;
+  }
   const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
   return `#!/bin/sh
 ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)

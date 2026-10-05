@@ -1384,7 +1384,7 @@ function verifyRefs(refs, dirs) {
     if (direct) return [direct];
     if (path7.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path7.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path7.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path7.basename(wanted)) ?? []).filter((f) => f.split(path7.sep).join("/").endsWith(`/${wanted}`) || path7.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);

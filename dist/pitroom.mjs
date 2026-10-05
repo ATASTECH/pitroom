@@ -2213,7 +2213,7 @@ function findSecretFiles(dir) {
       if (e.isDirectory()) {
         if (!SKIP_DIRS.has(e.name)) walk(path11.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(path11.relative(dir, path11.join(d, e.name)));
+        found.push(slash(path11.relative(dir, path11.join(d, e.name))));
       }
     }
   };
@@ -2223,7 +2223,7 @@ function findSecretFiles(dir) {
 function findSecretFilesInTree(root, dir) {
   try {
     const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path11.basename(f)) && !path11.relative(dir, path11.join(root, f)).startsWith("..")).map((f) => path11.relative(dir, path11.join(root, f))).sort();
+    return out.split("\0").filter((f) => f && looksSecret(path11.basename(f)) && !path11.relative(dir, path11.join(root, f)).startsWith("..")).map((f) => slash(path11.relative(dir, path11.join(root, f)))).sort();
   } catch {
     return [];
   }
@@ -2235,6 +2235,7 @@ function secretWarning(files, mode) {
   const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
+var slash = (p) => p.split(path11.sep).join("/");
 
 // src/core/snapshot.ts
 var READ_IN = ["auto", "snapshot", "project"];
@@ -2529,9 +2530,21 @@ function skillTargets() {
   if (fs16.existsSync(path14.join(home3, ".claude"))) targets.push(path14.join(home3, ".claude", "skills"));
   return targets;
 }
-var launcherPath = () => path14.join(os9.homedir(), ".local", "bin", "pitroom");
+var launcherPath = () => path14.join(os9.homedir(), ".local", "bin", process.platform === "win32" ? "pitroom.cmd" : "pitroom");
 var LAUNCHER_MARK = "# pitroom launcher";
 function launcherScript(bundle) {
+  if (process.platform === "win32") {
+    const q2 = (v) => v.replace(/%/g, "%%");
+    return `@echo off\r
+rem ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)\r
+if defined PITROOM_NODE (\r
+  "%PITROOM_NODE%" "${q2(bundle)}" %*\r
+) else (\r
+  "${q2(process.execPath)}" "${q2(bundle)}" %*\r
+)\r
+exit /b %ERRORLEVEL%\r
+`;
+  }
   const q = (s) => `'${s.replace(/'/g, `'\\''`)}'`;
   return `#!/bin/sh
 ${LAUNCHER_MARK} (created by \`pitroom install\`; \`pitroom uninstall\` removes it)
@@ -2956,7 +2969,7 @@ function verifyRefs(refs, dirs) {
     if (direct) return [direct];
     if (path18.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path18.basename(wanted)) ?? []).filter((f) => f.endsWith(`/${wanted}`) || path18.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path18.basename(wanted)) ?? []).filter((f) => f.split(path18.sep).join("/").endsWith(`/${wanted}`) || path18.basename(f) === wanted).slice(0, 20);
   };
   const check = (file2, ref) => {
     const lines = load(file2);
@@ -3632,7 +3645,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   }
   if (meta.verifyResult) {
     const v = meta.verifyResult;
-    const notFound = !v.ok && v.code === 127 && /not found|no such file/i.test(v.tail);
+    const notFound = !v.ok && v.code === 127 && /not found|no such file|is not recognized as an internal or external command/i.test(v.tail);
     out.push(`\u2500\u2500 verify: \`${meta.verify}\` ${v.ok ? "\u2714 passed" : notFound ? "\u2718 could not run (exit 127: command not found)" : `\u2718 failed (exit ${v.code})`}`);
     if (notFound) out.push("   the command is not on the PATH Pitroom runs with (an app such as an MCP client may start it without your shell's PATH): give its full path, or set PATH in the command");
     if (!v.ok && v.tail) out.push(...v.tail.split("\n").map((l) => `   ${l}`));
@@ -4046,7 +4059,8 @@ function runVerify(meta) {
   });
   const output = `${r.stdout ?? ""}${r.stderr ?? ""}`;
   fs24.writeFileSync(runFile(meta.id, "verify.log"), output);
-  return { ok: r.status === 0, code: r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
+  const notFound = process.platform === "win32" && r.status === 1 && /is not recognized as an internal or external command/.test(output);
+  return { ok: r.status === 0, code: notFound ? 127 : r.status, tail: output.trimEnd().split("\n").slice(-25).join("\n") };
 }
 function applyRun(meta, allowDelete = false) {
   if (meta.mode !== "isolate") throw new UserError(`run ${meta.id} edited your tree directly (${meta.mode}); nothing to apply`);
@@ -6669,7 +6683,7 @@ function cmdStatusline(p) {
   const lines = [];
   const then = flag(p, "then");
   if (then) {
-    const r = spawnSync8("/bin/sh", ["-c", then], { input, encoding: "utf8", timeout: 5e3 });
+    const r = process.platform === "win32" ? spawnSync8(then, { shell: true, input, encoding: "utf8", timeout: 5e3 }) : spawnSync8("/bin/sh", ["-c", then], { input, encoding: "utf8", timeout: 5e3 });
     if (r.stdout?.trimEnd()) lines.push(r.stdout.trimEnd());
   }
   try {
@@ -6871,7 +6885,9 @@ function doctor5(probe) {
   const cfg = loadConfig();
   add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs34.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
-  if (process.platform !== "win32") {
+  if (process.platform === "win32") {
+    add("warn", "git guard: not available on Windows yet, so Pitroom does not block a worker's git history changes or pushes there (read-only runs are still limited by each worker CLI's own rules, and --isolate keeps edits in a copy); prefer --isolate and check the patch before apply");
+  } else {
     const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
     add(guarded ? "ok" : "warn", guarded ? "git guard shim ready" : "git guard unavailable (git not on PATH)");
   }
@@ -7035,7 +7051,7 @@ function skillChecks() {
   }
   const launcher = launcherPath();
   if (fs34.existsSync(launcher)) {
-    const r = spawnSync9(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"] });
+    const r = spawnSync9(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
     );
