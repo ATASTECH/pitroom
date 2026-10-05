@@ -1,6 +1,6 @@
 {
   "name": "pitroom",
-  "version": "0.18.0",
+  "version": "0.19.0",
   "mcpName": "io.github.ATASTECH/pitroom",
   "description": "A free pit crew for your expensive coding agent: the superpowers development workflow, run by cheap workers. Delegate research, fixes, tests, reviews and whole plans from Claude Code, Codex or any agent to OpenCode, Codex, Claude Code or Gemini CLI workers, with receipts that prove the savings.",
   "type": "module",
