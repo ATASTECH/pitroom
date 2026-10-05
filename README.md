@@ -662,6 +662,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 - `tiers`: `cheap`, `standard` and `capable` name the workers for plan tasks and `--tier`; an optional `review` tier names who reviews a run (by default another worker than the implementer's, `standard` first).
 - `audit`: the chance (0 to 1, default 0 = off) that a finished read run is re-checked in the background, see [Audits](#audits). The `audit` tier (else `cheap`) names who does it.
 - `costs`: your relative cost per `worker:model`, only compared with each other; `maxParallel`: workers at once (default 20, at most 30).
+- `countRateLimits`: whether runs that failed on a rate limit or quota count in `pitroom history stats` and the dashboard's Stats (default `false`: they are left out of the run counts, success rates, times and tokens and shown apart as rate-limited, since they say nothing about the worker's work; `true` counts them as not ok).
 
 
 ---

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Stats
+- **Rate limits no longer count against a worker.** Runs that failed on a rate limit or quota are left out of `pitroom history stats` and the dashboard's Stats (run counts, success rates, times, tokens) and shown apart as rate-limited: they say nothing about the worker's work, and on free models they made good workers look bad (in one history, 257 of 286 failures were rate limits). The config's `"countRateLimits": true` counts them as before.
+- A run records why its worker failed (`failureKind`: `rate-limited`, `model-unavailable`, `auth`, `other`); older records are recognised by the hint Pitroom adds to a rate-limit error.
+
 ## 0.19.0
 
 ### Doctor

@@ -426,7 +426,10 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, 'stderr.log')), res.code);
-    if (f) meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
+    if (f) {
+      meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
+      meta.failureKind = f.kind;
+    }
   }
 
   try {

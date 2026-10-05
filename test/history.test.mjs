@@ -108,3 +108,27 @@ test('history: import takes in runs from before the history existed', opts, () =
   assert.equal(JSON.parse(s.run(['history', '--json']).stdout).rows[0].id, id);
   assert.match(s.run(['history', 'import']).stdout, /imported 0 run/, 'a second import finds nothing new');
 });
+
+test('stats: rate-limited runs are left out and shown apart, unless countRateLimits counts them', opts, () => {
+  const s = sandbox();
+  s.config({ worker: 'opencode:mock/a' });
+  const limited = s.run(['run', 'where is app.txt?'], { MOCK_RATE_LIMIT_MODELS: 'mock/a' });
+  assert.notEqual(limited.status, 0, 'no fallback: the run fails on the rate limit');
+  const id = /run (\d{8}-\d{6}-[0-9a-f]{4})/.exec(limited.stdout)[1];
+  assert.equal(JSON.parse(s.run(['show', id, '--json']).stdout).failureKind, 'rate-limited', 'the record says why');
+  assert.equal(s.run(['run', 'what is in app.txt?']).status, 0);
+
+  const left = JSON.parse(s.run(['history', 'stats', '--json']).stdout);
+  assert.equal(left.rateLimits, 'excluded');
+  assert.deepEqual([left.totals.runs, left.totals.ok, left.totals.failed, left.totals.limited], [1, 1, 0, 1]);
+  // the history files both runs under the model the mock reports
+  const [w] = left.byWorker;
+  assert.deepEqual([w.runs, w.ok, w.limited], [1, 1, 1], 'the worker is judged on the run that reached it');
+  assert.match(s.run(['history', 'stats']).stdout, /1 runs · 1 ok · 0 not ok · 1 rate-limited \(left out; "countRateLimits": true counts them\)/);
+
+  s.config({ worker: 'opencode:mock/a', countRateLimits: true });
+  const counted = JSON.parse(s.run(['history', 'stats', '--json']).stdout);
+  assert.equal(counted.rateLimits, 'counted');
+  assert.deepEqual([counted.totals.runs, counted.totals.ok, counted.totals.failed, counted.totals.limited], [2, 1, 1, 1]);
+  assert.match(s.run(['history', 'stats']).stdout, /2 runs · 1 ok · 1 not ok · 1 rate-limited \(counted as not ok\)/);
+});

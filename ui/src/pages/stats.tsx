@@ -36,7 +36,7 @@ export function StatsPage() {
       </div>
       {!t ? <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">{[0, 1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-24 rounded-xl" />)}</div> : (
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5">
-          <Tile label="Runs" value={String(t.runs)} sub={`${t.failed} not ok`} />
+          <Tile label="Runs" value={String(t.runs)} sub={`${t.failed} not ok${t.limited ? ` · ${t.limited} rate-limited${data?.rateLimits === 'excluded' ? ', left out' : ''}` : ''}`} />
           <Tile label="Success" value={t.runs ? `${Math.round((100 * t.ok) / t.runs)}%` : '-'} tone="text-success" />
           <Tile label="Worker time" value={clock(t.seconds)} />
           <Tile label="Tokens" value={tokens(t.tokens)} />
@@ -55,7 +55,7 @@ export function StatsPage() {
                     <div className="flex-1 bg-success/80" />
                   </div>
                 </TooltipTrigger>
-                <TooltipContent>{d.day}: {d.runs} runs, {d.ok} ok, ~{usd(d.saved)} saved</TooltipContent>
+                <TooltipContent>{d.day}: {d.runs} runs, {d.ok} ok{d.limited ? `, ${d.limited} rate-limited` : ''}, ~{usd(d.saved)} saved</TooltipContent>
               </Tooltip>
             ))}
           </div>
@@ -72,7 +72,7 @@ export function StatsPage() {
                 return (
                   <TableRow key={`${w.backend}:${w.model}`}>
                     <TableCell><div className="flex items-center gap-2"><WorkerIcon backend={w.backend} className="size-[18px] rounded-[5px]" /><WorkerBadge backend={w.backend} model={w.model} /></div></TableCell>
-                    <TableCell className="text-right tabular-nums">{w.runs}</TableCell>
+                    <TableCell className="text-right tabular-nums" title={w.limited ? `${w.limited} failed on a rate limit or quota${data.rateLimits === 'excluded' ? ' (not counted here)' : ''}` : undefined}>{w.runs}{w.limited && data.rateLimits === 'excluded' ? <span className="text-muted-foreground"> +{w.limited}</span> : null}</TableCell>
                     <TableCell>{pct === undefined ? <span className="text-muted-foreground">-</span> : <div className="flex items-center gap-2"><Progress value={pct} className="flex-1" /><span className="w-9 text-right text-xs tabular-nums text-muted-foreground">{pct}%</span></div>}</TableCell>
                     <TableCell className="hidden text-right tabular-nums sm:table-cell">{w.avgSeconds != null ? clock(w.avgSeconds) : '-'}</TableCell>
                     <TableCell className="hidden text-right tabular-nums text-muted-foreground md:table-cell">{w.avgTokens ? tokens(w.avgTokens) : '-'}</TableCell>

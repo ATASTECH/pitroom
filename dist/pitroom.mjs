@@ -1441,7 +1441,8 @@ var SCHEMA = {
   costs: "numbers",
   audit: "number",
   readIn: "string",
-  cacheDays: "number"
+  cacheDays: "number",
+  countRateLimits: "boolean"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1530,7 +1531,8 @@ function effective(flags = {}) {
     costs: setting(void 0, void 0, c.costs, {}),
     audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
     readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
-    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7)
+    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
+    countRateLimits: setting(void 0, void 0, c.countRateLimits, false)
   };
 }
 
@@ -3489,14 +3491,14 @@ function auditStats(db, since2) {
   return { total, byWorker };
 }
 function workerRows(rows, ledger, audited) {
-  const out = rows.map((r) => ({ backend: r.backend, model: r.model ?? void 0, runs: r.runs, ok: r.ok ?? 0, avgSeconds: r.avg_s, avgTokens: r.avg_t, saved: 0, audited: 0, agreed: 0 }));
+  const out = rows.map((r) => ({ backend: r.backend, model: r.model ?? void 0, runs: r.runs, ok: r.ok ?? 0, limited: r.limited ?? 0, avgSeconds: r.avg_s, avgTokens: r.avg_t, saved: 0, audited: 0, agreed: 0 }));
   const key = (backend, model) => `${backend ?? ""}\0${model ?? ""}`;
   const index = new Map(out.map((r) => [key(r.backend, r.model), r]));
   for (const e of ledger) {
     const backend = e.backend ?? "opencode";
     let row = index.get(key(backend, e.model)) ?? (e.model ? out.find((r) => r.backend === backend && r.model?.endsWith(`/${e.model}`)) : void 0);
     if (!row) {
-      row = { backend, model: e.model, runs: 0, ok: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
+      row = { backend, model: e.model, runs: 0, ok: 0, limited: 0, avgSeconds: null, avgTokens: null, saved: 0, audited: 0, agreed: 0 };
       index.set(key(backend, e.model), row);
       out.push(row);
     }
@@ -3508,24 +3510,28 @@ function workerRows(rows, ledger, audited) {
   }
   return out;
 }
+var LIMITED = `(state='failed' AND (json_extract(meta_json,'$.failureKind')='rate-limited' OR error LIKE '%the model is rate-limited or overloaded%'))`;
 function historyStats(sinceMs2) {
-  const empty = { totals: { runs: 0, ok: 0, failed: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
+  const counted = effective().countRateLimits.value === true;
+  const K = counted ? "1" : `NOT ${LIMITED}`;
+  const empty = { rateLimits: counted ? "counted" : "excluded", totals: { runs: 0, ok: 0, failed: 0, limited: 0, seconds: 0, tokens: 0, saved: 0 }, audits: { runs: 0, agree: 0, partial: 0, disagree: 0, unclear: 0, tokens: 0 }, byWorker: [], byDay: [] };
   const db = openDb();
   if (!db) return empty;
   const since2 = sinceMs2 ? new Date(sinceMs2).toISOString() : "";
   try {
-    const t = db.prepare(`SELECT COUNT(*) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(seconds),0) seconds, COALESCE(SUM(tokens),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since2);
-    const w = db.prepare(`SELECT backend, model, COUNT(*) runs, SUM(state='done') ok, AVG(seconds) avg_s, AVG(tokens) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since2);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, COUNT(*) runs, SUM(state='done') ok, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since2);
+    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since2);
+    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since2);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since2);
     const audits = auditStats(db, since2);
     const ledger = readLedger(sinceMs2);
     const byDay = /* @__PURE__ */ new Map();
     for (const e of ledger) byDay.set(e.at.slice(0, 10), (byDay.get(e.at.slice(0, 10)) ?? 0) + e.saved);
     return {
-      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
+      rateLimits: counted ? "counted" : "excluded",
+      totals: { runs: t.runs, ok: t.ok, failed: t.runs - t.ok, limited: t.limited, seconds: t.seconds, tokens: t.tokens, saved: totals(ledger).saved },
       audits: audits.total,
       byWorker: workerRows(w, ledger, audits.byWorker),
-      byDay: d.reverse().map((r) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, saved: byDay.get(r.day) ?? 0 }))
+      byDay: d.reverse().map((r) => ({ day: r.day, runs: r.runs, ok: r.ok ?? 0, limited: r.limited ?? 0, saved: byDay.get(r.day) ?? 0 }))
     };
   } catch {
     return empty;
@@ -4015,7 +4021,10 @@ function finalize(meta, res) {
   }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run2, read2(runFile(meta.id, "stderr.log")), res.code);
-    if (f) meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
+    if (f) {
+      meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
+      meta.failureKind = f.kind;
+    }
   }
   try {
     captureChanges(meta);
@@ -6612,9 +6621,10 @@ function cmdHistory(p) {
     const s = historyStats(since2);
     if (has(p, "json")) return console.log(JSON.stringify(s, null, 2)), 0;
     const t = s.totals;
-    console.log(`${t.runs} runs \xB7 ${t.ok} ok \xB7 ${t.failed} not ok \xB7 ${secs(t.seconds)} of worker time \xB7 ${(t.tokens / 1e6).toFixed(1)}M tokens \xB7 ~${usd(t.saved)} saved`);
-    const rows2 = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ""}`, String(w.runs), w.runs ? `${Math.round(100 * w.ok / w.runs)}%` : "-", secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1e3)}k` : "-", `~${usd(w.saved)}`]);
-    const head2 = ["WORKER", "RUNS", "OK", "AVG TIME", "AVG TOKENS", "SAVED"];
+    const limited = t.limited ? ` \xB7 ${t.limited} rate-limited (${s.rateLimits === "counted" ? "counted as not ok" : 'left out; "countRateLimits": true counts them'})` : "";
+    console.log(`${t.runs} runs \xB7 ${t.ok} ok \xB7 ${t.failed} not ok${limited} \xB7 ${secs(t.seconds)} of worker time \xB7 ${(t.tokens / 1e6).toFixed(1)}M tokens \xB7 ~${usd(t.saved)} saved`);
+    const rows2 = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ""}`, String(w.runs), w.runs ? `${Math.round(100 * w.ok / w.runs)}%` : "-", w.limited ? String(w.limited) : "-", secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1e3)}k` : "-", `~${usd(w.saved)}`]);
+    const head2 = ["WORKER", "RUNS", "OK", "LIMITED", "AVG TIME", "AVG TOKENS", "SAVED"];
     const widths2 = head2.map((h, i) => Math.max(h.length, ...rows2.map((r) => r[i].length)));
     const fmt2 = (r) => r.map((c, i) => i === 0 ? c.padEnd(widths2[i]) : c.padStart(widths2[i])).join("  ");
     if (rows2.length) console.log(`

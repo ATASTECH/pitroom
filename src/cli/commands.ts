@@ -291,9 +291,10 @@ export function cmdHistory(p: Parsed): number {
     const s = historyStats(since);
     if (has(p, 'json')) return console.log(JSON.stringify(s, null, 2)), 0;
     const t = s.totals;
-    console.log(`${t.runs} runs · ${t.ok} ok · ${t.failed} not ok · ${secs(t.seconds)} of worker time · ${(t.tokens / 1e6).toFixed(1)}M tokens · ~${usd(t.saved)} saved`);
-    const rows = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ''}`, String(w.runs), (w.runs ? `${Math.round((100 * w.ok) / w.runs)}%` : '-'), secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1000)}k` : '-', `~${usd(w.saved)}`]);
-    const head = ['WORKER', 'RUNS', 'OK', 'AVG TIME', 'AVG TOKENS', 'SAVED'];
+    const limited = t.limited ? ` · ${t.limited} rate-limited (${s.rateLimits === 'counted' ? 'counted as not ok' : 'left out; "countRateLimits": true counts them'})` : '';
+    console.log(`${t.runs} runs · ${t.ok} ok · ${t.failed} not ok${limited} · ${secs(t.seconds)} of worker time · ${(t.tokens / 1e6).toFixed(1)}M tokens · ~${usd(t.saved)} saved`);
+    const rows = s.byWorker.map((w) => [`${w.backend}${w.model ? `:${w.model}` : ''}`, String(w.runs), (w.runs ? `${Math.round((100 * w.ok) / w.runs)}%` : '-'), w.limited ? String(w.limited) : '-', secs(w.avgSeconds), w.avgTokens ? `${Math.round(w.avgTokens / 1000)}k` : '-', `~${usd(w.saved)}`]);
+    const head = ['WORKER', 'RUNS', 'OK', 'LIMITED', 'AVG TIME', 'AVG TOKENS', 'SAVED'];
     const widths = head.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
     const fmt = (r: string[]) => r.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join('  ');
     if (rows.length) console.log(`\n${[fmt(head), ...rows.map(fmt)].join('\n')}`);

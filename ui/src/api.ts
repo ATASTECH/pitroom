@@ -86,10 +86,12 @@ export interface HistoryRow {
 
 export interface Stats {
   price: string;
-  totals: { runs: number; ok: number; failed: number; seconds: number; tokens: number; saved: number };
+  /** `limited`: failed on a rate limit or quota; left out of runs, failed and the averages unless `rateLimits` is 'counted'. */
+  totals: { runs: number; ok: number; failed: number; limited: number; seconds: number; tokens: number; saved: number };
+  rateLimits: 'excluded' | 'counted';
   audits: { runs: number; agree: number; partial: number; disagree: number; unclear: number; tokens: number };
-  byWorker: { backend: string; model?: string; runs: number; ok: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
-  byDay: { day: string; runs: number; ok: number; saved: number }[];
+  byWorker: { backend: string; model?: string; runs: number; ok: number; limited: number; avgSeconds: number | null; avgTokens: number | null; saved: number; audited: number; agreed: number }[];
+  byDay: { day: string; runs: number; ok: number; limited: number; saved: number }[];
 }
 
 async function get<T>(path: string, params: Record<string, string | number | undefined> = {}): Promise<T> {
