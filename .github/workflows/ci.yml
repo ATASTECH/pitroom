@@ -16,6 +16,8 @@ jobs:
     # Windows is being brought up: its result is shown but does not block a merge yet.
     continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
+      # Windows' git converts LF to CRLF by default, which changes the bytes the tests compare.
+      - run: git config --global core.autocrlf false
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:

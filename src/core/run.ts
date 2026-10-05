@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getBackend } from '../backends/index.js';
 import type { Backend, Failure, Mode, Target } from '../backends/types.js';
-import { applyPatch, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
+import { applyPatch, canonical, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
 import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { DeletionRefused, UserError } from './errors.js';
@@ -120,7 +120,7 @@ export function prepareRun(o: RunOptions): RunMeta {
   }
 
   const mode = parent?.mode ?? o.mode;
-  const dir = path.resolve(parent?.dir ?? o.dir);
+  const dir = canonical(path.resolve(parent?.dir ?? o.dir));
   if (!fs.existsSync(dir) || !fs.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === 'isolate' && !root) throw new UserError('--isolate needs a git repository', 3);

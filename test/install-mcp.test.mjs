@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { root, sandbox } from './helpers.mjs';
+import { posixOnly, root, sandbox } from './helpers.mjs';
 
 const FAKE = path.join(root, 'test', 'fixtures', 'mcp', 'fake-client.mjs');
 
@@ -143,7 +143,7 @@ test('install --mcp --force registers again, a Codex entry with another command 
   assert.equal(adds(), before + 3, 'the three CLI clients were registered again');
 });
 
-test('install --mcp does not register a file at the launcher path that is not a Pitroom launcher', () => {
+test('install --mcp does not register a file at the launcher path that is not a Pitroom launcher', { skip: posixOnly }, () => {
   const s = sandbox();
   const m = machine(s, { desktop: false, clis: [] });
   fs.mkdirSync(path.join(m.home, '.local', 'bin'), { recursive: true });
@@ -166,7 +166,7 @@ test('uninstall: a client whose command is gone cannot drop its entry, which is 
   assert.match(stuck.stdout, /✘ Claude Code: its command does not run: remove the pitroom entry from its config by hand/);
 });
 
-test('install: --no-skills and --dry-run need --mcp, and a failing client command is a line, not a crash', () => {
+test('install: --no-skills and --dry-run need --mcp, and a failing client command is a line, not a crash', { skip: posixOnly }, () => {
   const s = sandbox();
   const m = machine(s, { cursor: false, desktop: false, clis: ['claude'] });
   assert.equal(s.run(['install', '--no-skills'], m.env).status, 2);

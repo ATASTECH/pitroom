@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { root, sandbox, scratchDir } from './helpers.mjs';
+import { posixOnly, root, sandbox, scratchDir } from './helpers.mjs';
 
 test('read mode returns the answer, a receipt, and touches nothing', () => {
   const s = sandbox();
@@ -172,7 +172,7 @@ test('doctor groups its checks, sums them up and says what to run next', () => {
   assert.match(out, /pitroom init +propose a starter config/, 'no fallback workers points to init');
 });
 
-test('doctor warns when the first node on PATH is too old for Pitroom', () => {
+test('doctor warns when the first node on PATH is too old for Pitroom', { skip: posixOnly }, () => {
   const s = sandbox();
   const bin = path.join(s.base, 'oldnode');
   fs.mkdirSync(bin);
@@ -360,7 +360,7 @@ test('--no-fallback and non-model errors do not fail over', () => {
   assert.equal(s.calls().filter((c) => c.argv[0] === 'run').length, 2);
 });
 
-test('git guard blocks history changes even through sh -c, env and aliases', () => {
+test('git guard blocks history changes even through sh -c, env and aliases', { skip: posixOnly }, () => {
   const s = sandbox();
   s.git('config', 'alias.ci', 'commit');
   const head = s.git('rev-parse', 'HEAD');
@@ -393,7 +393,7 @@ test('git guard blocks history changes even through sh -c, env and aliases', () 
   assert.doesNotMatch(s.git('status', '--porcelain'), /^A /m, 'index untouched');
 });
 
-test('git never waits for a password, editor or pager', () => {
+test('git never waits for a password, editor or pager', { skip: posixOnly }, () => {
   const s = sandbox();
   s.run(['run', 'x'], { MOCK_ACTIONS: 'exec:echo "$GIT_TERMINAL_PROMPT|$GIT_EDITOR|$GIT_PAGER";answer:ok' });
   assert.equal(s.execs()[0].output.trim(), '0|true|cat');
@@ -474,7 +474,7 @@ test('records from before pluggable workers still list and show', () => {
 
 test('fallback crosses backends: Claude Code (session expired) → OpenCode', () => {
   const s = sandbox();
-  const claudeMock = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'claude', 'mock', 'claude.mjs');
+  const claudeMock = path.join(path.join(root, 'test'), 'fixtures', 'claude', 'mock', 'claude.mjs');
   const r = s.run(['run', '-W', 'claude', 'where is login?'], {
     PITROOM_CLAUDE_BIN: claudeMock,
     PITROOM_FALLBACK: 'opencode:mock/alive',
@@ -486,7 +486,7 @@ test('fallback crosses backends: Claude Code (session expired) → OpenCode', ()
   assert.match(r.stdout, /SUMMARY: login is in auth.ts/);
 });
 
-const GEMINI_MOCK = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'gemini', 'mock', 'gemini.mjs');
+const GEMINI_MOCK = path.join(path.join(root, 'test'), 'fixtures', 'gemini', 'mock', 'gemini.mjs');
 
 test('a Gemini CLI worker runs in plan mode and its answer comes back with the model it used', () => {
   const s = sandbox();

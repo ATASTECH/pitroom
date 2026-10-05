@@ -186,7 +186,7 @@ test('mcp http: without PITROOM_MCP_TOKEN a token is made once, kept private, an
     const file = path.join(s.base, 'home', 'mcp-token');
     token = fs.readFileSync(file, 'utf8').trim();
     assert.match(token, /^[0-9a-f]{64}$/);
-    assert.equal(fs.statSync(file).mode & 0o077, 0, 'only the owner can read it');
+    if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o077, 0, 'only the owner can read it'); // no POSIX modes on Windows
     assert.ok(first.lines.some((l) => l.includes(`$(cat "${file}")`)), first.lines.join('\n'));
     const r = await fetch(first.url, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }) });
     assert.equal(r.status, 200);

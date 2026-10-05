@@ -1733,9 +1733,16 @@ function must(cwd, args, env) {
 function gitAvailable() {
   return git(process.cwd(), ["--version"]).code === 0;
 }
+function canonical(dir) {
+  try {
+    return fs9.realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
+}
 function repoRoot(dir) {
   const r = git(dir, ["rev-parse", "--show-toplevel"]);
-  return r.code === 0 ? path8.resolve(r.stdout.trim()) : void 0;
+  return r.code === 0 ? canonical(path8.resolve(r.stdout.trim())) : void 0;
 }
 function snapshotTree(root, exclude = [], drop2 = []) {
   const tmp = path8.join(os8.tmpdir(), `pitroom-index-${process.pid}-${crypto2.randomBytes(4).toString("hex")}`);
@@ -3702,7 +3709,7 @@ function prepareRun(o) {
     throw new UserError(`the ${backend.name} worker cannot attach files; put the content in the task`);
   }
   const mode = parent?.mode ?? o.mode;
-  const dir = path20.resolve(parent?.dir ?? o.dir);
+  const dir = canonical(path20.resolve(parent?.dir ?? o.dir));
   if (!fs24.existsSync(dir) || !fs24.statSync(dir).isDirectory()) throw new UserError(`not a directory: ${dir}`);
   const root = repoRoot(dir);
   if (mode === "isolate" && !root) throw new UserError("--isolate needs a git repository", 3);
@@ -6037,7 +6044,7 @@ var SCAN2 = 500;
 function cacheKey(o) {
   if (o.verify || o.mode !== "read" || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return void 0;
   if (!(effective().cacheDays.value > 0)) return void 0;
-  const dir = path27.resolve(o.dir);
+  const dir = canonical(path27.resolve(o.dir));
   const root = repoRoot(dir);
   if (!root) return void 0;
   try {

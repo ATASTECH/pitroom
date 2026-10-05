@@ -47,9 +47,21 @@ export function gitAvailable(): boolean {
   return git(process.cwd(), ['--version']).code === 0;
 }
 
+/**
+ * The directory as the file system names it. On Windows one folder has two spellings (`RUNNER~1` and
+ * `runneradmin`, which git prints), and path.relative treats them as different places.
+ */
+export function canonical(dir: string): string {
+  try {
+    return fs.realpathSync.native(dir);
+  } catch {
+    return dir;
+  }
+}
+
 export function repoRoot(dir: string): string | undefined {
   const r = git(dir, ['rev-parse', '--show-toplevel']);
-  return r.code === 0 ? path.resolve(r.stdout.trim()) : undefined;
+  return r.code === 0 ? canonical(path.resolve(r.stdout.trim())) : undefined;
 }
 
 /** `exclude` keeps paths (e.g. symlinked node_modules) out of the snapshot; `drop` also removes them when they are tracked. */

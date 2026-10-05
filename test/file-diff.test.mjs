@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { transformSync } from 'esbuild';
-import { root, sandbox } from './helpers.mjs';
+import { posixOnly, root, sandbox } from './helpers.mjs';
 
 const source = fs.readFileSync(path.join(root, 'src/core/file-diff.ts'), 'utf8');
 const { code } = transformSync(source, { loader: 'ts', format: 'esm', target: 'es2022' });
@@ -16,7 +16,7 @@ const diffOf = (s) => {
   return fileDiffs(s.git('diff', '--binary', '--full-index', '--no-renames', 'HEAD'), changes);
 };
 
-test('file diff: real Git hunks keep both line numbers, quoted UTF-8 paths and newline markers', () => {
+test('file diff: real Git hunks keep both line numbers, quoted UTF-8 paths and newline markers', { skip: posixOnly }, () => {
   const s = sandbox();
   const lines = Array.from({ length: 30 }, (_, i) => `const value${i} = ${i};`);
   fs.writeFileSync(path.join(s.repo, 'source.ts'), lines.join('\n'));
@@ -58,7 +58,7 @@ test('file diff: a large file is bounded without hiding later files or undercoun
   assert.equal(diffs.find((f) => f.path === 'z-last.ts').additions, 1);
 });
 
-test('file diff: binary, deleted, empty and mode-only changes remain distinct', () => {
+test('file diff: binary, deleted, empty and mode-only changes remain distinct', { skip: posixOnly }, () => {
   const s = sandbox();
   fs.writeFileSync(path.join(s.repo, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
   fs.writeFileSync(path.join(s.repo, 'deleted.ts'), 'export const gone = true;\n');

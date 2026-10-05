@@ -18,7 +18,7 @@ import type { RunOptions } from './run.js';
 import { READ_IN, type ReadIn, wantSnapshot } from './snapshot.js';
 import { readSummary } from './report.js';
 import { type RunMeta, isActive, listRunIds, readMeta } from './store.js';
-import { commitOf, repoRoot, snapshotTree } from '../vcs/git.js';
+import { canonical, commitOf, repoRoot, snapshotTree } from '../vcs/git.js';
 
 /** The newest runs looked at for an earlier answer (older ones are not found, even within cacheDays). */
 const SCAN = 500;
@@ -34,7 +34,7 @@ export interface CacheKey {
 export function cacheKey(o: RunOptions): CacheKey | undefined {
   if (o.verify || o.mode !== 'read' || o.continueFrom || o.web || o.plan || o.review || o.audit || o.auditRate === 1) return undefined;
   if (!(effective().cacheDays.value > 0)) return undefined;
-  const dir = path.resolve(o.dir);
+  const dir = canonical(path.resolve(o.dir));
   const root = repoRoot(dir);
   if (!root) return undefined;
   try {
