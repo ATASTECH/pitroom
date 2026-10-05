@@ -8,10 +8,13 @@ permissions:
 jobs:
   test:
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: [22, 24]
     runs-on: ${{ matrix.os }}
+    # Windows is being brought up: its result is shown but does not block a merge yet.
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
