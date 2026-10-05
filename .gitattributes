@@ -1,1 +1,5 @@
 dist/** -diff linguist-generated=true
+# Checked out with LF on every platform (Windows would otherwise turn skills, fixtures and scripts into CRLF).
+* text=auto eol=lf
+*.png binary
+*.gif binary
