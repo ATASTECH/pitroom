@@ -3395,8 +3395,8 @@ function listHistory(q = {}) {
   const base2 = where.length ? `WHERE ${where.join(" AND ")}` : "";
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base2}`).get(...args).n;
-    const page = q.beforeId ? `${base2 ? `${base2} AND` : "WHERE"} r.id < ?` : base2;
-    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const page2 = q.beforeId ? `${base2 ? `${base2} AND` : "WHERE"} r.id < ?` : base2;
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page2} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r) => ({
@@ -4074,6 +4074,14 @@ ${res.message}`, 1);
   meta.reverted = true;
   writeMeta(meta);
   return `reverted ${meta.changes.length} file(s) changed by ${meta.id}`;
+}
+function stopRun(id) {
+  const meta = freshMeta(id);
+  if (!isActive(meta.state) || !isAlive(meta.pid)) return void 0;
+  meta.stopRequested = true;
+  writeMeta(meta);
+  process.kill(meta.pid, "SIGTERM");
+  return meta;
 }
 function discardRun(meta) {
   if (meta.mode !== "isolate") throw new UserError("only --isolate runs have an isolated copy to discard");
@@ -5091,9 +5099,9 @@ function fileDiffs(patch, changes, sourceTruncated = false) {
 // src/core/dash-page.ts
 var THEME_SCRIPT = "(function(){try{var t=localStorage.getItem('pitroom-theme');var d=t?t==='dark':matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d)}catch(e){}})()";
 var ICON3 = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23ff6a2b'/%3E%3Cpath d='M9 8h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4zM9 16h4v4H9zm8 0h4v4h-4zm-4 4h4v4h-4zm8 0h4v4h-4z' fill='%23fff'/%3E%3C/svg%3E";
-var PAGE = `<!doctype html>
+var page = (token) => `<!doctype html>
 <html lang="en" class="dark"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<meta name="color-scheme" content="dark light"><title>Pitroom</title><link rel="icon" href="${ICON3}">
+<meta name="color-scheme" content="dark light"><meta name="pitroom-token" content="${token}"><title>Pitroom</title><link rel="icon" href="${ICON3}">
 <script>${THEME_SCRIPT}</script><link rel="stylesheet" href="/assets/app.css"></head>
 <body><div id="root"></div><script type="module" src="/assets/app.js"></script></body></html>`;
 var MISSING = `<!doctype html><meta charset="utf-8"><title>Pitroom</title><body style="font:15px system-ui;padding:3rem;max-width:40rem;margin:auto"><h1>Pitroom dash</h1><p>The dashboard files are missing (dist/ui). Run <code>npm run build</code> in the Pitroom repository, or reinstall the package.</p></body>`;
@@ -5114,6 +5122,7 @@ function findings(m) {
   const parts = [v.critical && `${v.critical} critical`, v.important && `${v.important} important`, v.minor && `${v.minor} minor`].filter(Boolean);
   return parts.length ? parts.join(" \xB7 ") : "no findings";
 }
+var canDiscard = (m) => m.mode === "isolate" && !isActive(m.state) && !m.applied && !m.discarded;
 function toRun(m) {
   const l = m.state === "running" ? live(m) : void 0;
   return {
@@ -5134,6 +5143,7 @@ function toRun(m) {
     audit: auditBadge(m),
     changes: m.changes?.length || void 0,
     applied: m.applied || void 0,
+    discardable: canDiscard(m) || void 0,
     note: l?.last ? oneLine7(String(l.last), 140) : isActive(m.state) ? "" : m.verifyResult && !m.verifyResult.ok ? `verify failed: ${m.verify ?? ""}` : m.verdict ? findings(m) : m.auditOf && m.state === "done" ? m.auditDisputed?.length ? `${m.auditDisputed.length} disputed` : "nothing disputed" : headline(m, 200) || oneLine7(m.error ?? "", 200)
   };
 }
@@ -5249,18 +5259,44 @@ function readAsset(route) {
     return void 0;
   }
 }
-function handler(touch2) {
+function handler(touch2, token) {
   const send = (res, code, type, body) => {
     res.writeHead(code, { ...HEADERS, "content-type": type });
     res.end(body);
   };
   const json = (res, code, value) => send(res, code, "application/json; charset=utf-8", JSON.stringify(value));
+  const tokenBuf = Buffer.from(token);
+  const act = (req, res, pathname) => {
+    req.resume();
+    const given = Buffer.from(String(req.headers["x-pitroom-token"] ?? ""));
+    if (given.length !== tokenBuf.length || !crypto6.timingSafeEqual(given, tokenBuf)) return json(res, 403, { error: "forbidden" });
+    if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: "forbidden origin" });
+    const m = /^\/api\/run\/([^/]+)\/(stop|discard)$/.exec(pathname);
+    if (!m) return json(res, 404, { error: "not found" });
+    let meta;
+    try {
+      if (!RUN_ID3.test(m[1])) throw new Error("bad id");
+      meta = freshMeta(m[1]);
+    } catch {
+      return json(res, 404, { error: "no such run" });
+    }
+    try {
+      if (m[2] === "stop") {
+        return stopRun(meta.id) ? json(res, 200, { ok: true, message: `stopping ${meta.id}` }) : json(res, 409, { error: "run is not active" });
+      }
+      if (!canDiscard(meta)) return json(res, 409, { error: "only a finished, not yet applied isolate run can be discarded" });
+      return json(res, 200, { ok: true, message: discardRun(meta) });
+    } catch (e) {
+      return json(res, 409, { error: e.message });
+    }
+  };
   return (req, res) => {
     touch2();
     if (!LOCAL_HOST.test(req.headers.host ?? "")) return json(res, 403, { error: "forbidden host" });
-    if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "read-only" });
     const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (url.pathname === "/") return send(res, 200, "text/html; charset=utf-8", readAsset("/assets/app.js") ? PAGE : MISSING);
+    if (req.method === "POST") return act(req, res, url.pathname);
+    if (req.method !== "GET" && req.method !== "HEAD") return json(res, 405, { error: "read-only" });
+    if (url.pathname === "/") return send(res, 200, "text/html; charset=utf-8", readAsset("/assets/app.js") ? page(token) : MISSING);
     const type = ASSETS[url.pathname];
     if (type) {
       const data = readAsset(url.pathname);
@@ -5301,7 +5337,7 @@ function handler(touch2) {
 }
 function startDash(opts) {
   let lastRequest = Date.now();
-  const server = http.createServer(handler(() => lastRequest = Date.now()));
+  const server = http.createServer(handler(() => lastRequest = Date.now(), crypto6.randomBytes(24).toString("hex")));
   return new Promise((resolve2, reject) => {
     server.once("error", reject);
     server.listen(opts.port, "127.0.0.1", () => {
@@ -6606,11 +6642,8 @@ function cmdStop(p) {
   const ids = selectIds(p, () => [resolveRun(void 0)]);
   let stopped = 0;
   for (const id of ids) {
-    const meta = freshMeta(id);
-    if (!isActive(meta.state) || !isAlive(meta.pid)) continue;
-    meta.stopRequested = true;
-    writeMeta(meta);
-    process.kill(meta.pid, "SIGTERM");
+    const meta = stopRun(id);
+    if (!meta) continue;
     console.log(`stopping ${meta.id} (${meta.state})`);
     stopped++;
   }

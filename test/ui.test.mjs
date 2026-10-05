@@ -226,3 +226,20 @@ test('ui: an audited run carries the audit\'s verdict, its disputed claims, and 
   assert.equal(audited, '0/1', 'one audited answer, none confirmed');
   assert.match(await evaluate('document.body.innerText'), /RUNS\s*\n?\s*2/i, 'the audit is not counted as a run');
 });
+
+// Last: it discards the isolate run the tests above look at.
+test('ui: a finished isolate run can be discarded from its card, after a confirmation', { skip }, async () => {
+  await open(`#${ids.change}`);
+  await until("document.querySelector('[aria-label=\"Close\"]') !== null", 'the pinned card');
+  const button = (label) => `[...document.querySelectorAll('button')].find((b) => b.textContent.trim() === ${JSON.stringify(label)})`;
+  await until(`${button('Discard')} !== undefined`, 'the Discard button');
+  assert.equal(await evaluate(`${button('Stop')} === undefined`), true, 'a finished run has no Stop');
+  await click(button('Discard'));
+  await until(`${button('Yes, discard')} !== undefined`, 'the confirmation');
+  await click(button('Cancel'));
+  await until(`${button('Discard')} !== undefined`, 'the confirmation to go away');
+  await click(button('Discard'));
+  await click(button('Yes, discard'));
+  await until(`${button('Discard')} === undefined && ${button('Yes, discard')} === undefined`, 'the run to be discarded');
+  assert.match(s.run(['show', ids.change]).stdout, /\[discarded\]/, 'the server discarded it');
+});

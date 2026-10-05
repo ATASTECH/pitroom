@@ -62,7 +62,44 @@ function Note({ children, tone }: { children: React.ReactNode; tone?: 'bad' | 'o
   return <p className={cn('text-[13px]', tone === 'bad' ? 'text-destructive' : tone === 'ok' ? 'text-muted-foreground' : 'text-warning')}>{children}</p>;
 }
 
-function Body({ d }: { d: RunDetail }) {
+/** Stop (a running run) or Discard (a finished isolate copy): asks once more before it does anything. */
+function RunAction({ d, reload }: { d: RunDetail; reload: () => void }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const running = d.state === 'running' || d.state === 'queued';
+  if (!running && !d.card?.discardable) return null;
+  const verb = running ? 'Stop' : 'Discard';
+  const go = async () => {
+    setBusy(true);
+    setError('');
+    try {
+      await (running ? api.stop(d.id) : api.discard(d.id));
+      setAsking(false);
+      reload();
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {asking ? (
+        <>
+          <span className="text-[13px] text-muted-foreground">{running ? 'Stop this run?' : 'Throw away the isolated copy? The patch file stays.'}</span>
+          <Button variant="destructive" size="sm" disabled={busy} onClick={() => void go()}>{busy ? `${verb}…` : `Yes, ${verb.toLowerCase()}`}</Button>
+          <Button variant="ghost" size="sm" disabled={busy} onClick={() => setAsking(false)}>Cancel</Button>
+        </>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setAsking(true)}>{verb}</Button>
+      )}
+      {error && <Note tone="bad">{error}</Note>}
+    </div>
+  );
+}
+
+function Body({ d, reload }: { d: RunDetail; reload: () => void }) {
   const [report, setReport] = useState(false);
   const [copied, setCopied] = useState(false);
   const running = d.state === 'running' || d.state === 'queued';
@@ -71,6 +108,7 @@ function Body({ d }: { d: RunDetail }) {
   const items = useMemo(() => traceItems(d.steps, diffs), [d.steps, diffs]);
   return (
     <div className="space-y-5">
+      <RunAction d={d} reload={reload} />
       {!/^Review of /.test(d.task) && <Section title="Task"><Block>{d.task}</Block></Section>}
       <Section title={`What it did${d.steps.length ? ` · ${d.steps.length}` : ''}`}>
         {d.steps.length ? <AgentActivity key={d.id} items={items} status={running ? 'working' : 'complete'} defaultOpen collapseOnComplete={false} maxHeight={440} activeLabel="Working…" /> : <p className="text-sm text-muted-foreground">{running ? 'Waiting for its first step…' : 'No activity was recorded for this run.'}</p>}
@@ -116,9 +154,9 @@ function Body({ d }: { d: RunDetail }) {
 
 /** The expanded view of one run: its task, what the worker did, the result, the changes and the details. */
 export function RunDetailView({ id, live }: { id: string; live?: boolean }) {
-  const { data, error } = usePoll(() => api.run(id), live ? 3000 : 600_000, [id, live]);
+  const { data, error, reload } = usePoll(() => api.run(id), live ? 3000 : 600_000, [id, live]);
   if (!data) return error ? <p className="text-sm text-destructive">Could not load this run.</p> : <div className="space-y-3"><Skeleton className="h-16" /><Skeleton className="h-24" /></div>;
-  return <Body d={data} />;
+  return <Body d={data} reload={() => void reload()} />;
 }
 
 export { Pill };

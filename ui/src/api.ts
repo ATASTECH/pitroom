@@ -1,4 +1,4 @@
-// Types and fetchers for the dashboard's read-only JSON API (see src/core/dash.ts).
+// Types and fetchers for the dashboard's JSON API (see src/core/dash.ts). Reading is open to the page; stopping or discarding a run needs the secret the page was served with.
 import type { FileDiffData } from '../../src/core/file-diff';
 export type { FileDiffData, FileDiffLine } from '../../src/core/file-diff';
 export type RunState = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
@@ -20,6 +20,8 @@ export interface DashRun {
   audit?: string;
   changes?: number;
   applied?: boolean;
+  /** A finished isolate run whose copy can still be thrown away. */
+  discardable?: boolean;
   /** Finished, but its --verify command failed. */
   verifyFailed?: boolean;
   note: string;
@@ -98,7 +100,17 @@ async function get<T>(path: string, params: Record<string, string | number | und
   return r.json() as Promise<T>;
 }
 
+async function post(path: string): Promise<string> {
+  const token = document.querySelector<HTMLMetaElement>('meta[name="pitroom-token"]')?.content ?? '';
+  const r = await fetch(path, { method: 'POST', headers: { 'x-pitroom-token': token } });
+  const body = (await r.json().catch(() => ({}))) as { message?: string; error?: string };
+  if (!r.ok) throw new Error(body.error ?? `${path}: ${r.status}`);
+  return body.message ?? 'done';
+}
+
 export const api = {
+  stop: (id: string) => post(`/api/run/${id}/stop`),
+  discard: (id: string) => post(`/api/run/${id}/discard`),
   state: (limit: number, group?: string) => get<DashState>('/api/state', { limit, group }),
   run: (id: string) => get<RunDetail>(`/api/run/${id}`),
   history: (p: { q?: string; state?: string; model?: string; days?: number; before?: string; limit?: number }) =>
