@@ -240,6 +240,12 @@ test('ui: a finished isolate run can be discarded from its card, after a confirm
   await until(`${button('Discard')} !== undefined`, 'the confirmation to go away');
   await click(button('Discard'));
   await click(button('Yes, discard'));
-  await until(`${button('Discard')} === undefined && ${button('Yes, discard')} === undefined`, 'the run to be discarded');
-  assert.match(s.run(['show', ids.change]).stdout, /\[discarded\]/, 'the server discarded it');
+  // while the request is in flight the button reads "Discard…", so neither label is on the page: wait for the server, not the buttons
+  let shown = '';
+  for (let i = 0; i < 80 && !/\[discarded\]/.test(shown); i++) {
+    shown = s.run(['show', ids.change]).stdout;
+    if (!/\[discarded\]/.test(shown)) await sleep(100);
+  }
+  assert.match(shown, /\[discarded\]/, 'the server discarded it');
+  await until(`${button('Discard')} === undefined && ${button('Yes, discard')} === undefined && ${button('Discard…')} === undefined`, 'the buttons to go');
 });

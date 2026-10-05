@@ -5410,13 +5410,17 @@ async function ping(port) {
   }
 }
 async function runningDash() {
+  let r;
   try {
-    const r = JSON.parse(fs27.readFileSync(registryFile(), "utf8"));
-    if (isAlive(r.pid) && await ping(r.port)) return { ...r, url: `http://127.0.0.1:${r.port}/` };
+    r = JSON.parse(fs27.readFileSync(registryFile(), "utf8"));
   } catch {
+    return void 0;
   }
-  fs27.rmSync(registryFile(), { force: true });
-  return void 0;
+  if (!isAlive(r.pid)) {
+    fs27.rmSync(registryFile(), { force: true });
+    return void 0;
+  }
+  return await ping(r.port) ? { ...r, url: `http://127.0.0.1:${r.port}/` } : void 0;
 }
 function openBrowser(url) {
   const [cmd, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
@@ -5468,7 +5472,9 @@ async function dashCommand(o) {
     dash = await startDash({ port: 0, idleMs: o.idleMs });
   }
   fs27.mkdirSync(home(), { recursive: true });
-  fs27.writeFileSync(registryFile(), JSON.stringify({ pid: process.pid, port: dash.port }));
+  const tmp = `${registryFile()}.${process.pid}.tmp`;
+  fs27.writeFileSync(tmp, JSON.stringify({ pid: process.pid, port: dash.port }));
+  renameOver(tmp, registryFile());
   const stop = () => void dash.close();
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);

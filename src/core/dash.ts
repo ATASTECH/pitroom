@@ -19,6 +19,7 @@ import { headline } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
+import { renameOver } from './fs-atomic.js';
 import { discardRun, stopRun } from './run.js';
 import { type RunMeta, freshMeta, home, isActive, isAlive, listRunIds } from './store.js';
 import { describeTarget } from './target.js';
@@ -385,14 +386,19 @@ async function ping(port: number): Promise<boolean> {
 
 /** The address of the dash that is already running, or undefined. */
 export async function runningDash(): Promise<(Registry & { url: string }) | undefined> {
+  let r: Registry;
   try {
-    const r = JSON.parse(fs.readFileSync(registryFile(), 'utf8')) as Registry;
-    if (isAlive(r.pid) && (await ping(r.port))) return { ...r, url: `http://127.0.0.1:${r.port}/` };
+    r = JSON.parse(fs.readFileSync(registryFile(), 'utf8')) as Registry;
   } catch {
-    // no file, or not a dash any more
+    return undefined; // no file, or one that is being written right now: the next dash that starts replaces it
   }
-  fs.rmSync(registryFile(), { force: true });
-  return undefined;
+  if (!isAlive(r.pid)) {
+    fs.rmSync(registryFile(), { force: true });
+    return undefined;
+  }
+  // A live process that does not answer yet (starting, or a busy machine) keeps its entry: deleting it would
+  // leave a dash that is up but that nobody can find.
+  return (await ping(r.port)) ? { ...r, url: `http://127.0.0.1:${r.port}/` } : undefined;
 }
 
 function openBrowser(url: string): void {
@@ -460,7 +466,9 @@ export async function dashCommand(o: DashOptions): Promise<number> {
     dash = await startDash({ port: 0, idleMs: o.idleMs });
   }
   fs.mkdirSync(home(), { recursive: true });
-  fs.writeFileSync(registryFile(), JSON.stringify({ pid: process.pid, port: dash.port }));
+  const tmp = `${registryFile()}.${process.pid}.tmp`; // a reader never sees half a file
+  fs.writeFileSync(tmp, JSON.stringify({ pid: process.pid, port: dash.port }));
+  renameOver(tmp, registryFile());
   const stop = () => void dash.close();
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);

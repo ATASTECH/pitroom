@@ -192,3 +192,21 @@ test('dash and history: a run whose --verify failed is marked and needs attentio
   assert.equal(problem.rows[0].verifyFailed, true);
   assert.match(s.run(['history']).stdout, new RegExp(`${bad}.*verify failed`));
 });
+
+test('dash: the registry entry of a live process is kept when it does not answer; a dead one or a stale file is cleaned', () => {
+  const s = sandbox();
+  const file = path.join(s.base, 'home', 'dash.json');
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  // alive (this test's own process) but nothing listens on the port: it might be a dash that is still starting
+  fs.writeFileSync(file, JSON.stringify({ pid: process.pid, port: 9 }));
+  assert.equal(s.run(['dash', '--stop']).status, 2, 'not running');
+  assert.ok(fs.existsSync(file), 'a live process keeps its entry');
+  // half a file, as a reader may see while the server writes it
+  fs.writeFileSync(file, '{"pid":');
+  assert.equal(s.run(['dash', '--stop']).status, 2);
+  assert.ok(fs.existsSync(file), 'an unreadable entry is left for the dash that is being written');
+  // a process that is gone
+  fs.writeFileSync(file, JSON.stringify({ pid: 2 ** 22 - 1, port: 9 }));
+  assert.equal(s.run(['dash', '--stop']).status, 2);
+  assert.ok(!fs.existsSync(file), 'the entry of a dead process is removed');
+});
