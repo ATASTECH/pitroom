@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.21.0
 
 ### Windows
 - **A real git guard on Windows.** Until now the guard (a worker may not commit, reset, push, `git add`, `clean` and so on) was a `sh` script and Windows had none. Now the ref and push guard (git's own env config with a `reference-transaction` hook) is on there too, and the `git` shim runs on the `sh.exe` that Git for Windows brings (`git.cmd` for cmd.exe and PowerShell, `git` for Git Bash). A worker that starts git without a shell skips the shim and is left with the config layer. The guard tests, which were skipped on Windows, run there now; `pitroom doctor` reports the shim as ready or says what is missing.
