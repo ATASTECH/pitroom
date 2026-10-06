@@ -4,6 +4,7 @@ import { auditLines } from './audit.js';
 import { archivedRun } from './history.js';
 import fs from 'node:fs';
 import { planName } from './plan.js';
+import { catalogLabel } from './prices.js';
 import { getBackend } from '../backends/index.js';
 import { compact, primaryPrice, usd } from './receipt.js';
 import { type RunMeta, isActive, runFile } from './store.js';
@@ -80,7 +81,7 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
     const ratio = meta.returnedTokens ? `, ${Math.max(1, Math.round(u.total / meta.returnedTokens))}× compression` : '';
     out.push(
       `── receipt: worker processed ${compact(u.total)} tokens in ${plural(u.steps, 'step')} (${plural(u.toolCalls, 'tool call')}${u.denied ? `, ${u.denied} blocked` : ''})` +
-        ` · worker cost ${u.cost !== undefined ? usd(u.cost) : u.costEstimate !== undefined ? `~${usd(u.costEstimate)} (estimated from your workerPrices)` : 'n/a'} · returned ~${compact(meta.returnedTokens ?? 0)} tokens${ratio}` +
+        ` · worker cost ${u.cost !== undefined ? usd(u.cost) : u.costEstimate !== undefined ? `~${usd(u.costEstimate)} (estimated from ${u.costSource === 'catalog' ? `${catalogLabel()} prices` : 'your workerPrices'})` : 'n/a'} · returned ~${compact(meta.returnedTokens ?? 0)} tokens${ratio}` +
         (meta.savedUsd !== undefined ? ` · est. saved ${usd(meta.savedUsd)} vs ${primaryPrice().name}` : ''),
     );
   }

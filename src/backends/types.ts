@@ -23,6 +23,8 @@ export interface Usage {
   cost?: number;
   /** USD estimated from the user's `workerPrices` when the CLI reports no cost (Codex, Gemini); never set when it does. */
   costEstimate?: number;
+  /** Whose prices the estimate used: the user's own `workerPrices`, or the price catalog. */
+  costSource?: 'config' | 'catalog';
   steps: number;
   toolCalls: number;
   /** Tool calls the permission layer refused. */

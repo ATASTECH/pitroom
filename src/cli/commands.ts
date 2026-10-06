@@ -9,7 +9,10 @@ import { DeletionRefused, UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { installMcp, parseClients, uninstallMcp } from '../core/mcp-install.js';
-import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd } from '../core/receipt.js';
+import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd, workerPrice } from '../core/receipt.js';
+import { catalogLabel, catalogStatus, refreshCatalog } from '../core/prices.js';
+import { getBackend } from '../backends/index.js';
+import { resolveChain } from '../core/chain.js';
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
@@ -127,6 +130,49 @@ export async function cmdAudit(p: Parsed): Promise<number> {
   m.audit = { id: a.id, state: 'running' };
   writeMeta(m);
   return launch(p, a);
+}
+
+/** `pitroom prices`: the price catalog (see core/prices.ts), what it holds and which prices the workers in use get. */
+export async function cmdPrices(p: Parsed): Promise<number> {
+  if (has(p, 'refresh')) {
+    const r = await refreshCatalog();
+    if (r.state === 'failed') {
+      if (!has(p, 'quiet')) console.error(`could not refresh the price catalog: ${r.error}`);
+      return 1;
+    }
+    if (!has(p, 'quiet')) console.log(`price catalog updated: ${r.models} priced models`);
+  }
+  const st = catalogStatus();
+  const used = (() => {
+    try {
+      const chain = resolveChain();
+      return [chain.worker, ...chain.fallback].map((t) => {
+        const backend = getBackend(t.backend);
+        const model = (t.model ?? '').split('#')[0];
+        const price = workerPrice(t.backend, model);
+        return {
+          worker: model ? `${t.backend}:${model}` : t.backend,
+          reportsCost: backend.capabilities.reportsCost,
+          price: price ? { name: price.name, source: price.source, input: price.input, output: price.output, cachedInput: price.cachedInput } : undefined,
+        };
+      });
+    } catch {
+      return [];
+    }
+  })();
+  if (has(p, 'json')) return console.log(JSON.stringify({ ...st, workers: used }, null, 2)), 0;
+  console.log(`price feed: ${st.enabled ? 'on' : 'off ("priceFeed": true in the config turns it on: Pitroom then fetches one public file, see PRIVACY.md)'}`);
+  console.log(`source:     ${st.url}${st.enabled ? `, refreshed after a run when older than ${st.hours} h` : ''}`);
+  console.log(st.models ? `catalog:    ${st.models} priced models, updated ${st.ageHours! < 1 ? 'within the hour' : `${st.ageHours!.toFixed(1)} h ago`}` : 'catalog:    none yet (pitroom prices --refresh fetches it)');
+  if (st.lastFailure) console.log(`last try:   failed: ${st.lastFailure.replace(/^\S+ /, '')}`);
+  if (used.length) {
+    console.log('\nthe workers in use:');
+    for (const u of used) {
+      const what = u.reportsCost ? 'reports its own cost' : u.price ? `in ${u.price.input} · out ${u.price.output} · cached ${u.price.cachedInput} USD/1M  (${u.price.source === 'catalog' ? `price catalog ${catalogLabel()}` : 'your workerPrices'})` : 'no price: its runs count as free in the savings';
+      console.log(`  ${u.worker.padEnd(36)} ${what}`);
+    }
+  }
+  return 0;
 }
 
 /** The models that said "rate limited" and are being left alone for now; --clear tries them again. */

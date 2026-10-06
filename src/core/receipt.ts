@@ -8,11 +8,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { effective } from './config.js';
+import { catalogPrice } from './prices.js';
 import type { Usage } from '../backends/types.js';
 import { ledgerFile, type RunMeta } from './store.js';
 
 export interface Price {
   name: string;
+  /** Whose number it is: the user's own (config, presets) or the price catalog's. */
+  source?: 'config' | 'catalog';
   input: number;
   output: number;
   cachedInput: number;
@@ -31,7 +34,12 @@ export function primaryPrice(): Price {
   if (custom && custom.length >= 2 && custom.every((n) => Number.isFinite(n) && n >= 0)) {
     return { name: 'custom', input: custom[0]!, output: custom[1]!, cachedInput: custom[2] ?? custom[0]! / 10 };
   }
-  return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet!;
+  const named = eff.primary.value;
+  const preset = PRESETS[named.toLowerCase()];
+  if (preset) return preset;
+  // not a preset: a model id from the price catalog, when the feed is on and has it
+  const c = eff.priceFeed.value ? catalogPrice('', named) : undefined;
+  return c ? { name: named, source: 'catalog', input: c.input, output: c.output, cachedInput: c.cachedInput } : PRESETS.sonnet!;
 }
 
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
@@ -40,26 +48,29 @@ export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 export function parsePriceSpec(spec: unknown, name = 'worker'): Price | undefined {
   const parts = typeof spec === 'string' ? spec.split(',').map((x) => Number(x.trim())) : [];
   if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return undefined;
-  return { name, input: parts[0]!, output: parts[1]!, cachedInput: parts[2] ?? parts[0]! / 10 };
+  return { name, source: 'config', input: parts[0]!, output: parts[1]!, cachedInput: parts[2] ?? parts[0]! / 10 };
 }
 
 /**
  * The price the user gave for a worker model: `backend:model` for the first of `models` that has one (the model that
- * actually ran, then the one that was asked for), else `backend`. Pitroom knows no vendor prices.
+ * actually ran, then the one that was asked for), else `backend`; only then the price catalog, when the feed is on (prices.ts).
+ * Without the feed Pitroom knows no vendor prices.
  */
 export function workerPrice(backend: string, ...models: (string | undefined)[]): Price | undefined {
   const prices = effective().workerPrices.value;
   for (const key of [...models.filter((m): m is string => !!m).map((m) => `${backend}:${m.split('#')[0]}`), backend]) {
     if (prices[key] !== undefined) return parsePriceSpec(prices[key], key);
   }
-  return undefined;
+  // none of yours: the catalog, when the feed is on (see prices.ts)
+  const c = effective().priceFeed.value ? catalogPrice(backend, ...models) : undefined;
+  return c ? { name: c.key, source: 'catalog', input: c.input, output: c.output, cachedInput: c.cachedInput } : undefined;
 }
 
 /** What the tokens cost at a price (USD). */
 export const costAt = (usage: Usage, price: Price): number =>
   (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
 
-/** The worker's cost: as its CLI reported it, else as estimated from the user's `workerPrices`; undefined when neither. */
+/** The worker's cost: as its CLI reported it, else as estimated from a price (the user's `workerPrices`, else the catalog's); undefined when neither. */
 export const workerCostOf = (usage: Usage | undefined): number | undefined => usage?.cost ?? usage?.costEstimate;
 
 export function savedUsd(usage: Usage, returnedTokens: number, price = primaryPrice()): number {
@@ -77,8 +88,9 @@ export interface LedgerEntry {
   tokens: number;
   returned: number;
   workerCost: number;
-  /** The worker cost is an estimate from the user's `workerPrices`, not what the CLI reported. */
+  /** The worker cost is an estimate from a price, not what the CLI reported; `costSource` says whose price. */
   costEstimated?: true;
+  costSource?: 'config' | 'catalog';
   saved: number;
   price: string;
 }
@@ -96,7 +108,7 @@ export function record(meta: RunMeta): void {
     tokens: meta.usage.total,
     returned: meta.returnedTokens ?? 0,
     workerCost: workerCostOf(meta.usage) ?? 0,
-    ...(meta.usage.cost === undefined && meta.usage.costEstimate !== undefined ? { costEstimated: true as const } : {}),
+    ...(meta.usage.cost === undefined && meta.usage.costEstimate !== undefined ? { costEstimated: true as const, costSource: meta.usage.costSource } : {}),
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name,
   };

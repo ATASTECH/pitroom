@@ -15,3 +15,4 @@ export { findSecretFiles, findSecretFilesInTree, looksSecret, secretWarning } fr
 export { badgeUrl, card, compact, costAt, estimateTokens, parsePriceSpec, primaryPrice, readLedger, savedUsd, totals, usd, workerCostOf } from './core/receipt.js';
 export { TERMINAL, STOP_FILE, freshMeta, home, isActive, isAlive, listRunIds, newRunId, readMeta, requestStop, resolveRun, runDir, runFile, runsDir, writeMeta } from './core/store.js';
 export { spawnWorker } from './core/process.js';
+export { catalogPrice, readCatalog, trim } from './core/prices.js';

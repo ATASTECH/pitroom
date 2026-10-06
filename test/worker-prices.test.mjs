@@ -20,7 +20,7 @@ function ask(s, config) {
 }
 
 test('workerPrices: "in,out[,cachedIn]" is parsed, anything else is not a price', () => {
-  assert.deepEqual(parsePriceSpec('2,10,0.5', 'k'), { name: 'k', input: 2, output: 10, cachedInput: 0.5 });
+  assert.deepEqual(parsePriceSpec('2,10,0.5', 'k'), { name: 'k', source: 'config', input: 2, output: 10, cachedInput: 0.5 });
   assert.equal(parsePriceSpec('2,10', 'k').cachedInput, 0.2, 'the cached price defaults to a tenth of the input price');
   for (const bad of ['', 'abc', '2', '1,2,3,4', '-1,5', '1,x', 5, undefined, null]) assert.equal(parsePriceSpec(bad), undefined, String(bad));
 });

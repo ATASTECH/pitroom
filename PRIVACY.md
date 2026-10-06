@@ -6,7 +6,9 @@ Pitroom is a command-line tool and a set of agent skills that run on your own co
 
 ## What the Pitroom authors collect
 
-Nothing. Pitroom has no accounts, no analytics and no telemetry, and its own code makes no network requests. No data is sent to the authors.
+Nothing. Pitroom has no accounts, no analytics and no telemetry, and by default its own code makes no network requests. No data is sent to the authors.
+
+**One request you can turn on.** With `"priceFeed": true` in the config (or `PITROOM_PRICE_FEED=1`; off by default) Pitroom keeps a price list of AI models up to date: at most once a day, in a background process after a run, it sends a plain `GET` for one public file (`https://models.dev/api.json` unless you set `priceFeedUrl`) and keeps a trimmed copy in its state directory. The request carries no data about you, your code, your tasks or your runs, and no cookie or account; like any web request it shows your IP address to the server that answers it. Nothing is fetched while the feed is off, and `pitroom prices` shows what it holds.
 
 ## Data categories and purposes
 

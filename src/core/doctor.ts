@@ -14,6 +14,7 @@ import { resolveChain } from './chain.js';
 import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { mcpStatus } from './mcp-install.js';
+import { catalogStatus } from './prices.js';
 import { workerPrice } from './receipt.js';
 import { VERSION } from './run.js';
 import { type RunMeta, home, listRunIds, readMeta } from './store.js';
@@ -152,7 +153,13 @@ export function doctor(probe: boolean): number {
     const key = model ? `${t.backend}:${model}` : t.backend; // a target that names no model: the backend alone
     if (backend.capabilities.reportsCost || seenUnpriced.has(key) || workerPrice(t.backend, model)) continue;
     seenUnpriced.add(key);
-    add('warn', `${key} reports no cost, so its runs count as free in the savings: give its price in the config, "workerPrices": {"${key}": "<in>,<out>[,<cachedIn>]"} (USD per 1M tokens)`);
+    add('warn', `${key} reports no cost, so its runs count as free in the savings: give its price in the config, "workerPrices": {"${key}": "<in>,<out>[,<cachedIn>]"} (USD per 1M tokens), or turn on "priceFeed": true to use the public price catalog`);
+  }
+  // The price catalog, when the feed is on.
+  const feed = catalogStatus();
+  if (feed.enabled) {
+    if (feed.models) add(feed.lastFailure ? 'warn' : 'ok', `price catalog: ${feed.models} priced models from ${feed.url}, updated ${feed.ageHours! < 1 ? 'within the hour' : `${feed.ageHours!.toFixed(1)} h ago`}${feed.lastFailure ? `; the last refresh failed (${feed.lastFailure.replace(/^\S+ /, '')})` : ''}`);
+    else add('warn', `price feed is on but no catalog has been fetched yet${feed.lastFailure ? ` (the last try failed: ${feed.lastFailure.replace(/^\S+ /, '')})` : ''}: it is fetched after a run, or now with \`pitroom prices --refresh\``);
   }
   // Models skipped for now because they said "rate limited": say so, with when they come back.
   for (const c of Object.values(activeCooldowns())) {

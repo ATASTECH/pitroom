@@ -54,6 +54,7 @@ Usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
+  pitroom prices [--refresh] [--json]   the price catalog (config "priceFeed") and the price each worker in use gets
   pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
                                         --clear tries them again
   pitroom mcp [-d DIR] [--http [--port N]]
@@ -107,8 +108,10 @@ Exit codes: 0 ok · 1 worker failed · 2 usage · 3 refused/setup · 4 timeout
 Workers: ${backendIds().join(', ')} (targets: "opencode", "opencode:provider/model", or a bare model)
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
-     PITROOM_<WORKER>_BIN
-Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays)`;
+     PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
+     PITROOM_PRICE_FEED_HOURS, PITROOM_<WORKER>_BIN
+Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
+        countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 
@@ -118,6 +121,7 @@ const COMMANDS: Record<string, Command> = {
   review: cmd.cmdReview,
   audit: cmd.cmdAudit,
   cooldown: cmd.cmdCooldown,
+  prices: cmd.cmdPrices,
   mcp: (p) => {
     const port = flag(p, 'port');
     if (port !== undefined && !has(p, 'http')) throw new UserError('--port goes with --http (on stdio there is no port)');

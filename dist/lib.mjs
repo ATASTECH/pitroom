@@ -380,10 +380,10 @@ function parseEvents2(jsonl) {
       }
       case "turn.completed": {
         const u = e.usage ?? {};
-        const cached2 = num2(u.cached_input_tokens);
+        const cached3 = num2(u.cached_input_tokens);
         const reasoning = num2(u.reasoning_output_tokens);
-        usage.input += Math.max(0, num2(u.input_tokens) - cached2);
-        usage.cacheRead += cached2;
+        usage.input += Math.max(0, num2(u.input_tokens) - cached3);
+        usage.cacheRead += cached3;
         usage.cacheWrite += num2(u.cache_write_input_tokens);
         usage.output += Math.max(0, num2(u.output_tokens) - reasoning);
         usage.reasoning += reasoning;
@@ -752,9 +752,9 @@ function parseEvents3(jsonl) {
       if (e.severity === "error") error ??= String(e.message ?? "Gemini CLI error");
     } else if (e.type === "result") {
       const s = e.stats ?? {};
-      const cached2 = num3(s.cached);
-      usage.cacheRead += cached2;
-      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached2);
+      const cached3 = num3(s.cached);
+      usage.cacheRead += cached3;
+      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached3);
       usage.output += num3(s.output_tokens);
       usage.total += num3(s.total_tokens) || num3(s.input_tokens) + num3(s.output_tokens);
       usage.toolCalls = Math.max(usage.toolCalls, num3(s.tool_calls));
@@ -1994,7 +1994,7 @@ function secretWarning(files, mode) {
 var slash = (p) => p.split(path13.sep).join("/");
 
 // src/core/receipt.ts
-import fs15 from "node:fs";
+import fs16 from "node:fs";
 
 // src/core/config.ts
 import fs14 from "node:fs";
@@ -2020,7 +2020,10 @@ var SCHEMA = {
   notify: "boolean",
   notifyCommand: "string",
   notifyAfter: "number",
-  workerPrices: "record"
+  workerPrices: "record",
+  priceFeed: "boolean",
+  priceFeedUrl: "string",
+  priceFeedHours: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
@@ -2119,8 +2122,61 @@ function effective(flags = {}) {
     notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
     notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
     notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
-    workerPrices: setting(void 0, void 0, c.workerPrices, {})
+    workerPrices: setting(void 0, void 0, c.workerPrices, {}),
+    priceFeed: setting(void 0, flag01(e.PITROOM_PRICE_FEED), c.priceFeed, false),
+    priceFeedUrl: setting(void 0, e.PITROOM_PRICE_FEED_URL?.trim() || void 0, c.priceFeedUrl?.trim() || void 0, "https://models.dev/api.json"),
+    priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24)
   };
+}
+
+// src/core/prices.ts
+import fs15 from "node:fs";
+import path15 from "node:path";
+var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
+var catalogFile = () => path15.join(home(), "prices.json");
+function trim(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [provider, p] of Object.entries(raw)) {
+    for (const [id, m] of Object.entries(p?.models ?? {})) {
+      const c = m?.cost;
+      const ok = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
+      if (!c || !ok(c.input) || !ok(c.output)) continue;
+      out[`${provider}/${id}`] = [c.input, c.output, ok(c.cache_read) ? c.cache_read : c.input / 10];
+    }
+  }
+  return out;
+}
+var cached2;
+function readCatalog() {
+  const file = catalogFile();
+  try {
+    const { mtimeMs } = fs15.statSync(file);
+    if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
+    const parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
+    const catalog5 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
+    cached2 = { file, mtimeMs, catalog: catalog5 };
+    return catalog5;
+  } catch {
+    return void 0;
+  }
+}
+var OWN = { codex: ["openai"], claude: ["anthropic"], gemini: ["google"] };
+function catalogPrice(backend, ...models) {
+  const catalog5 = readCatalog();
+  if (!catalog5) return void 0;
+  for (const raw of models) {
+    const id = raw?.split("#")[0];
+    if (!id) continue;
+    const keys = [id, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id}`)];
+    const any = keys.find((k) => catalog5.models[k]) ?? Object.keys(catalog5.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
+    const triple = any ? catalog5.models[any] : void 0;
+    if (any && triple && triple.length === 3 && triple.every((n) => Number.isFinite(n) && n >= 0)) {
+      const [input, output, cachedInput] = triple;
+      return { input, output, cachedInput, key: any };
+    }
+  }
+  return void 0;
 }
 
 // src/core/receipt.ts
@@ -2136,13 +2192,17 @@ function primaryPrice() {
   if (custom && custom.length >= 2 && custom.every((n) => Number.isFinite(n) && n >= 0)) {
     return { name: "custom", input: custom[0], output: custom[1], cachedInput: custom[2] ?? custom[0] / 10 };
   }
-  return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet;
+  const named = eff.primary.value;
+  const preset = PRESETS[named.toLowerCase()];
+  if (preset) return preset;
+  const c = eff.priceFeed.value ? catalogPrice("", named) : void 0;
+  return c ? { name: named, source: "catalog", input: c.input, output: c.output, cachedInput: c.cachedInput } : PRESETS.sonnet;
 }
 var estimateTokens = (text) => Math.ceil(text.length / 4);
 function parsePriceSpec(spec, name = "worker") {
   const parts = typeof spec === "string" ? spec.split(",").map((x) => Number(x.trim())) : [];
   if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return void 0;
-  return { name, input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
+  return { name, source: "config", input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
 }
 var costAt = (usage, price) => (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
 var workerCostOf = (usage) => usage?.cost ?? usage?.costEstimate;
@@ -2151,8 +2211,8 @@ function savedUsd(usage, returnedTokens, price = primaryPrice()) {
   return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
 function readLedger(sinceMs) {
-  if (!fs15.existsSync(ledgerFile())) return [];
-  return fs15.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+  if (!fs16.existsSync(ledgerFile())) return [];
+  return fs16.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
       return [JSON.parse(l)];
     } catch {
@@ -2228,10 +2288,10 @@ ${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.rou
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs16 from "node:fs";
+import fs17 from "node:fs";
 async function spawnWorker(inv, opts) {
-  const out = fs16.openSync(opts.stdoutFile, "w");
-  const err = fs16.openSync(opts.stderrFile, "w");
+  const out = fs17.openSync(opts.stdoutFile, "w");
+  const err = fs17.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -2254,7 +2314,7 @@ async function spawnWorker(inv, opts) {
   }, opts.timeoutSec * 1e3);
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
-      res.spawnError = e.code === "ENOENT" ? fs16.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      res.spawnError = e.code === "ENOENT" ? fs17.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
       resolve2(127);
     });
     child.on("close", (c) => resolve2(c));
@@ -2263,8 +2323,8 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs16.closeSync(out);
-  fs16.closeSync(err);
+  fs17.closeSync(out);
+  fs17.closeSync(err);
   return res;
 }
 export {
@@ -2277,6 +2337,7 @@ export {
   badgeUrl,
   brief,
   card,
+  catalogPrice,
   compact,
   cooldownMs,
   costAt,
@@ -2307,6 +2368,7 @@ export {
   planName,
   planTask,
   primaryPrice,
+  readCatalog,
   readLedger,
   readMeta,
   releaseSlot,
@@ -2323,6 +2385,7 @@ export {
   slotHolders,
   spawnWorker,
   totals,
+  trim,
   tryAcquireSlot,
   usd,
   verifyRefs,

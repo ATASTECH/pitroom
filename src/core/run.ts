@@ -17,6 +17,7 @@ import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldo
 import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
 import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
 import { notifyEnded } from './notify.js';
+import { refreshInBackground } from './prices.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
@@ -468,7 +469,10 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   // computed as if the worker had been free. Only when they gave one; otherwise it stays unknown ("n/a").
   if (meta.usage && meta.usage.cost === undefined) {
     const price = workerPrice(ran.backend, meta.resolvedModel ?? run.model, ran.model);
-    if (price) meta.usage.costEstimate = costAt(meta.usage, price);
+    if (price) {
+      meta.usage.costEstimate = costAt(meta.usage, price);
+      meta.usage.costSource = price.source ?? 'config';
+    }
   }
   meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
   // An audit is overhead, not a delegation that saved anything.
@@ -478,6 +482,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   record(meta);
   if (meta.auditOf) settleAudit(meta);
   notifyEnded(meta);
+  refreshInBackground(); // the price catalog, when the feed is on and it is due: in a process of its own
   return meta;
 }
 
