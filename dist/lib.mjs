@@ -1849,6 +1849,16 @@ function writeIfChanged(file, content) {
   fs11.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
 }
+function pathKey(env) {
+  const keys = Object.keys(env).filter((k) => k.toLowerCase() === "path");
+  return keys.includes("PATH") ? "PATH" : keys[0] ?? "PATH";
+}
+function onePath(env) {
+  const key = pathKey(env);
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (k !== key && k.toLowerCase() === "path") delete out[k];
+  return out;
+}
 function withGitConfig(env, entries) {
   const out = { ...env };
   let n = Number(env.GIT_CONFIG_COUNT) || 0;
@@ -1869,7 +1879,7 @@ function guardEnv(env) {
     PAGER: "cat"
   };
   writeIfChanged(path11.join(hooksDir(), "reference-transaction"), REF_HOOK);
-  env = withGitConfig(env, [
+  env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
   ]);
@@ -1883,13 +1893,12 @@ function guardEnv(env) {
     writeIfChanged(path11.join(dir, "git.cmd"), cmdShim(sh));
   }
   writeIfChanged(path11.join(dir, "git"), SHIM);
-  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  const key = pathKey(env);
   return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path11.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
-  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
-  return Boolean(env[key]?.startsWith(shimDir()));
+  return Boolean(env[pathKey(env)]?.startsWith(shimDir()));
 }
 
 // src/core/slots.ts

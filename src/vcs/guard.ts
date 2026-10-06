@@ -155,6 +155,19 @@ function writeIfChanged(file: string, content: string): void {
   renameOver(tmp, file);
 }
 
+/** The key PATH lives under, after folding variants (`Path` from process.env on Windows, a `PATH` someone set on top): one key, the explicit upper-case one winning. */
+function pathKey(env: NodeJS.ProcessEnv): string {
+  const keys = Object.keys(env).filter((k) => k.toLowerCase() === 'path');
+  return keys.includes('PATH') ? 'PATH' : (keys[0] ?? 'PATH');
+}
+
+function onePath(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const key = pathKey(env);
+  const out = { ...env };
+  for (const k of Object.keys(out)) if (k !== key && k.toLowerCase() === 'path') delete out[k];
+  return out;
+}
+
 /** Appends git config entries to GIT_CONFIG_COUNT/KEY_n/VALUE_n, keeping any the user set. */
 function withGitConfig(env: NodeJS.ProcessEnv, entries: [string, string][]): NodeJS.ProcessEnv {
   const out = { ...env };
@@ -182,7 +195,7 @@ export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     PAGER: 'cat',
   };
   writeIfChanged(path.join(hooksDir(), 'reference-transaction'), REF_HOOK);
-  env = withGitConfig(env, [
+  env = withGitConfig(onePath(env), [
     ['core.hooksPath', fwd(hooksDir())],
     ['url.pitroom-push-blocked://.pushInsteadOf', ''],
   ]);
@@ -196,14 +209,12 @@ export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     writeIfChanged(path.join(dir, 'git.cmd'), cmdShim(sh));
   }
   writeIfChanged(path.join(dir, 'git'), SHIM);
-  // On Windows the variable is `Path` (any casing) and a second `PATH` key would be ambiguous.
-  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  const key = pathKey(env);
   return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path.delimiter}${env[key] ?? ''}` };
 }
 
 /** Whether the git shim (layer 1) would be put first on a worker's PATH here. */
 export function shimReady(): boolean {
   const env = guardEnv({ ...process.env });
-  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
-  return Boolean(env[key]?.startsWith(shimDir()));
+  return Boolean(env[pathKey(env)]?.startsWith(shimDir()));
 }
