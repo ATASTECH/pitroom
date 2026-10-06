@@ -553,6 +553,7 @@ import { fileURLToPath } from "node:url";
 import fs5 from "node:fs";
 import os4 from "node:os";
 import path4 from "node:path";
+import crypto from "node:crypto";
 
 // src/core/fs-atomic.ts
 import fs4 from "node:fs";
@@ -583,6 +584,11 @@ var runsDir = () => path4.join(home(), "runs");
 var ledgerFile = () => path4.join(home(), "ledger.jsonl");
 var runDir = (id) => path4.join(runsDir(), id);
 var runFile = (id, name) => path4.join(runDir(id), name);
+function newRunId(now = /* @__PURE__ */ new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp2 = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${stamp2}-${crypto.randomBytes(2).toString("hex")}`;
+}
 var onFinished;
 var archive;
 function writeMeta(meta) {
@@ -616,6 +622,25 @@ function upgrade(raw) {
   raw.link ??= [];
   return raw;
 }
+function listRunIds() {
+  if (!fs5.existsSync(runsDir())) return [];
+  return fs5.readdirSync(runsDir()).filter((d) => fs5.existsSync(runFile(d, "meta.json"))).sort();
+}
+function resolveRun(ref) {
+  const ids = listRunIds();
+  if (!ref || ref === "latest" || ref === "last") {
+    if (!ids.length) throw new UserError("no runs yet");
+    return ids[ids.length - 1];
+  }
+  if (ids.includes(ref)) return ref;
+  const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
+  if (hits.length === 1) return hits[0];
+  if (!hits.length) {
+    const kept = archive?.id(ref);
+    if (kept) return kept;
+  }
+  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(", ")}` : ids.length ? `unknown run "${ref}"` : "no runs yet");
+}
 function isAlive(pid) {
   if (!pid) return false;
   try {
@@ -626,6 +651,7 @@ function isAlive(pid) {
   }
 }
 var STOP_FILE = "stop-requested";
+var requestStop = (id) => fs5.writeFileSync(runFile(id, STOP_FILE), "");
 function freshMeta(id) {
   const meta = readMeta(id);
   if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
@@ -1835,7 +1861,7 @@ function guardEnv(env) {
 }
 
 // src/core/slots.ts
-import crypto from "node:crypto";
+import crypto2 from "node:crypto";
 import fs12 from "node:fs";
 import path12 from "node:path";
 var slotsDir = () => path12.join(home(), "slots");
@@ -1900,7 +1926,7 @@ function slotHolders() {
     }
   }).filter((id) => holderActive(id, ""));
 }
-var lockFile = (repoRoot) => path12.join(locksDir(), `write-${crypto.createHash("sha1").update(path12.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path12.join(locksDir(), `write-${crypto2.createHash("sha1").update(path12.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
@@ -2191,8 +2217,52 @@ ${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.rou
 </svg>
 `;
 }
+
+// src/core/process.ts
+import { spawn } from "node:child_process";
+import fs16 from "node:fs";
+async function spawnWorker(inv, opts) {
+  const out = fs16.openSync(opts.stdoutFile, "w");
+  const err = fs16.openSync(opts.stderrFile, "w");
+  const res = { code: null, timedOut: false, stopped: false };
+  const child = spawn(inv.command, inv.args, {
+    cwd: opts.cwd,
+    stdio: ["ignore", out, err],
+    // OpenCode v2 takes its workspace from $PWD, not the process cwd: without this a worker
+    // started in an isolated copy would read and edit the directory pitroom was launched from.
+    env: guardEnv({ ...process.env, ...inv.env, PWD: opts.cwd, PITROOM_ACTIVE: "1" })
+  });
+  const stop = () => {
+    res.stopped = true;
+    child.kill("SIGTERM");
+  };
+  process.once("SIGINT", stop);
+  process.once("SIGTERM", stop);
+  let killer;
+  const timer = setTimeout(() => {
+    res.timedOut = true;
+    child.kill("SIGTERM");
+    killer = setTimeout(() => child.kill("SIGKILL"), 1e4);
+  }, opts.timeoutSec * 1e3);
+  res.code = await new Promise((resolve2) => {
+    child.on("error", (e) => {
+      res.spawnError = e.code === "ENOENT" ? fs16.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      resolve2(127);
+    });
+    child.on("close", (c) => resolve2(c));
+  });
+  clearTimeout(timer);
+  if (killer) clearTimeout(killer);
+  process.off("SIGINT", stop);
+  process.off("SIGTERM", stop);
+  fs16.closeSync(out);
+  fs16.closeSync(err);
+  return res;
+}
 export {
   DEFAULT_BACKEND,
+  STOP_FILE,
+  TERMINAL,
   acquireWriteLock,
   allBackends,
   backendIds,
@@ -2208,11 +2278,17 @@ export {
   findSecretFiles,
   findSecretFilesInTree,
   formatTarget,
+  freshMeta,
   getBackend,
   guardEnv,
+  home,
+  isActive,
+  isAlive,
+  listRunIds,
   loadPlan,
   loadTemplate,
   looksSecret,
+  newRunId,
   parseAudit,
   parsePlan,
   parseStatus,
@@ -2222,15 +2298,23 @@ export {
   planTask,
   primaryPrice,
   readLedger,
+  readMeta,
   releaseSlot,
   releaseWriteLock,
+  requestStop,
+  resolveRun,
   retryAfterMs,
+  runDir,
+  runFile,
+  runsDir,
   savedUsd,
   secretWarning,
   shimDir,
   slotHolders,
+  spawnWorker,
   totals,
   tryAcquireSlot,
   usd,
-  verifyRefs
+  verifyRefs,
+  writeMeta
 };
