@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Workers
+- **`--continue` works with Gemini.** It was refused ("cannot continue sessions") because Gemini CLI's `--resume` was known to take an index or `latest`, which is not safe with parallel workers. It takes the session id as well (checked live on 0.62: a follow-up remembered what the first run read), and the id is in the stream's first event, so Pitroom resumes by it like with the other workers: `pitroom run --continue last "…"`, or `continue` in `pitroom_run`.
+
 ### Dashboard
 - **A crew is one card.** On the Live tab, runs that share a group (two or more: `pitroom run -g name`, a `pitroom_run` with `tasks`) now show as one card: the group name, the workers that are in it (`opencode ×3`), how many runs, how many are running, done or need attention, a progress bar, the tokens and the estimated saving of the crew, and when it started. It opens onto its runs, which are the usual cards; a crew that is still working is open by itself. A group of one run, and runs without a group, stay plain cards; the group picker still lists one crew's runs flat. A crew with a run among the newest is returned whole, so "Show older runs" never leaves it with fewer runs than it has.
 

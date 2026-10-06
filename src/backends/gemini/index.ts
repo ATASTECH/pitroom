@@ -78,6 +78,8 @@ function invocation(req: WorkerRequest) {
     '-e', 'none',
   ];
   for (const p of policies) args.push('--policy', path.join(dir, p));
+  // The session id of the stream's `init` event: `--resume` takes it as well as an index or "latest", so a follow-up finds its own session even beside parallel workers.
+  if (req.sessionId) args.push('--resume', req.sessionId);
   // A headless run in a folder Gemini CLI does not trust fails; trusting makes it load that project's own Gemini
   // settings (hooks, MCP), so this is opt-in. Folders the user already trusted in Gemini stay trusted.
   if (process.env.PITROOM_GEMINI_TRUST === '1') args.push('--skip-trust');
@@ -183,7 +185,7 @@ function catalog(): ModelCatalog {
 export const gemini: Backend = {
   id: 'gemini',
   name: 'Gemini CLI',
-  capabilities: { readOnly: 'approval-mode', resume: 'none', reportsCost: false, attachFiles: false },
+  capabilities: { readOnly: 'approval-mode', resume: 'by-id', reportsCost: false, attachFiles: false },
   binary,
   catalog,
   invocation,

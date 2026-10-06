@@ -58,7 +58,7 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | **OpenCode v2** (`run --standalone --format json`) | permission profile: edit denied, shell allowlist, `execute` and web off | profile: edits on, history-changing git, bulk deletes and `execute` denied | `--session <id>` | reported |
 | **Codex** (`exec --json --ignore-user-config`) | `-c sandbox_mode="read-only"` (OS sandbox) | `-c sandbox_mode="workspace-write"` (writes only in the working dir, no network), `approval_policy="never"` | `exec resume <id>` | tokens only |
 | **Claude Code** (`-p --output-format stream-json --verbose`) | `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk`, tools `Read,Grep,Glob` only | same lockdown, tools `+Edit,Write,Bash`, `--disallowedTools Bash(git commit:*)`… | `--resume <id>` | `total_cost_usd` |
-| **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | index/latest only → `resume: 'none'` | tokens only |
+| **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | by session id (`--resume <id>`) → `resume: 'by-id'` | tokens only |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -121,7 +121,7 @@ How a worker is started:
 - **Folder trust**: a headless run in a folder Gemini does not trust fails. Folders you trusted in Gemini stay trusted. `PITROOM_GEMINI_TRUST=1` adds `--skip-trust`, which also lets that folder's own `.gemini` settings (hooks included) load.
 - **Stream**: `message` events carry the answer in `delta` chunks, merged per model turn; the answer is the text after the last tool call. `result.stats` gives tokens (`cached` is part of `input_tokens`), not dollars. Lines that are not JSON are skipped.
 - **Models**: Gemini CLI cannot list models; the catalogue is its built-in names (`gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, …). The 2.5 models are no longer served to new API keys. Its own default (`auto`) may be a larger model, so pin a worker, e.g. `-W gemini:gemini-3.8-flash`. The free tier has a small daily quota per model. No effort option: `#level` is dropped.
-- **Resume**: sessions are chosen by index or `latest` per project, which is not safe with parallel workers, so `--continue` is not supported (`resume: 'none'`).
+- **Resume**: `--resume` takes the session id that the stream's `init` event reports (checked live on 0.62: the follow-up remembered what the first run read), as well as an index or `latest` (which are not safe with parallel workers, so Pitroom never uses them). `--continue` therefore works (`resume: 'by-id'`). Sessions are kept per project folder, so a follow-up runs in the same folder as its parent, which Pitroom does anyway.
 - **Sign-in**: a Google account sign-in (`oauth-personal`, Code Assist for individuals) is refused by Google for this client (`IneligibleTierError`); use an API key from Google AI Studio (`gemini` stores it, or set `GEMINI_API_KEY`).
 
 ## Adding a worker

@@ -320,3 +320,14 @@ test('opencode: "Endpoint is unavailable" (HTTP 400) is a rate limit: the model 
   const run = { ...b.parse(''), error: 'Endpoint is unavailable [provider.invalid-request, HTTP 400]' };
   assert.equal(b.failure(run, '', 1).kind, 'rate-limited');
 });
+
+test('gemini: a follow-up resumes by the session id (never an index or "latest", which are unsafe beside parallel workers)', () => {
+  const b = getBackend('gemini');
+  assert.equal(b.capabilities.resume, 'by-id');
+  const argv = (over) => b.invocation(request(over)).args;
+  const withId = argv({ sessionId: '1413e6ff-f8d1-4e12-98e0-8b4f374d207b' });
+  assert.equal(withId[withId.indexOf('--resume') + 1], '1413e6ff-f8d1-4e12-98e0-8b4f374d207b');
+  assert.equal(withId.filter((a) => a === '--resume').length, 1);
+  assert.ok(!argv({}).includes('--resume'), 'a first run does not resume anything');
+  assert.ok(!['latest', '-r'].some((a) => withId.includes(a)), 'no "latest" and no short flag');
+});

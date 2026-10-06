@@ -662,7 +662,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | OpenCode (v2+) | ✅ | per-run permission rules | reported | private `--standalone` server per run |
 | Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
-| Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, but a read run with secret-looking files reads a [clean snapshot](#modes) without them; pin a model, e.g. `-W gemini:gemini-3.8-flash`; no `--continue` (see [the notes](docs/backends.md#gemini-cli-notes)) |
+| Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, but a read run with secret-looking files reads a [clean snapshot](#modes) without them; pin a model, e.g. `-W gemini:gemini-3.8-flash`; `--continue` works (by session id; see [the notes](docs/backends.md#gemini-cli-notes)) |
 
 ### Models, costs and effort
 

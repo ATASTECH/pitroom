@@ -843,6 +843,7 @@ function invocation3(req) {
     "none"
   ];
   for (const p of policies) args.push("--policy", path5.join(dir, p));
+  if (req.sessionId) args.push("--resume", req.sessionId);
   if (process.env.PITROOM_GEMINI_TRUST === "1") args.push("--skip-trust");
   const [model] = (req.model ?? "").split("#");
   if (model) args.push("--model", model);
@@ -929,7 +930,7 @@ function catalog3() {
 var gemini = {
   id: "gemini",
   name: "Gemini CLI",
-  capabilities: { readOnly: "approval-mode", resume: "none", reportsCost: false, attachFiles: false },
+  capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
   binary: binary3,
   catalog: catalog3,
   invocation: invocation3,
