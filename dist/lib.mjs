@@ -1988,7 +1988,11 @@ var SCHEMA = {
   audit: "number",
   readIn: "string",
   cacheDays: "number",
-  countRateLimits: "boolean"
+  countRateLimits: "boolean",
+  mcpDash: "boolean",
+  notify: "boolean",
+  notifyCommand: "string",
+  notifyAfter: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
@@ -2050,6 +2054,10 @@ var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
 };
+var flag01 = (v) => {
+  const t = v?.trim().toLowerCase();
+  return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
+};
 var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
 var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
 function setting(flag, env, conf, fallback) {
@@ -2078,7 +2086,11 @@ function effective(flags = {}) {
     audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
     readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
     cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
-    countRateLimits: setting(void 0, void 0, c.countRateLimits, false)
+    countRateLimits: setting(void 0, void 0, c.countRateLimits, false),
+    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
+    notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
+    notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
+    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15)
   };
 }
 

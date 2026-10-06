@@ -16,6 +16,7 @@ import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
 import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
+import { notifyEnded } from './notify.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
@@ -220,6 +221,9 @@ async function waitForSlot(meta: RunMeta): Promise<string | undefined> {
 export function startInBackground(meta: RunMeta): RunMeta {
   const script = process.argv[1];
   if (!script) throw new Error('cannot locate the pitroom executable');
+  // written before the process starts: it reads the record, and must see this
+  meta.background = true;
+  writeMeta(meta);
   const child = spawn(process.execPath, [script, '__exec', meta.id], {
     detached: true,
     stdio: 'ignore',
@@ -467,6 +471,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   if (meta.mode === 'write' && meta.repoRoot) releaseWriteLock(meta.repoRoot, meta.id);
   record(meta);
   if (meta.auditOf) settleAudit(meta);
+  notifyEnded(meta);
   return meta;
 }
 
