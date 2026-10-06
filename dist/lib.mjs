@@ -380,10 +380,10 @@ function parseEvents2(jsonl) {
       }
       case "turn.completed": {
         const u = e.usage ?? {};
-        const cached = num2(u.cached_input_tokens);
+        const cached2 = num2(u.cached_input_tokens);
         const reasoning = num2(u.reasoning_output_tokens);
-        usage.input += Math.max(0, num2(u.input_tokens) - cached);
-        usage.cacheRead += cached;
+        usage.input += Math.max(0, num2(u.input_tokens) - cached2);
+        usage.cacheRead += cached2;
         usage.cacheWrite += num2(u.cache_write_input_tokens);
         usage.output += Math.max(0, num2(u.output_tokens) - reasoning);
         usage.reasoning += reasoning;
@@ -544,20 +544,101 @@ var codex = {
 
 // src/backends/gemini/index.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import fs4 from "node:fs";
+import fs6 from "node:fs";
 import os5 from "node:os";
 import path5 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/core/store.ts
+import fs5 from "node:fs";
 import os4 from "node:os";
 import path4 from "node:path";
+
+// src/core/fs-atomic.ts
+import fs4 from "node:fs";
+var BUSY = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
+function renameOver(tmp, file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs4.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      if (process.platform !== "win32" || !BUSY.has(e.code ?? "") || attempt >= 40) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
+
+// src/core/store.ts
+var TERMINAL = ["done", "failed", "timeout", "stopped"];
+var isActive = (s) => !TERMINAL.includes(s);
 function home() {
   if (process.env.PITROOM_HOME) return path4.resolve(process.env.PITROOM_HOME);
   if (process.platform === "win32") {
     return path4.join(process.env.LOCALAPPDATA ?? path4.join(os4.homedir(), "AppData", "Local"), "pitroom");
   }
   return path4.join(process.env.XDG_STATE_HOME ?? path4.join(os4.homedir(), ".local", "state"), "pitroom");
+}
+var runsDir = () => path4.join(home(), "runs");
+var ledgerFile = () => path4.join(home(), "ledger.jsonl");
+var runDir = (id) => path4.join(runsDir(), id);
+var runFile = (id, name) => path4.join(runDir(id), name);
+var onFinished;
+var archive;
+function writeMeta(meta) {
+  fs5.mkdirSync(runDir(meta.id), { recursive: true });
+  const file = runFile(meta.id, "meta.json");
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs5.writeFileSync(tmp, JSON.stringify(meta, null, 2));
+  renameOver(tmp, file);
+  if (TERMINAL.includes(meta.state)) {
+    try {
+      onFinished?.(meta);
+    } catch {
+    }
+  }
+}
+function readMeta(id) {
+  const file = runFile(id, "meta.json");
+  if (!fs5.existsSync(file)) {
+    const kept = archive?.meta(id);
+    if (kept) return upgrade(kept);
+  }
+  return upgrade(JSON.parse(fs5.readFileSync(file, "utf8")));
+}
+function upgrade(raw) {
+  if (!raw.worker) raw.worker = raw.model ? { backend: "opencode", model: raw.model } : { backend: "opencode" };
+  if (!Array.isArray(raw.fallback)) {
+    raw.fallback = (raw.fallbackModels ?? []).map((m) => ({ backend: "opencode", model: m }));
+  }
+  raw.warnings ??= [];
+  raw.files ??= [];
+  raw.link ??= [];
+  return raw;
+}
+function isAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+var STOP_FILE = "stop-requested";
+function freshMeta(id) {
+  const meta = readMeta(id);
+  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
+    const latest = readMeta(id);
+    if (TERMINAL.includes(latest.state)) return latest;
+    const stopped = latest.stopRequested || fs5.existsSync(runFile(id, STOP_FILE));
+    latest.state = stopped ? "stopped" : "failed";
+    if (!stopped) latest.error ??= "worker process exited unexpectedly";
+    latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
+    writeMeta(latest);
+    return latest;
+  }
+  return meta;
 }
 
 // src/backends/gemini/events.ts
@@ -645,9 +726,9 @@ function parseEvents3(jsonl) {
       if (e.severity === "error") error ??= String(e.message ?? "Gemini CLI error");
     } else if (e.type === "result") {
       const s = e.stats ?? {};
-      const cached = num3(s.cached);
-      usage.cacheRead += cached;
-      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached);
+      const cached2 = num3(s.cached);
+      usage.cacheRead += cached2;
+      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached2);
       usage.output += num3(s.output_tokens);
       usage.total += num3(s.total_tokens) || num3(s.input_tokens) + num3(s.output_tokens);
       usage.toolCalls = Math.max(usage.toolCalls, num3(s.tool_calls));
@@ -684,22 +765,22 @@ var policyDir = () => path5.resolve(path5.dirname(fileURLToPath(import.meta.url)
 function workerHome() {
   const root = path5.join(home(), "gemini-home");
   const dir = path5.join(root, ".gemini");
-  const base = JSON.parse(fs4.readFileSync(path5.join(policyDir(), "worker-settings.json"), "utf8"));
+  const base = JSON.parse(fs6.readFileSync(path5.join(policyDir(), "worker-settings.json"), "utf8"));
   const auth = settings().security?.auth;
   const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}
 `;
   const file = path5.join(dir, "settings.json");
   try {
-    if (fs4.readFileSync(file, "utf8") === body) return root;
+    if (fs6.readFileSync(file, "utf8") === body) return root;
   } catch {
   }
-  fs4.mkdirSync(dir, { recursive: true });
-  fs4.writeFileSync(file, body);
+  fs6.mkdirSync(dir, { recursive: true });
+  fs6.writeFileSync(file, body);
   for (const name of ["oauth_creds.json", "google_accounts.json"]) {
     const from = path5.join(geminiHome(), name);
     const to = path5.join(dir, name);
     try {
-      if (fs4.existsSync(from) && !fs4.existsSync(to)) fs4.symlinkSync(from, to);
+      if (fs6.existsSync(from) && !fs6.existsSync(to)) fs6.symlinkSync(from, to);
     } catch {
     }
   }
@@ -726,7 +807,7 @@ function invocation3(req) {
   const { command, prefix } = resolveCommand(binary3());
   const env = { GEMINI_CLI_HOME: workerHome() };
   const trusted = path5.join(geminiHome(), "trustedFolders.json");
-  if (fs4.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  if (fs6.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
   return { command, args: [...prefix, ...args], env };
 }
 function classify3(message) {
@@ -751,7 +832,7 @@ function geminiHome() {
 }
 function settings() {
   try {
-    return JSON.parse(fs4.readFileSync(path5.join(geminiHome(), "settings.json"), "utf8"));
+    return JSON.parse(fs6.readFileSync(path5.join(geminiHome(), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -770,7 +851,7 @@ function doctor3({ models, hasFallback }) {
   const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary3()}` }];
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
-  const signedIn = fs4.existsSync(path5.join(geminiHome(), "oauth_creds.json"));
+  const signedIn = fs6.existsSync(path5.join(geminiHome(), "oauth_creds.json"));
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
@@ -929,7 +1010,7 @@ function describe2(input) {
 }
 
 // src/backends/opencode/profiles.ts
-import fs5 from "node:fs";
+import fs7 from "node:fs";
 import os6 from "node:os";
 import path6 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
@@ -1040,7 +1121,7 @@ function scratchDirs() {
 }
 function realpath(p) {
   try {
-    return fs5.realpathSync(p);
+    return fs7.realpathSync(p);
   } catch {
     return p;
   }
@@ -1313,7 +1394,7 @@ var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
 var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
 
 // src/core/refs.ts
-import fs6 from "node:fs";
+import fs8 from "node:fs";
 import path7 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
@@ -1337,23 +1418,23 @@ function looksLikeSymbol(m) {
 function extractRefs(answer) {
   const seen = /* @__PURE__ */ new Map();
   for (const line of answer.split("\n")) {
-    const matches = [...line.matchAll(REF)];
+    const matches2 = [...line.matchAll(REF)];
     const seps = [...line.matchAll(CLAUSE)].map((s) => s.index ?? 0);
     const sepBetween = (a, b) => seps.some((s) => s >= a && s < b);
     const idents = [...line.matchAll(IDENT)].filter((i) => {
       if (!looksLikeSymbol(i)) return false;
       const pos = i.index ?? 0;
-      const before = matches.filter((m) => (m.index ?? 0) + m[0].length <= pos).at(-1);
-      const after = matches.find((m) => (m.index ?? 0) >= pos + i[0].length);
+      const before = matches2.filter((m) => (m.index ?? 0) + m[0].length <= pos).at(-1);
+      const after = matches2.find((m) => (m.index ?? 0) >= pos + i[0].length);
       return !(before && after && !sepBetween((before.index ?? 0) + before[0].length, after.index ?? 0));
     });
-    matches.forEach((m, k) => {
+    matches2.forEach((m, k) => {
       const start = Number(m[2]);
       const end = m[3] ? Number(m[3]) : start;
       if (start < 1 || end < start) return;
       const at = m.index ?? 0;
-      const prev = matches[k - 1];
-      const next = matches[k + 1];
+      const prev = matches2[k - 1];
+      const next = matches2[k + 1];
       const from = Math.max(at - 80, prev ? (prev.index ?? 0) + prev[0].length : 0, ...seps.filter((s) => s < at).map((s) => s + 1));
       const to = Math.min(at + m[0].length + 40, next?.index ?? Infinity, ...seps.filter((s) => s >= at + m[0].length));
       const near = new Set(idents.filter((i) => (i.index ?? 0) >= from && (i.index ?? 0) < to).map((i) => i[1]));
@@ -1370,8 +1451,8 @@ function verifyRefs(refs, dirs) {
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs6.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs6.readFileSync(file, "utf8").split("\n");
+      const size = fs8.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs8.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -1429,7 +1510,7 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs6.readdirSync(dir, { withFileTypes: true });
+      entries = fs8.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
@@ -1439,8 +1520,8 @@ function indexFiles(roots) {
         if (!SKIP_DIRS.has(e.name)) walk(path7.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
-        const list = index.get(e.name);
-        if (list) list.push(path7.join(dir, e.name));
+        const list2 = index.get(e.name);
+        if (list2) list2.push(path7.join(dir, e.name));
         else index.set(e.name, [path7.join(dir, e.name)]);
       }
     }
@@ -1452,7 +1533,7 @@ function resolve(ref, roots) {
   const candidates = path7.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path7.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs6.statSync(c).isFile() && inside(c, roots);
+      return fs8.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -1467,7 +1548,7 @@ function inside(file, roots) {
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
-import fs7 from "node:fs";
+import fs9 from "node:fs";
 import path9 from "node:path";
 
 // src/core/install.ts
@@ -1486,8 +1567,8 @@ var FILES = {
 };
 function loadTemplate(name, root = packageRoot()) {
   const file = path9.join(root, "skills", FILES[name]);
-  if (!fs7.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
-  return fs7.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  if (!fs9.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs9.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -1500,11 +1581,11 @@ var MAX_MS = 24 * 36e5;
 var OVERLOAD_MS = 20 * 6e4;
 var DAILY_MS = 4 * 36e5;
 function retryAfterMs(message) {
-  const compact = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
+  const compact2 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
   const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
   let ms = 0;
-  if (compact) {
-    for (const [, n, unit] of compact.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
+  if (compact2) {
+    for (const [, n, unit] of compact2.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
   } else if (words) {
     ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
   }
@@ -1544,7 +1625,7 @@ function parseAudit(text) {
 }
 
 // src/core/plan.ts
-import fs8 from "node:fs";
+import fs10 from "node:fs";
 import path10 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
@@ -1593,8 +1674,8 @@ function parsePlan(text, file = "") {
 }
 function loadPlan(file) {
   const abs = path10.resolve(file);
-  if (!fs8.existsSync(abs) || !fs8.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
-  const plan = parsePlan(fs8.readFileSync(abs, "utf8"), fs8.realpathSync(abs));
+  if (!fs10.existsSync(abs) || !fs10.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs10.readFileSync(abs, "utf8"), fs10.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
   return plan;
 }
@@ -1614,19 +1695,511 @@ function brief(plan, task) {
 `;
 }
 var planName = (file) => path10.basename(file).replace(/\.md$/i, "");
+
+// src/vcs/guard.ts
+import fs11 from "node:fs";
+import path11 from "node:path";
+var VERSION = 1;
+var SHIM = `#!/bin/sh
+# pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
+# index or discard work. The primary agent reviews and commits, not the worker.
+set -f
+real="\${PITROOM_REAL_GIT:-}"
+if [ -z "$real" ] || [ ! -x "$real" ]; then
+  echo "pitroom: git guard cannot find the real git" >&2
+  exit 127
+fi
+block() {
+  echo "pitroom: 'git $1' is blocked for workers (the primary agent reviews and commits)" >&2
+  exit 1
+}
+sub=""; skip=""; after=""
+for a do
+  if [ -n "$sub" ]; then after="$after $a"; continue; fi
+  case "$skip" in
+    c) skip=""; case "$a" in [Aa][Ll][Ii][Aa][Ss].*) block "-c $a" ;; esac; continue ;;
+    v) skip=""; continue ;;
+  esac
+  case "$a" in
+    -c|--config-env) skip=c ;;
+    -C|--git-dir|--work-tree|--namespace|--super-prefix|--exec-path) skip=v ;;
+    -*) ;;
+    *) sub="$a" ;;
+  esac
+done
+[ -z "$sub" ] && exec "$real" "$@"
+
+# Resolve aliases (also those injected via GIT_CONFIG_* env); shell aliases are refused.
+depth=0
+while def=$("$real" config --get "alias.$sub" 2>/dev/null) && [ -n "$def" ]; do
+  depth=$((depth+1)); [ "$depth" -gt 5 ] && block "$sub (alias loop)"
+  case "$def" in '!'*) block "$sub (shell alias)" ;; -*) block "$sub (alias with options)" ;; esac
+  next=\${def%% *}
+  [ "$next" != "$def" ] && after=" \${def#* }$after"
+  sub="$next"
+done
+
+has() { for f in "$@"; do case " $after " in *" $f "*|*" $f="*) return 0 ;; esac; done; return 1; }
+count() { n=0; for w in $after; do case "$w" in -*) ;; *) n=$((n+1)) ;; esac; done; echo "$n"; }
+
+case "$sub" in
+  commit|push|pull|reset|checkout|restore|clean|stash|rebase|merge|switch|cherry-pick|revert|am|\\
+  worktree|update-ref|update-index|filter-branch|filter-repo|gc|prune|replace|notes|add|rm|mv|\\
+  sparse-checkout|read-tree|commit-tree|write-tree|fast-import|bisect)
+    block "$sub" ;;
+  branch)
+    has -d -D --delete -m -M --move -c -C --copy -f --force -u --set-upstream-to --unset-upstream --edit-description && block "branch$after"
+    [ "$(count)" -gt 0 ] && ! has -l --list --contains --no-contains --merged --no-merged --points-at && block "branch$after" ;;
+  tag)
+    has -d --delete -a --annotate -s --sign -u --local-user -f --force -m --message -F --file && block "tag$after"
+    [ "$(count)" -gt 0 ] && ! has -l --list --contains --no-contains --merged --no-merged --points-at && block "tag$after" ;;
+  config)
+    has --unset --unset-all --add --replace-all --rename-section --remove-section -e --edit set unset rename-section remove-section edit && block "config$after"
+    [ "$(count)" -ge 2 ] && ! has get --get --get-all --get-regexp --get-urlmatch && block "config$after" ;;
+  remote)
+    for w in $after; do case "$w" in add|remove|rm|rename|set-url|set-head|set-branches|prune|update) block "remote $w" ;; esac; done ;;
+  fetch)
+    for w in $after; do case "$w" in -*) ;; *:*) block "fetch $w (writes a local ref)" ;; esac; done ;;
+  apply)
+    has --index --cached -3 --3way && block "apply$after" ;;
+  reflog)
+    has expire delete && block "reflog$after" ;;
+  symbolic-ref)
+    has -d --delete && block "symbolic-ref$after"
+    [ "$(count)" -ge 2 ] && block "symbolic-ref$after" ;;
+  submodule)
+    for w in $after; do case "$w" in -*) ;; status|summary) break ;; *) block "submodule $w" ;; esac; done ;;
+esac
+exec "$real" "$@"
+`;
+function shimDir() {
+  return path11.join(home(), "shim", `v${VERSION}`);
+}
+function findRealGit(skip) {
+  for (const dir of (process.env.PATH ?? "").split(path11.delimiter).filter(Boolean)) {
+    if (path11.resolve(dir) === skip) continue;
+    const p = path11.join(dir, "git");
+    try {
+      fs11.accessSync(p, fs11.constants.X_OK);
+      if (fs11.statSync(p).isFile()) return p;
+    } catch {
+    }
+  }
+  return void 0;
+}
+var HOOK_VERSION = 1;
+var REF_HOOK = `#!/bin/sh
+# pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
+[ "$1" = prepared ] || exit 0
+echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
+exit 1
+`;
+var hooksDir = () => path11.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+function writeIfChanged(file, content) {
+  if (fs11.existsSync(file) && fs11.readFileSync(file, "utf8") === content) return;
+  fs11.mkdirSync(path11.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs11.writeFileSync(tmp, content, { mode: 493 });
+  fs11.renameSync(tmp, file);
+}
+function withGitConfig(env, entries) {
+  const out = { ...env };
+  let n = Number(env.GIT_CONFIG_COUNT) || 0;
+  for (const [key, value] of entries) {
+    out[`GIT_CONFIG_KEY_${n}`] = key;
+    out[`GIT_CONFIG_VALUE_${n}`] = value;
+    n++;
+  }
+  out.GIT_CONFIG_COUNT = String(n);
+  return out;
+}
+function guardEnv(env) {
+  const quiet = {
+    GIT_TERMINAL_PROMPT: "0",
+    GIT_EDITOR: "true",
+    GIT_SEQUENCE_EDITOR: "true",
+    GIT_PAGER: "cat",
+    PAGER: "cat"
+  };
+  if (process.platform === "win32") return { ...env, ...quiet };
+  writeIfChanged(path11.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  env = withGitConfig(env, [
+    ["core.hooksPath", hooksDir()],
+    ["url.pitroom-push-blocked://.pushInsteadOf", ""]
+  ]);
+  const dir = shimDir();
+  const real = findRealGit(dir);
+  if (!real) return { ...env, ...quiet };
+  writeIfChanged(path11.join(dir, "git"), SHIM);
+  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path11.delimiter}${env.PATH ?? ""}` };
+}
+
+// src/core/slots.ts
+import crypto from "node:crypto";
+import fs12 from "node:fs";
+import path12 from "node:path";
+var slotsDir = () => path12.join(home(), "slots");
+var locksDir = () => path12.join(home(), "locks");
+var STARTUP_GRACE_MS = 3e4;
+function holderActive(runId, self) {
+  if (!runId || runId === self) return false;
+  try {
+    const m = freshMeta(runId);
+    if (!isActive(m.state)) return false;
+    if (m.pid) return isAlive(m.pid);
+    return Date.now() - Date.parse(m.startedAt) < STARTUP_GRACE_MS;
+  } catch {
+    return false;
+  }
+}
+function tryClaim(file, runId) {
+  fs12.mkdirSync(path12.dirname(file), { recursive: true });
+  try {
+    fs12.writeFileSync(file, runId, { flag: "wx" });
+    return true;
+  } catch (e) {
+    if (e.code !== "EEXIST") throw e;
+  }
+  let owner = "";
+  try {
+    owner = fs12.readFileSync(file, "utf8").trim();
+  } catch {
+  }
+  if (owner === runId) return true;
+  if (holderActive(owner, runId)) return false;
+  fs12.rmSync(file, { force: true });
+  try {
+    fs12.writeFileSync(file, runId, { flag: "wx" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+function releaseIfOwner(file, runId) {
+  if (!file) return;
+  try {
+    if (fs12.readFileSync(file, "utf8").trim() === runId) fs12.rmSync(file, { force: true });
+  } catch {
+  }
+}
+function tryAcquireSlot(runId, maxParallel) {
+  for (let n = 0; n < Math.max(1, maxParallel); n++) {
+    const file = path12.join(slotsDir(), `slot-${n}`);
+    if (tryClaim(file, runId)) return file;
+  }
+  return void 0;
+}
+var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
+function slotHolders() {
+  if (!fs12.existsSync(slotsDir())) return [];
+  return fs12.readdirSync(slotsDir()).map((f) => {
+    try {
+      return fs12.readFileSync(path12.join(slotsDir(), f), "utf8").trim();
+    } catch {
+      return "";
+    }
+  }).filter((id) => holderActive(id, ""));
+}
+var lockFile = (repoRoot) => path12.join(locksDir(), `write-${crypto.createHash("sha1").update(path12.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+function acquireWriteLock(repoRoot, runId) {
+  const file = lockFile(repoRoot);
+  if (tryClaim(file, runId)) return;
+  let owner = "";
+  try {
+    owner = fs12.readFileSync(file, "utf8").trim();
+  } catch {
+  }
+  throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
+}
+var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), runId);
+
+// src/core/secrets.ts
+import { execFileSync } from "node:child_process";
+import fs13 from "node:fs";
+import path13 from "node:path";
+var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
+var MAX_VISITED = 2e4;
+var MAX_DEPTH = 4;
+var TEMPLATE = /\.(example|sample|template|dist|defaults?|tpl)$/i;
+function looksSecret(name) {
+  if (TEMPLATE.test(name)) return false;
+  if (name === ".env" || name.startsWith(".env.") || /\.env$/i.test(name)) return true;
+  return /\.(pem|p12|pfx|key|jks|keystore)$/i.test(name) || /^id_(rsa|dsa|ecdsa|ed25519)$/.test(name) || name === ".netrc" || name === "credentials.json" || /^secrets?\.(json|ya?ml|toml)$/i.test(name);
+}
+function findSecretFiles(dir) {
+  const found = [];
+  let visited = 0;
+  const walk = (d, depth) => {
+    if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
+    let entries;
+    try {
+      entries = fs13.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      visited++;
+      if (e.isDirectory()) {
+        if (!SKIP_DIRS2.has(e.name)) walk(path13.join(d, e.name), depth + 1);
+      } else if (e.isFile() && looksSecret(e.name)) {
+        found.push(slash(path13.relative(dir, path13.join(d, e.name))));
+      }
+    }
+  };
+  walk(dir, 0);
+  return found.sort();
+}
+function findSecretFilesInTree(root, dir) {
+  try {
+    const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
+    return out.split("\0").filter((f) => f && looksSecret(path13.basename(f)) && !path13.relative(dir, path13.join(root, f)).startsWith("..")).map((f) => slash(path13.relative(dir, path13.join(root, f)))).sort();
+  } catch {
+    return [];
+  }
+}
+function secretWarning(files, mode) {
+  if (!files.length) return void 0;
+  const shown = files.slice(0, 3).join(", ") + (files.length > 3 ? `, +${files.length - 3} more` : "");
+  const where = mode === "isolate" ? "would be copied into the isolated copy" : "sit in the directory the worker runs in";
+  const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
+  return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
+}
+var slash = (p) => p.split(path13.sep).join("/");
+
+// src/core/receipt.ts
+import fs15 from "node:fs";
+
+// src/core/config.ts
+import fs14 from "node:fs";
+import os7 from "node:os";
+import path14 from "node:path";
+var SCHEMA = {
+  worker: "string",
+  fallback: "string[]",
+  timeout: "string",
+  primary: "string",
+  price: "string",
+  link: "string[]",
+  web: "boolean",
+  maxParallel: "number",
+  models: "record",
+  tiers: "record",
+  costs: "numbers",
+  audit: "number",
+  readIn: "string",
+  cacheDays: "number",
+  countRateLimits: "boolean"
+};
+function configPath() {
+  if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
+  const base = process.platform === "win32" ? process.env.APPDATA ?? path14.join(os7.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path14.join(os7.homedir(), ".config");
+  return path14.join(base, "pitroom", "config.json");
+}
+var cached;
+function loadConfig() {
+  if (cached) return cached;
+  const file = configPath();
+  const config = {};
+  const warnings = [];
+  if (fs14.existsSync(file)) {
+    let raw;
+    try {
+      raw = JSON.parse(fs14.readFileSync(file, "utf8"));
+    } catch (e) {
+      warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
+    }
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [key, value] of Object.entries(raw)) {
+        const type = SCHEMA[key];
+        if (!type) {
+          warnings.push(`${file}: unknown key "${key}" ignored`);
+        } else if (matches(value, type)) {
+          config[key] = value;
+        } else {
+          warnings.push(`${file}: "${key}" must be ${type}; ignored`);
+        }
+      }
+    }
+  }
+  cached = { config, warnings };
+  return cached;
+}
+function matches(v, type) {
+  if (type === "string[]") return Array.isArray(v) && v.every((s) => typeof s === "string");
+  if (type === "record") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === "string");
+  }
+  if (type === "numbers") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+  }
+  if (type === "number") return typeof v === "number" && Number.isFinite(v) && v >= 0;
+  return typeof v === type;
+}
+var DEFAULT_PARALLEL = 20;
+var MAX_PARALLEL_LIMIT = 30;
+var clampParallel = (s) => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT) });
+var positiveInt = (v) => {
+  const n = Number(v);
+  return v !== void 0 && v !== "" && Number.isInteger(n) && n > 0 ? n : void 0;
+};
+var rate = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
+};
+var days = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
+};
+var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
+var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
+function setting(flag, env, conf, fallback) {
+  if (flag !== void 0) return { value: flag, source: "flag" };
+  if (env !== void 0) return { value: env, source: "env" };
+  if (conf !== void 0) return { value: conf, source: "config" };
+  return { value: fallback, source: "default" };
+}
+function effective(flags = {}) {
+  const c = loadConfig().config;
+  const e = process.env;
+  return {
+    worker: setting(flags.worker, e.PITROOM_WORKER, c.worker, DEFAULT_BACKEND),
+    /** Overrides the model of the preferred worker only. */
+    model: setting(flags.model, e.PITROOM_MODEL, void 0, void 0),
+    fallback: setting(void 0, list(e.PITROOM_FALLBACK), c.fallback, []),
+    timeout: setting(flags.timeout, e.PITROOM_TIMEOUT, c.timeout, "30m"),
+    primary: setting(void 0, e.PITROOM_PRIMARY, c.primary, "sonnet"),
+    price: setting(void 0, e.PITROOM_PRICE, c.price, void 0),
+    link: setting(void 0, void 0, c.link, []),
+    web: setting(void 0, void 0, c.web, false),
+    maxParallel: clampParallel(setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
+    models: setting(void 0, void 0, c.models, {}),
+    tiers: setting(void 0, void 0, c.tiers, {}),
+    costs: setting(void 0, void 0, c.costs, {}),
+    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
+    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
+    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
+    countRateLimits: setting(void 0, void 0, c.countRateLimits, false)
+  };
+}
+
+// src/core/receipt.ts
+var PRESETS = {
+  sonnet: { name: "Claude Sonnet", input: 3, output: 15, cachedInput: 0.3 },
+  opus: { name: "Claude Opus", input: 5, output: 25, cachedInput: 0.5 },
+  haiku: { name: "Claude Haiku", input: 1, output: 5, cachedInput: 0.1 },
+  "gpt-5": { name: "GPT-5", input: 1.25, output: 10, cachedInput: 0.125 }
+};
+function primaryPrice() {
+  const eff = effective();
+  const custom = eff.price.value?.split(",").map(Number);
+  if (custom && custom.length >= 2 && custom.every((n) => Number.isFinite(n) && n >= 0)) {
+    return { name: "custom", input: custom[0], output: custom[1], cachedInput: custom[2] ?? custom[0] / 10 };
+  }
+  return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet;
+}
+var estimateTokens = (text) => Math.ceil(text.length / 4);
+function savedUsd(usage, returnedTokens, price = primaryPrice()) {
+  const wouldCost = (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
+  const readingTheReport = returnedTokens * price.input / 1e6;
+  return Math.max(0, wouldCost - (usage.cost ?? 0) - readingTheReport);
+}
+function readLedger(sinceMs) {
+  if (!fs15.existsSync(ledgerFile())) return [];
+  return fs15.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  }).filter((e) => !sinceMs || Date.parse(e.at) >= sinceMs);
+}
+function totals(entries) {
+  const t = entries.reduce(
+    (a, e) => ({
+      runs: a.runs + 1,
+      tokens: a.tokens + e.tokens,
+      returned: a.returned + e.returned,
+      workerCost: a.workerCost + e.workerCost,
+      saved: a.saved + e.saved
+    }),
+    { runs: 0, tokens: 0, returned: 0, workerCost: 0, saved: 0 }
+  );
+  return { ...t, ratio: t.returned ? t.tokens / t.returned : 0 };
+}
+var usd = (n) => n >= 100 ? `$${n.toFixed(0)}` : n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+function compact(n) {
+  const fmt = (v) => v.toFixed(v >= 100 ? 0 : 1).replace(/\.0$/, "");
+  if (n >= 1e6) return `${fmt(n / 1e6)}M`;
+  if (n >= 1e3) return `${fmt(n / 1e3)}k`;
+  return String(Math.round(n));
+}
+function badgeUrl(t) {
+  const msg = encodeURIComponent(`saved ${usd(t.saved)} \xB7 ${compact(t.tokens)} tokens offloaded`).replace(/-/g, "--");
+  return `https://img.shields.io/badge/pitroom-${msg}-7c3aed`;
+}
+var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function card(t, period) {
+  const W = 720, H = 316, M = 32, GAP = 12;
+  const tile = (i, value, label) => {
+    const w = (W - 2 * M - 2 * GAP) / 3, x = M + i * (w + GAP);
+    return `<rect x="${x}" y="196" width="${w}" height="72" rx="14" fill="#fff" fill-opacity=".035" stroke="#fff" stroke-opacity=".1"/>
+<text x="${x + 18}" y="224" class="lab">${esc(label.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
+  };
+  const when = period.toUpperCase();
+  const pill = 22 + when.length * 7.4;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="pitroom saved ${esc(usd(t.saved))}">
+<style>
+text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#f4f4f5}
+.name{font-size:20px;font-weight:650;letter-spacing:-.01em}
+.sub{font-size:12.5px;fill:#a1a1aa}
+.pill{font-size:11px;font-weight:600;letter-spacing:.1em;fill:#a1a1aa}
+.lab{font-size:11px;font-weight:500;letter-spacing:.09em;fill:#a1a1aa}
+.big{font-size:60px;font-weight:700;letter-spacing:-.03em;fill:#3ddc97}
+.val{font-size:26px;font-weight:650;letter-spacing:-.02em}
+.foot{font-size:11.5px;fill:#71717a}
+</style>
+<defs>
+<radialGradient id="o" cx="1" cy="0" r=".7"><stop offset="0" stop-color="#ff6a2b" stop-opacity=".24"/><stop offset="1" stop-color="#ff6a2b" stop-opacity="0"/></radialGradient>
+<radialGradient id="b" cx="0" cy="0" r=".7"><stop offset="0" stop-color="#38bdf8" stop-opacity=".16"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+<linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a2b"/><stop offset="1" stop-color="#ffa86b"/></linearGradient>
+<clipPath id="c"><rect width="${W}" height="${H}" rx="20"/></clipPath>
+</defs>
+<g clip-path="url(#c)"><rect width="${W}" height="${H}" fill="#0b0b0f"/><rect width="${W}" height="${H}" fill="url(#o)"/><rect width="${W}" height="${H}" fill="url(#b)"/></g>
+<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="19.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
+<rect x="${M}" y="28" width="38" height="38" rx="11" fill="url(#m)"/>
+<path d="M4 4h4v4H4zm8 0h4v4h-4zM8 8h4v4H8zm8 0h4v4h-4zM4 12h4v4H4zm8 0h4v4h-4zm-4 4h4v4H8zm8 0h4v4h-4z" fill="#fff" transform="translate(${M + 7} 35) scale(1)"/>
+<text x="${M + 52}" y="45" class="name">Pitroom</text><text x="${M + 52}" y="63" class="sub">Your agent's pit crew</text>
+<rect x="${W - M - pill}" y="34" width="${pill}" height="26" rx="13" fill="#fff" fill-opacity=".04" stroke="#fff" stroke-opacity=".14"/>
+<text x="${W - M - pill / 2}" y="51" class="pill" text-anchor="middle">${esc(when)}</text>
+<text x="${M}" y="112" class="lab">SAVED ON YOUR MAIN CODING AGENT</text>
+<text x="${M}" y="168" class="big">${esc(usd(t.saved))}</text>
+${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.round(t.ratio)}\xD7` : "\u2014", "Context compression")}${tile(2, String(t.runs), "Delegated tasks")}
+<text x="${M}" y="296" class="foot">Estimated against ${esc(primaryPrice().name)} pricing \xB7 npx pitroom</text>
+</svg>
+`;
+}
 export {
   DEFAULT_BACKEND,
+  acquireWriteLock,
   allBackends,
   backendIds,
+  badgeUrl,
   brief,
+  card,
+  compact,
   cooldownMs,
   describeTarget,
+  estimateTokens,
   extractRefs,
   fill,
+  findSecretFiles,
+  findSecretFilesInTree,
   formatTarget,
   getBackend,
+  guardEnv,
   loadPlan,
   loadTemplate,
+  looksSecret,
   parseAudit,
   parsePlan,
   parseStatus,
@@ -1634,6 +2207,17 @@ export {
   parseVerdict,
   planName,
   planTask,
+  primaryPrice,
+  readLedger,
+  releaseSlot,
+  releaseWriteLock,
   retryAfterMs,
+  savedUsd,
+  secretWarning,
+  shimDir,
+  slotHolders,
+  totals,
+  tryAcquireSlot,
+  usd,
   verifyRefs
 };
