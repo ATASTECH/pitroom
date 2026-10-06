@@ -21,6 +21,8 @@ export interface Usage {
   total: number;
   /** USD as reported by the CLI; undefined when the CLI does not report cost. */
   cost?: number;
+  /** USD estimated from the user's `workerPrices` when the CLI reports no cost (Codex, Gemini); never set when it does. */
+  costEstimate?: number;
   steps: number;
   toolCalls: number;
   /** Tool calls the permission layer refused. */

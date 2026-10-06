@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Costs
+- **Prices for the CLIs that report no cost.** Codex and Gemini give tokens but no cost, so a run's `worker cost` was `n/a` and counted as free in the savings, which overstated them. The new config `"workerPrices": {"codex:gpt-6.1-sol": "1.25,10,0.125"}` (USD per 1M tokens, "in,out[,cachedIn]", keyed `backend:model` or `backend`) lets you say what they cost: the cost is then estimated from the tokens, shown as `~$0.016 (estimated from your workerPrices)` in the receipt and marked estimated in the dashboard, kept in the ledger and history, and taken off the savings. A cost the CLI reported always wins. `pitroom doctor` warns about a worker in your chain that reports no cost and has no price. Pitroom still knows no vendor prices and fetches none: the numbers are yours.
+
 ## 0.20.0
 
 ### Notifications

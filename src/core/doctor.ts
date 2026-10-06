@@ -14,6 +14,7 @@ import { resolveChain } from './chain.js';
 import { configPath, effective, loadConfig } from './config.js';
 import { installedSkills, launcherPath, skillNames } from './install.js';
 import { mcpStatus } from './mcp-install.js';
+import { workerPrice } from './receipt.js';
 import { VERSION } from './run.js';
 import { type RunMeta, home, listRunIds, readMeta } from './store.js';
 import { bold, cyan, dim, green, red, wrapText, yellow } from './style.js';
@@ -137,6 +138,21 @@ export function doctor(probe: boolean): number {
       const cheaper = Object.entries(costs).filter(([k, v]) => k.startsWith(`${t.backend}:`) && v < mine).sort((a, b) => a[1] - b[1])[0];
       add('ok', `cost: ${key} = ${mine}${cheaper ? `; you priced ${cheaper[0]} cheaper (${cheaper[1]}): is the dearer one needed?` : ''}`);
     }
+  }
+  // A CLI that reports no cost (Codex, Gemini): without a price of yours its runs count as free, which overstates the savings.
+  const seenUnpriced = new Set<string>();
+  for (const t of [...chain, ...tierTargets]) {
+    let backend;
+    try {
+      backend = getBackend(t.backend);
+    } catch {
+      continue; // reported in its own section
+    }
+    const model = (t.model ?? '').split('#')[0];
+    const key = model ? `${t.backend}:${model}` : t.backend; // a target that names no model: the backend alone
+    if (backend.capabilities.reportsCost || seenUnpriced.has(key) || workerPrice(t.backend, model)) continue;
+    seenUnpriced.add(key);
+    add('warn', `${key} reports no cost, so its runs count as free in the savings: give its price in the config, "workerPrices": {"${key}": "<in>,<out>[,<cachedIn>]"} (USD per 1M tokens)`);
   }
   // Models skipped for now because they said "rate limited": say so, with when they come back.
   for (const c of Object.values(activeCooldowns())) {

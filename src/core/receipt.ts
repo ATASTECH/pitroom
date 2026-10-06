@@ -36,11 +36,35 @@ export function primaryPrice(): Price {
 
 export const estimateTokens = (text: string) => Math.ceil(text.length / 4);
 
+/** "in,out[,cachedIn]" in USD per 1M tokens, or undefined when it is not that. */
+export function parsePriceSpec(spec: unknown, name = 'worker'): Price | undefined {
+  const parts = typeof spec === 'string' ? spec.split(',').map((x) => Number(x.trim())) : [];
+  if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return undefined;
+  return { name, input: parts[0]!, output: parts[1]!, cachedInput: parts[2] ?? parts[0]! / 10 };
+}
+
+/**
+ * The price the user gave for a worker model: `backend:model` for the first of `models` that has one (the model that
+ * actually ran, then the one that was asked for), else `backend`. Pitroom knows no vendor prices.
+ */
+export function workerPrice(backend: string, ...models: (string | undefined)[]): Price | undefined {
+  const prices = effective().workerPrices.value;
+  for (const key of [...models.filter((m): m is string => !!m).map((m) => `${backend}:${m.split('#')[0]}`), backend]) {
+    if (prices[key] !== undefined) return parsePriceSpec(prices[key], key);
+  }
+  return undefined;
+}
+
+/** What the tokens cost at a price (USD). */
+export const costAt = (usage: Usage, price: Price): number =>
+  (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
+
+/** The worker's cost: as its CLI reported it, else as estimated from the user's `workerPrices`; undefined when neither. */
+export const workerCostOf = (usage: Usage | undefined): number | undefined => usage?.cost ?? usage?.costEstimate;
+
 export function savedUsd(usage: Usage, returnedTokens: number, price = primaryPrice()): number {
-  const wouldCost =
-    (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
   const readingTheReport = (returnedTokens * price.input) / 1e6;
-  return Math.max(0, wouldCost - (usage.cost ?? 0) - readingTheReport);
+  return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
 
 export interface LedgerEntry {
@@ -53,6 +77,8 @@ export interface LedgerEntry {
   tokens: number;
   returned: number;
   workerCost: number;
+  /** The worker cost is an estimate from the user's `workerPrices`, not what the CLI reported. */
+  costEstimated?: true;
   saved: number;
   price: string;
 }
@@ -69,7 +95,8 @@ export function record(meta: RunMeta): void {
     model: meta.resolvedModel ?? (meta.ran ?? meta.worker).model,
     tokens: meta.usage.total,
     returned: meta.returnedTokens ?? 0,
-    workerCost: meta.usage.cost ?? 0,
+    workerCost: workerCostOf(meta.usage) ?? 0,
+    ...(meta.usage.cost === undefined && meta.usage.costEstimate !== undefined ? { costEstimated: true as const } : {}),
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name,
   };

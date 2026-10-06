@@ -37,6 +37,8 @@ export interface PitroomConfig {
   notifyCommand?: string;
   /** Seconds a run must have taken to be announced (default 15): quick runs are not worth a notification. */
   notifyAfter?: number;
+  /** USD per 1M tokens of a worker model, for the CLIs that report no cost (Codex, Gemini): {"codex:gpt-6.1-sol": "1.25,10,0.125"} = "in,out[,cachedIn]", keyed "backend:model" or "backend". Pitroom knows no vendor prices. */
+  workerPrices?: Record<string, string>;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -61,6 +63,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   notify: 'boolean',
   notifyCommand: 'string',
   notifyAfter: 'number',
+  workerPrices: 'record',
 };
 
 export function configPath(): string {
@@ -187,5 +190,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     notify: setting<boolean>(undefined, flag01(e.PITROOM_NOTIFY), c.notify, false),
     notifyCommand: setting<string | undefined>(undefined, e.PITROOM_NOTIFY_COMMAND?.trim() || undefined, c.notifyCommand?.trim() || undefined, undefined),
     notifyAfter: setting<number>(undefined, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
+    workerPrices: setting<Record<string, string>>(undefined, undefined, c.workerPrices, {}),
   };
 }

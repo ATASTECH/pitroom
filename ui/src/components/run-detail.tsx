@@ -50,10 +50,11 @@ const Block = ({ children, mono }: { children: React.ReactNode; mono?: boolean }
 );
 
 const LABEL: Record<string, string> = { worker: 'Worker', model: 'Model', mode: 'Mode', started: 'Started', time: 'Duration', steps: 'Steps', toolCalls: 'Tool calls', tokens: 'Tokens', returnedTokens: 'Returned to agent', cost: 'Worker cost', saved: 'Saved', group: 'Group', directory: 'Directory' };
-function value(k: string, v: string | number): string {
+function value(k: string, v: string | number, estimated = false): string {
   if (k === 'started') return new Date(v).toLocaleString();
   if (k === 'tokens' || k === 'returnedTokens') return tokens(Number(v));
-  if (k === 'cost') return Number(v) ? `$${Number(v).toFixed(3)}` : 'free';
+  // the CLI reported no cost: the figure is estimated from the user's own prices
+  if (k === 'cost') return Number(v) ? `${estimated ? '~' : ''}$${Number(v).toFixed(3)}${estimated ? ' (estimated)' : ''}` : 'free';
   if (k === 'saved') return `~${usd(Number(v))}`;
   return String(v);
 }
@@ -129,7 +130,7 @@ function Body({ d, reload }: { d: RunDetail; reload: () => void }) {
           {Object.keys(LABEL).map((k) => {
             const v = d.info[k];
             if (v == null || v === '' || (v === 0 && k !== 'cost')) return null;
-            return <div key={k} className="min-w-0"><dt className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{LABEL[k]}</dt><dd className="break-words text-[13px]">{value(k, v)}</dd></div>;
+            return <div key={k} className="min-w-0"><dt className="text-[11px] uppercase tracking-wide text-muted-foreground/80">{LABEL[k]}</dt><dd className="break-words text-[13px]">{value(k, v, k === 'cost' && !!d.info.costEstimated)}</dd></div>;
           })}
         </dl>
         {d.audit && d.audit.state === 'done' && d.audit.verdict && d.audit.verdict !== 'agree' && (

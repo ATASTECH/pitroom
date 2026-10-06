@@ -2019,7 +2019,8 @@ var SCHEMA = {
   mcpDash: "boolean",
   notify: "boolean",
   notifyCommand: "string",
-  notifyAfter: "number"
+  notifyAfter: "number",
+  workerPrices: "record"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
@@ -2117,7 +2118,8 @@ function effective(flags = {}) {
     mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
     notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
     notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
-    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15)
+    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
+    workerPrices: setting(void 0, void 0, c.workerPrices, {})
   };
 }
 
@@ -2137,10 +2139,16 @@ function primaryPrice() {
   return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet;
 }
 var estimateTokens = (text) => Math.ceil(text.length / 4);
+function parsePriceSpec(spec, name = "worker") {
+  const parts = typeof spec === "string" ? spec.split(",").map((x) => Number(x.trim())) : [];
+  if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return void 0;
+  return { name, input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
+}
+var costAt = (usage, price) => (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
+var workerCostOf = (usage) => usage?.cost ?? usage?.costEstimate;
 function savedUsd(usage, returnedTokens, price = primaryPrice()) {
-  const wouldCost = (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
   const readingTheReport = returnedTokens * price.input / 1e6;
-  return Math.max(0, wouldCost - (usage.cost ?? 0) - readingTheReport);
+  return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
 function readLedger(sinceMs) {
   if (!fs15.existsSync(ledgerFile())) return [];
@@ -2271,6 +2279,7 @@ export {
   card,
   compact,
   cooldownMs,
+  costAt,
   describeTarget,
   estimateTokens,
   extractRefs,
@@ -2291,6 +2300,7 @@ export {
   newRunId,
   parseAudit,
   parsePlan,
+  parsePriceSpec,
   parseStatus,
   parseTarget,
   parseVerdict,
@@ -2316,5 +2326,6 @@ export {
   tryAcquireSlot,
   usd,
   verifyRefs,
+  workerCostOf,
   writeMeta
 };

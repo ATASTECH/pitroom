@@ -21,7 +21,7 @@ import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
-import { estimateTokens, record, savedUsd } from './receipt.js';
+import { costAt, estimateTokens, record, savedUsd, workerPrice } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
@@ -464,6 +464,12 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   if (meta.state === 'done' && meta.verify) meta.verifyResult = runVerify(meta);
   meta.endedAt = new Date().toISOString();
 
+  // A CLI that reports no cost (Codex, Gemini): estimate it from the prices the user gave, so the savings are not
+  // computed as if the worker had been free. Only when they gave one; otherwise it stays unknown ("n/a").
+  if (meta.usage && meta.usage.cost === undefined) {
+    const price = workerPrice(ran.backend, meta.resolvedModel ?? run.model, ran.model);
+    if (price) meta.usage.costEstimate = costAt(meta.usage, price);
+  }
   meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
   // An audit is overhead, not a delegation that saved anything.
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);

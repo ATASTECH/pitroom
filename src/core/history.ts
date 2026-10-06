@@ -148,7 +148,7 @@ export function recordRun(meta: RunMeta): void {
       dir: meta.dir, review_of: meta.reviewOf ?? meta.auditOf ?? null,
       verdict: meta.verdict ? `SPEC ${meta.verdict.spec.toUpperCase()} · QUALITY ${meta.verdict.quality.toUpperCase()}` : meta.auditVerdict ? `AUDIT ${meta.auditVerdict.toUpperCase()}` : null,
       seconds, steps: u?.steps ?? null, tool_calls: u?.toolCalls ?? null, tokens: u?.total ?? null, returned_tokens: meta.returnedTokens ?? null,
-      cost: u?.cost ?? null, saved: meta.savedUsd ?? null, files_changed: meta.changes?.length ?? 0, applied: meta.applied ? 1 : 0,
+      cost: u?.cost ?? u?.costEstimate ?? null, saved: meta.savedUsd ?? null, files_changed: meta.changes?.length ?? 0, applied: meta.applied ? 1 : 0,
       error: clip(meta.error, 2000) ?? null, meta_json: JSON.stringify(meta),
     };
     db.exec('BEGIN IMMEDIATE');

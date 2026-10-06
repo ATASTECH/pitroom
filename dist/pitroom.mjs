@@ -1446,7 +1446,8 @@ var SCHEMA = {
   mcpDash: "boolean",
   notify: "boolean",
   notifyCommand: "string",
-  notifyAfter: "number"
+  notifyAfter: "number",
+  workerPrices: "record"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1544,7 +1545,8 @@ function effective(flags = {}) {
     mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
     notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
     notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
-    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15)
+    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
+    workerPrices: setting(void 0, void 0, c.workerPrices, {})
   };
 }
 
@@ -2511,10 +2513,23 @@ function primaryPrice() {
   return PRESETS[eff.primary.value.toLowerCase()] ?? PRESETS.sonnet;
 }
 var estimateTokens = (text) => Math.ceil(text.length / 4);
+function parsePriceSpec(spec, name = "worker") {
+  const parts = typeof spec === "string" ? spec.split(",").map((x) => Number(x.trim())) : [];
+  if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return void 0;
+  return { name, input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
+}
+function workerPrice(backend, ...models) {
+  const prices = effective().workerPrices.value;
+  for (const key of [...models.filter((m) => !!m).map((m) => `${backend}:${m.split("#")[0]}`), backend]) {
+    if (prices[key] !== void 0) return parsePriceSpec(prices[key], key);
+  }
+  return void 0;
+}
+var costAt = (usage2, price) => (usage2.input * price.input + usage2.cacheRead * price.cachedInput + (usage2.output + usage2.reasoning) * price.output) / 1e6;
+var workerCostOf = (usage2) => usage2?.cost ?? usage2?.costEstimate;
 function savedUsd(usage2, returnedTokens, price = primaryPrice()) {
-  const wouldCost = (usage2.input * price.input + usage2.cacheRead * price.cachedInput + (usage2.output + usage2.reasoning) * price.output) / 1e6;
   const readingTheReport = returnedTokens * price.input / 1e6;
-  return Math.max(0, wouldCost - (usage2.cost ?? 0) - readingTheReport);
+  return Math.max(0, costAt(usage2, price) - (workerCostOf(usage2) ?? 0) - readingTheReport);
 }
 function record(meta) {
   if (!meta.usage?.steps || meta.auditOf) return;
@@ -2527,7 +2542,8 @@ function record(meta) {
     model: meta.resolvedModel ?? (meta.ran ?? meta.worker).model,
     tokens: meta.usage.total,
     returned: meta.returnedTokens ?? 0,
-    workerCost: meta.usage.cost ?? 0,
+    workerCost: workerCostOf(meta.usage) ?? 0,
+    ...meta.usage.cost === void 0 && meta.usage.costEstimate !== void 0 ? { costEstimated: true } : {},
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name
   };
@@ -2858,7 +2874,7 @@ function recordRun(meta) {
       tool_calls: u?.toolCalls ?? null,
       tokens: u?.total ?? null,
       returned_tokens: meta.returnedTokens ?? null,
-      cost: u?.cost ?? null,
+      cost: u?.cost ?? u?.costEstimate ?? null,
       saved: meta.savedUsd ?? null,
       files_changed: meta.changes?.length ?? 0,
       applied: meta.applied ? 1 : 0,
@@ -3246,7 +3262,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   if (u && u.steps) {
     const ratio = meta.returnedTokens ? `, ${Math.max(1, Math.round(u.total / meta.returnedTokens))}\xD7 compression` : "";
     out.push(
-      `\u2500\u2500 receipt: worker processed ${compact(u.total)} tokens in ${plural(u.steps, "step")} (${plural(u.toolCalls, "tool call")}${u.denied ? `, ${u.denied} blocked` : ""}) \xB7 worker cost ${u.cost === void 0 ? "n/a" : usd(u.cost)} \xB7 returned ~${compact(meta.returnedTokens ?? 0)} tokens${ratio}` + (meta.savedUsd !== void 0 ? ` \xB7 est. saved ${usd(meta.savedUsd)} vs ${primaryPrice().name}` : "")
+      `\u2500\u2500 receipt: worker processed ${compact(u.total)} tokens in ${plural(u.steps, "step")} (${plural(u.toolCalls, "tool call")}${u.denied ? `, ${u.denied} blocked` : ""}) \xB7 worker cost ${u.cost !== void 0 ? usd(u.cost) : u.costEstimate !== void 0 ? `~${usd(u.costEstimate)} (estimated from your workerPrices)` : "n/a"} \xB7 returned ~${compact(meta.returnedTokens ?? 0)} tokens${ratio}` + (meta.savedUsd !== void 0 ? ` \xB7 est. saved ${usd(meta.savedUsd)} vs ${primaryPrice().name}` : "")
     );
   }
   if (meta.changes) {
@@ -4273,6 +4289,10 @@ function finalize(meta, res) {
   if (meta.state === "done" && !run2.finalText) meta.warnings.push("worker finished without a written answer");
   if (meta.state === "done" && meta.verify) meta.verifyResult = runVerify(meta);
   meta.endedAt = (/* @__PURE__ */ new Date()).toISOString();
+  if (meta.usage && meta.usage.cost === void 0) {
+    const price = workerPrice(ran.backend, meta.resolvedModel ?? run2.model, ran.model);
+    if (price) meta.usage.costEstimate = costAt(meta.usage, price);
+  }
   meta.returnedTokens = estimateTokens(formatReport(meta, run2.finalText));
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
@@ -5422,7 +5442,8 @@ function runDetail(id) {
       toolCalls: u?.toolCalls,
       tokens: u?.total,
       returnedTokens: m.returnedTokens,
-      cost: u?.cost,
+      cost: u?.cost ?? u?.costEstimate,
+      costEstimated: u?.cost === void 0 && u?.costEstimate !== void 0 ? 1 : void 0,
       saved: m.savedUsd,
       group: m.group,
       directory: m.dir
@@ -7125,6 +7146,20 @@ function doctor5(probe) {
       const cheaper = Object.entries(costs).filter(([k, v]) => k.startsWith(`${t.backend}:`) && v < mine).sort((a, b) => a[1] - b[1])[0];
       add("ok", `cost: ${key} = ${mine}${cheaper ? `; you priced ${cheaper[0]} cheaper (${cheaper[1]}): is the dearer one needed?` : ""}`);
     }
+  }
+  const seenUnpriced = /* @__PURE__ */ new Set();
+  for (const t of [...chain, ...tierTargets]) {
+    let backend;
+    try {
+      backend = getBackend(t.backend);
+    } catch {
+      continue;
+    }
+    const model = (t.model ?? "").split("#")[0];
+    const key = model ? `${t.backend}:${model}` : t.backend;
+    if (backend.capabilities.reportsCost || seenUnpriced.has(key) || workerPrice(t.backend, model)) continue;
+    seenUnpriced.add(key);
+    add("warn", `${key} reports no cost, so its runs count as free in the savings: give its price in the config, "workerPrices": {"${key}": "<in>,<out>[,<cachedIn>]"} (USD per 1M tokens)`);
   }
   for (const c of Object.values(activeCooldowns())) {
     add("warn", `${c.target} is cooling down ${untilText(c)} (${c.reason.slice(0, 80)}): runs skip it while a fallback is left; \`pitroom cooldown --clear\` tries it again`);

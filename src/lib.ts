@@ -12,6 +12,6 @@ export { brief, loadPlan, parsePlan, planName, planTask } from './core/plan.js';
 export { guardEnv, shimDir } from './vcs/guard.js';
 export { acquireWriteLock, releaseSlot, releaseWriteLock, slotHolders, tryAcquireSlot } from './core/slots.js';
 export { findSecretFiles, findSecretFilesInTree, looksSecret, secretWarning } from './core/secrets.js';
-export { badgeUrl, card, compact, estimateTokens, primaryPrice, readLedger, savedUsd, totals, usd } from './core/receipt.js';
+export { badgeUrl, card, compact, costAt, estimateTokens, parsePriceSpec, primaryPrice, readLedger, savedUsd, totals, usd, workerCostOf } from './core/receipt.js';
 export { TERMINAL, STOP_FILE, freshMeta, home, isActive, isAlive, listRunIds, newRunId, readMeta, requestStop, resolveRun, runDir, runFile, runsDir, writeMeta } from './core/store.js';
 export { spawnWorker } from './core/process.js';
