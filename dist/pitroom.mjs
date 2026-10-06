@@ -5564,7 +5564,7 @@ function toRun(m) {
 }
 function dashState(opts = {}) {
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
-  const runs = [];
+  const metas = [];
   const groups = /* @__PURE__ */ new Set();
   for (const id of listRunIds().slice(-SCAN).reverse()) {
     let m;
@@ -5575,8 +5575,10 @@ function dashState(opts = {}) {
     }
     if (m.group) groups.add(m.group);
     if (opts.group && m.group !== opts.group) continue;
-    if (runs.length < limit) runs.push(toRun(m));
+    metas.push(m);
   }
+  const whole = new Set(metas.slice(0, limit).flatMap((m) => m.group ? [m.group] : []));
+  const runs = metas.filter((m, i) => i < limit || m.group && whole.has(m.group)).map(toRun);
   return {
     price: primaryPrice().name,
     running: runs.filter((r) => r.state === "running" || r.state === "queued").length,

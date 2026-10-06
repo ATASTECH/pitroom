@@ -35,7 +35,10 @@ export function summarize(runs: DashRun[]) {
   const running = runs.filter(isActive).length;
   const problem = runs.filter((r) => !isActive(r) && isProblem(r)).length;
   const done = runs.filter((r) => r.state === 'done' && !r.verifyFailed).length;
+  const workers = new Map<string, number>();
+  for (const r of runs) workers.set(r.worker, (workers.get(r.worker) ?? 0) + 1);
   return {
+    workers: [...workers].sort((a, b) => b[1] - a[1]),
     total: runs.length,
     running,
     problem,

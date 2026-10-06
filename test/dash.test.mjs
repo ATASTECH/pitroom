@@ -210,3 +210,23 @@ test('dash: the registry entry of a live process is kept when it does not answer
   assert.equal(s.run(['dash', '--stop']).status, 2);
   assert.ok(!fs.existsSync(file), 'the entry of a dead process is removed');
 });
+
+test('dash: a crew on the edge of the limit is returned whole', async () => {
+  const s = sandbox();
+  for (const t of ['one', 'two', 'three']) assert.equal(s.run(['run', '-g', 'edge-crew', t]).status, 0);
+  await sleep(1100); // run ids order by the second: the lone run must be strictly the newest
+  assert.equal(s.run(['run', 'newest and alone']).status, 0);
+  const start = s.run(['dash', '--detach', '--port', '0']);
+  assert.equal(start.status, 0, start.stderr);
+  const url = start.stdout.trim();
+  try {
+    const two = JSON.parse((await get(`${url}api/state?limit=2`)).body).runs;
+    assert.equal(two.filter((r) => r.group === 'edge-crew').length, 3, 'the whole crew, not the one run that fits');
+    assert.equal(two.length, 4, 'and the newest run beside it');
+    const one = JSON.parse((await get(`${url}api/state?limit=1`)).body).runs;
+    assert.equal(one.length, 1, 'a limit that cuts no crew still limits');
+    assert.equal(one[0].group, undefined);
+  } finally {
+    s.run(['dash', '--stop']);
+  }
+});

@@ -1,7 +1,7 @@
 import { ChevronDown } from 'lucide-react';
 import { useState } from 'react';
 import type { DashRun } from '@/api';
-import { Pill } from '@/components/badges';
+import { Pill, WorkerBadge } from '@/components/badges';
 import { RunCard } from '@/components/run-card';
 import { ago, tokens, usd } from '@/lib/format';
 import { summarize } from '@/lib/groups';
@@ -24,6 +24,14 @@ export function GroupCard({ name, runs, index }: { name: string; runs: DashRun[]
               {s.running > 0 && <Pill>{s.running} running</Pill>}
               {s.done > 0 && <Pill tone="good">{s.done} done</Pill>}
               {s.problem > 0 && <span className="rounded-md border border-destructive/30 bg-destructive/10 px-1.5 py-0.5 text-xs text-destructive">{s.problem} need attention</span>}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {s.workers.map(([worker, n]) => (
+                <span key={worker} className="inline-flex items-center gap-1">
+                  <WorkerBadge worker={worker} />
+                  {n > 1 && <span className="text-xs text-muted-foreground">×{n}</span>}
+                </span>
+              ))}
             </div>
             <div className="flex h-[3px] overflow-hidden rounded-full bg-muted" role="progressbar" aria-valuemin={0} aria-valuemax={s.total} aria-valuenow={finished}>
               <div className="h-full bg-success transition-[width] duration-500" style={{ width: `${(s.done / s.total) * 100}%` }} />

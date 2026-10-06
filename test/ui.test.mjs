@@ -279,6 +279,8 @@ test('ui: runs of one group are one card with their progress; it opens onto the 
   assert.match(face, /2 runs/);
   assert.match(face, /2 done/);
   assert.match(face, /2\/2 finished/);
+  assert.match(face, /opencode/, 'the crew card names its workers');
+  assert.match(face, /×2/, 'and how many runs each did');
   assert.equal(await evaluate(`${cardWith('crew job alpha')} === undefined`), true, 'the runs are inside the card, closed at first');
   assert.notEqual(await evaluate(`${cardWith('a lone grouped job')} !== undefined`), false, 'a group of one is an ordinary card');
   await click(crew);
