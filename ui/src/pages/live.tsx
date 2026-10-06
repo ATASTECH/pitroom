@@ -1,6 +1,7 @@
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { type DashRun, api } from '@/api';
+import { GroupCard } from '@/components/group-card';
 import { Hint } from '@/components/hint';
 import { RunCard } from '@/components/run-card';
 import { SavingsNote } from '@/components/savings-note';
@@ -11,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Skeleton } from '@/components/ui/skeleton';
 import { usePoll } from '@/hooks/use-poll';
+import { bucket, isActive, isProblem } from '@/lib/groups';
 import { usd } from '@/lib/format';
 import { cn } from '@/lib/utils';
 
@@ -57,10 +59,12 @@ export function LivePage({ focus }: { focus?: string }) {
   const shown = useMemo(
     () =>
       (data?.runs ?? []).filter(
-        (r) => matches(r, q.trim().toLowerCase()) && (filter === 'all' || (filter === 'running' ? r.state === 'running' || r.state === 'queued' : r.state === 'failed' || r.state === 'timeout' || r.state === 'stopped' || !!r.verifyFailed)),
+        (r) => matches(r, q.trim().toLowerCase()) && (filter === 'all' || (filter === 'running' ? isActive(r) : isProblem(r))),
       ),
     [data, q, filter],
   );
+  // crews are one card each (the group picker still shows one crew's runs flat, and a filter shows only the runs that match)
+  const items = useMemo(() => (group ? shown.map((run) => ({ kind: 'run' as const, run })) : bucket(shown)), [shown, group]);
 
   return (
     <div className="space-y-5">
@@ -91,7 +95,7 @@ export function LivePage({ focus }: { focus?: string }) {
             {!data.runs.length && <code className="rounded-lg border bg-card px-3 py-1.5 text-sm text-foreground">pitroom run "your task"</code>}
           </div>
         )}
-        {shown.map((r, i) => <RunCard key={r.id} run={r} index={i} />)}
+        {items.map((it, i) => (it.kind === 'group' ? <GroupCard key={`g:${it.name}`} name={it.name} runs={it.runs} index={i} /> : <RunCard key={it.run.id} run={it.run} index={i} />))}
         {data && data.runs.length >= limit && <div className="flex justify-center pt-1"><Button variant="outline" onClick={() => setLimit((l) => l + 40)}>Show older runs</Button></div>}
       </div>
     </div>

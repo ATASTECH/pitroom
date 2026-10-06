@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Dashboard
+- **A crew is one card.** On the Live tab, runs that share a group (two or more: `pitroom run -g name`, a `pitroom_run` with `tasks`) now show as one card: the group name, how many runs, how many are running, done or need attention, a progress bar, the tokens and the estimated saving of the crew, and when it started. It opens onto its runs, which are the usual cards; a crew that is still working is open by itself. A group of one run, and runs without a group, stay plain cards; the group picker still lists one crew's runs flat.
+
 ## 0.21.0
 
 ### Windows

@@ -264,3 +264,25 @@ test('ui: a finished isolate run can be discarded from its card, after a confirm
   assert.match(shown, /\[discarded\]/, 'the server discarded it');
   await until(`${button('Discard')} === undefined && ${button('Yes, discard')} === undefined && ${button('Discard…')} === undefined`, 'the buttons to go');
 });
+
+test('ui: runs of one group are one card with their progress; it opens onto the runs, and a group of one stays a plain card', { skip }, async () => {
+  for (const task of ['crew job alpha', 'crew job beta']) {
+    const r = s.run(['run', '-g', 'crew-test', task]);
+    assert.equal(r.status, 0, r.stderr);
+  }
+  const lone = s.run(['run', '-g', 'lonely-group', 'a lone grouped job']);
+  assert.equal(lone.status, 0, lone.stderr);
+  await open();
+  const crew = "[...document.querySelectorAll('button[aria-expanded]')].find((b) => b.textContent.includes('crew-test'))";
+  await until(`${crew} !== undefined`, 'the crew card');
+  const face = await evaluate(`${crew}.textContent`);
+  assert.match(face, /2 runs/);
+  assert.match(face, /2 done/);
+  assert.match(face, /2\/2 finished/);
+  assert.equal(await evaluate(`${cardWith('crew job alpha')} === undefined`), true, 'the runs are inside the card, closed at first');
+  assert.notEqual(await evaluate(`${cardWith('a lone grouped job')} !== undefined`), false, 'a group of one is an ordinary card');
+  await click(crew);
+  await until(`${cardWith('crew job alpha')} !== undefined && ${cardWith('crew job beta')} !== undefined`, 'the crew to show its runs');
+  await click(crew);
+  await until(`${cardWith('crew job alpha')} === undefined`, 'the crew to close again');
+});
