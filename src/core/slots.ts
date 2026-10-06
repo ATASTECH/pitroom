@@ -16,6 +16,11 @@ const locksDir = () => path.join(home(), 'locks');
 /** Grace period for a run that has been prepared but whose process has not reported a pid yet. */
 const STARTUP_GRACE_MS = 30_000;
 
+/**
+ * Whether the run that holds a claim is still alive. A holder that is not alive (finished, crashed, its process gone) is
+ * stale, and so is one whose record cannot be read at all (its folder was removed: `clean`, or a hand-deleted run): the claim
+ * is taken over rather than waited on forever. Asking also settles a dead process's record (`freshMeta` marks it failed).
+ */
 function holderActive(runId: string, self: string): boolean {
   if (!runId || runId === self) return false;
   try {
