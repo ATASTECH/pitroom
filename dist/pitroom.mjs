@@ -1954,7 +1954,9 @@ import fs12 from "node:fs";
 // src/vcs/guard.ts
 import fs11 from "node:fs";
 import path9 from "node:path";
-var VERSION = 1;
+var VERSION = 2;
+var WINDOWS = process.platform === "win32";
+var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
 var SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
 # index or discard work. The primary agent reviews and commits, not the worker.
@@ -2031,9 +2033,10 @@ function shimDir() {
   return path9.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
+  const same2 = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
   for (const dir of (process.env.PATH ?? "").split(path9.delimiter).filter(Boolean)) {
-    if (path9.resolve(dir) === skip) continue;
-    const p = path9.join(dir, "git");
+    if (same2(path9.resolve(dir), skip)) continue;
+    const p = path9.join(dir, WINDOWS ? "git.exe" : "git");
     try {
       fs11.accessSync(p, fs11.constants.X_OK);
       if (fs11.statSync(p).isFile()) return p;
@@ -2042,6 +2045,24 @@ function findRealGit(skip) {
   }
   return void 0;
 }
+function findGitSh(realGit) {
+  let dir = path9.dirname(realGit);
+  for (let i = 0; i < 4; i++) {
+    for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
+      const p = path9.join(dir, rel);
+      if (fs11.existsSync(p)) return p;
+    }
+    const up = path9.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return void 0;
+}
+var cmdShim = (sh) => `@echo off\r
+set "MSYS2_ARG_CONV_EXCL=*"\r
+"${sh}" "%~dp0git" %*\r
+exit /b %errorlevel%\r
+`;
 var HOOK_VERSION = 1;
 var REF_HOOK = `#!/bin/sh
 # pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
@@ -2055,7 +2076,7 @@ function writeIfChanged(file2, content) {
   fs11.mkdirSync(path9.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}.tmp`;
   fs11.writeFileSync(tmp, content, { mode: 493 });
-  fs11.renameSync(tmp, file2);
+  renameOver(tmp, file2);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -2076,17 +2097,28 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  if (process.platform === "win32") return { ...env, ...quiet };
   writeIfChanged(path9.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(env, [
-    ["core.hooksPath", hooksDir()],
+    ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
   ]);
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
+  let sh;
+  if (WINDOWS) {
+    sh = findGitSh(real);
+    if (!sh) return { ...env, ...quiet };
+    writeIfChanged(path9.join(dir, "git.cmd"), cmdShim(sh));
+  }
   writeIfChanged(path9.join(dir, "git"), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path9.delimiter}${env.PATH ?? ""}` };
+  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path9.delimiter}${env[key] ?? ""}` };
+}
+function shimReady() {
+  const env = guardEnv({ ...process.env });
+  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  return Boolean(env[key]?.startsWith(shimDir()));
 }
 
 // src/core/process.ts
@@ -7300,12 +7332,9 @@ function doctor5(probe) {
   const cfg = loadConfig();
   add(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs37.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add("warn", w);
-  if (process.platform === "win32") {
-    add("warn", "git guard: not available on Windows yet, so Pitroom does not block a worker's git history changes or pushes there (read-only runs are still limited by each worker CLI's own rules, and --isolate keeps edits in a copy); prefer --isolate and check the patch before apply");
-  } else {
-    const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
-    add(guarded ? "ok" : "warn", guarded ? "git guard shim ready" : "git guard unavailable (git not on PATH)");
-  }
+  if (shimReady()) add("ok", "git guard shim ready");
+  else if (process.platform === "win32") add("warn", "git guard: the ref and push guard is on, but the git shim needs the sh.exe of Git for Windows next to git (not found), so a worker's `git add`, `restore` or `clean` is not blocked; prefer --isolate and check the patch before apply");
+  else add("warn", "git guard unavailable (git not on PATH)");
   section2("Worker chain");
   const chain = [];
   try {

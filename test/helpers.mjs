@@ -6,8 +6,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-/** For a test that needs sh scripts, POSIX file modes or the git guard (the guard is not on Windows yet): `{ skip: posixOnly }`. */
-export const posixOnly = process.platform === 'win32' ? 'POSIX-only (sh scripts, file modes, git guard)' : false;
+/** For a test that needs sh scripts or POSIX file modes: `{ skip: posixOnly }`. */
+export const posixOnly = process.platform === 'win32' ? 'POSIX-only (sh scripts, file modes)' : false;
 export const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 export const CLI = path.join(root, 'dist', 'pitroom.mjs');
 // Executed directly (no sh wrapper): a shell would silently repair a stale $PWD, which is

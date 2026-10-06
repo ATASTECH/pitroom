@@ -9,7 +9,7 @@ export { fill, loadTemplate } from './core/templates.js';
 export { cooldownMs, retryAfterMs } from './core/cooldown.js';
 export { parseAudit, parseStatus, parseVerdict } from './core/answers.js';
 export { brief, loadPlan, parsePlan, planName, planTask } from './core/plan.js';
-export { guardEnv, shimDir } from './vcs/guard.js';
+export { guardEnv, shimDir, shimReady } from './vcs/guard.js';
 export { acquireWriteLock, releaseSlot, releaseWriteLock, slotHolders, tryAcquireSlot } from './core/slots.js';
 export { findSecretFiles, findSecretFilesInTree, looksSecret, secretWarning } from './core/secrets.js';
 export { badgeUrl, card, compact, costAt, estimateTokens, parsePriceSpec, primaryPrice, readLedger, savedUsd, totals, usd, workerCostOf } from './core/receipt.js';

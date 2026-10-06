@@ -10,9 +10,13 @@
 // undone with `pitroom revert`, and --isolate never touches the user's tree.
 import fs from 'node:fs';
 import path from 'node:path';
+import { renameOver } from '../core/fs-atomic.js';
 import { home } from '../core/store.js';
 
-const VERSION = 1;
+const VERSION = 2;
+const WINDOWS = process.platform === 'win32';
+// MSYS paths inside Git for Windows' sh accept forward slashes; backslashes in a git config value or an `[ -x ]` test are asking for trouble.
+const fwd = (p: string) => (WINDOWS ? p.replace(/\\/g, '/') : p);
 
 const SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
@@ -92,9 +96,10 @@ export function shimDir(): string {
 }
 
 function findRealGit(skip: string): string | undefined {
+  const same = (a: string, b: string) => (WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b);
   for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
-    if (path.resolve(dir) === skip) continue;
-    const p = path.join(dir, 'git');
+    if (same(path.resolve(dir), skip)) continue;
+    const p = path.join(dir, WINDOWS ? 'git.exe' : 'git');
     try {
       fs.accessSync(p, fs.constants.X_OK);
       if (fs.statSync(p).isFile()) return p;
@@ -104,6 +109,25 @@ function findRealGit(skip: string): string | undefined {
   }
   return undefined;
 }
+
+// Git for Windows ships its own sh.exe (<root>\bin or <root>\usr\bin), which also runs the hooks below. The shim is
+// that same sh script; `git.cmd` is the door for cmd.exe and PowerShell, `git` (no extension) the one for Git Bash.
+function findGitSh(realGit: string): string | undefined {
+  let dir = path.dirname(realGit);
+  for (let i = 0; i < 4; i++) {
+    for (const rel of ['bin/sh.exe', 'usr/bin/sh.exe']) {
+      const p = path.join(dir, rel);
+      if (fs.existsSync(p)) return p;
+    }
+    const up = path.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return undefined;
+}
+
+// `MSYS2_ARG_CONV_EXCL`: the arguments reached cmd.exe already in Windows form, so sh must not "convert" them again.
+const cmdShim = (sh: string) => `@echo off\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n"${sh}" "%~dp0git" %*\r\nexit /b %errorlevel%\r\n`;
 
 // Second layer, carried in environment variables so it survives what PATH does not:
 // login shells (macOS path_helper and ~/.zprofile reorder PATH; Codex runs commands
@@ -128,7 +152,7 @@ function writeIfChanged(file: string, content: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, content, { mode: 0o755 });
-  fs.renameSync(tmp, file);
+  renameOver(tmp, file);
 }
 
 /** Appends git config entries to GIT_CONFIG_COUNT/KEY_n/VALUE_n, keeping any the user set. */
@@ -157,15 +181,29 @@ export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     GIT_PAGER: 'cat',
     PAGER: 'cat',
   };
-  if (process.platform === 'win32') return { ...env, ...quiet };
   writeIfChanged(path.join(hooksDir(), 'reference-transaction'), REF_HOOK);
   env = withGitConfig(env, [
-    ['core.hooksPath', hooksDir()],
+    ['core.hooksPath', fwd(hooksDir())],
     ['url.pitroom-push-blocked://.pushInsteadOf', ''],
   ]);
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
+  let sh: string | undefined;
+  if (WINDOWS) {
+    sh = findGitSh(real);
+    if (!sh) return { ...env, ...quiet };
+    writeIfChanged(path.join(dir, 'git.cmd'), cmdShim(sh));
+  }
   writeIfChanged(path.join(dir, 'git'), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path.delimiter}${env.PATH ?? ''}` };
+  // On Windows the variable is `Path` (any casing) and a second `PATH` key would be ambiguous.
+  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path.delimiter}${env[key] ?? ''}` };
+}
+
+/** Whether the git shim (layer 1) would be put first on a worker's PATH here. */
+export function shimReady(): boolean {
+  const env = guardEnv({ ...process.env });
+  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  return Boolean(env[key]?.startsWith(shimDir()));
 }

@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandbox, posixOnly } from './helpers.mjs';
-import { guardEnv, shimDir } from '../dist/lib.mjs';
+import { sandbox } from './helpers.mjs';
+import { guardEnv } from '../dist/lib.mjs';
 
 // The runner may itself run under a worker guard (layer-2 GIT_CONFIG_* env plus
 // a shim dir first on PATH), which would block sandbox()'s own git setup and
@@ -14,15 +14,18 @@ for (const k of Object.keys(process.env)) {
   if (k === 'GIT_CONFIG_COUNT' || k.startsWith('GIT_CONFIG_KEY_') || k.startsWith('GIT_CONFIG_VALUE_')) delete process.env[k];
 }
 if (process.env.PATH) {
-  process.env.PATH = process.env.PATH.split(path.delimiter).filter((d) => !d.includes('pitroom/shim')).join(path.delimiter);
+  process.env.PATH = process.env.PATH.split(path.delimiter).filter((d) => !d.includes(`pitroom${path.sep}shim`) && !d.includes('pitroom/shim')).join(path.delimiter);
 }
+
+// Plain `git` resolves to git.exe on Windows (CreateProcess ignores .cmd); a shell finds the shim's git.cmd first, as a worker's shell would.
+const gitIn = (args, opts) => spawnSync('git', args, { ...opts, shell: process.platform === 'win32' });
 
 function setup() {
   const s = sandbox();
   process.env.PITROOM_HOME = path.join(s.base, 'home');
   const env = guardEnv({ ...process.env, ...s.env });
   const run = (args, extra = {}) =>
-    spawnSync('git', args, { cwd: s.repo, env: { ...env, ...extra }, encoding: 'utf8', timeout: 15000 });
+    gitIn(args, { cwd: s.repo, env: { ...env, ...extra }, encoding: 'utf8', timeout: 15000 });
   const snap = () =>
     [s.git('rev-parse', 'HEAD'), s.git('branch', '--list'), s.git('config', '--list'),
       fs.readFileSync(path.join(s.repo, 'other.txt'), 'utf8')].join('\n');
@@ -37,10 +40,10 @@ function setup() {
     const r = run(args);
     assert.equal(r.status, 0, `${args.join(' ')} should pass, got ${r.status}: ${r.stderr}`);
   };
-  return { s, run, blocked, allowed };
+  return { s, env, run, blocked, allowed };
 }
 
-test('unconditional blocks', { skip: posixOnly }, () => {
+test('unconditional blocks', () => {
   const { blocked } = setup();
   for (const a of [
     ['pull'], ['merge'], ['rebase'], ['switch'], ['cherry-pick'], ['revert'], ['am'],
@@ -51,7 +54,7 @@ test('unconditional blocks', { skip: posixOnly }, () => {
   ]) blocked(a);
 });
 
-test('branch and tag rules', { skip: posixOnly }, () => {
+test('branch and tag rules', () => {
   const { blocked, allowed } = setup();
   for (const a of [
     ['branch', '-m', 'x'], ['branch', '-M', 'x'], ['branch', '-c', 'x'],
@@ -62,7 +65,7 @@ test('branch and tag rules', { skip: posixOnly }, () => {
   allowed(['tag', '-l']);
 });
 
-test('config, remote and fetch rules', { skip: posixOnly }, () => {
+test('config, remote and fetch rules', () => {
   const { s, run, blocked, allowed } = setup();
   for (const a of [
     ['config', 'user.name', 'x'], ['config', '--unset', 'user.name'], ['config', '--add', 'a.b', 'c'],
@@ -78,7 +81,7 @@ test('config, remote and fetch rules', { skip: posixOnly }, () => {
   assert.doesNotMatch(r.stderr, /blocked for workers/, 'plain fetch passes the shim');
 });
 
-test('apply, reflog, symbolic-ref and submodule rules', { skip: posixOnly }, () => {
+test('apply, reflog, symbolic-ref and submodule rules', () => {
   const { blocked, allowed } = setup();
   for (const a of [
     ['apply', '--index', 'p.patch'], ['apply', '--cached', 'p.patch'], ['apply', '--3way', 'p.patch'],
@@ -90,7 +93,7 @@ test('apply, reflog, symbolic-ref and submodule rules', { skip: posixOnly }, () 
   for (const a of [['submodule', 'status'], ['submodule', 'summary']]) allowed(a);
 });
 
-test('aliases are resolved or refused', { skip: posixOnly }, () => {
+test('aliases are resolved or refused', () => {
   const { s, run, blocked } = setup();
   s.git('config', 'alias.ci', 'commit');
   s.git('config', 'alias.sneaky', '!sh -c true');
@@ -106,7 +109,7 @@ test('aliases are resolved or refused', { skip: posixOnly }, () => {
   void blocked;
 });
 
-test('global options do not hide blocked commands; reads pass', { skip: posixOnly }, () => {
+test('global options do not hide blocked commands; reads pass', () => {
   const { blocked, allowed } = setup();
   for (const a of [
     ['-C', '.', 'reset', '--hard'], ['--git-dir=.git', 'reset', '--hard'],
@@ -118,11 +121,10 @@ test('global options do not hide blocked commands; reads pass', { skip: posixOnl
   ]) allowed(a);
 });
 
-test('shim exits 127 without a usable real git', { skip: posixOnly }, () => {
+test('shim exits 127 without a usable real git', () => {
   const { s, env } = setup();
-  const shim = path.join(shimDir(), 'git');
   for (const real of ['', '/nonexistent/pitroom-git']) {
-    const r = spawnSync(shim, ['status'], {
+    const r = gitIn(['status'], {
       cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: real }, encoding: 'utf8', timeout: 15000,
     });
     assert.equal(r.status, 127, `PITROOM_REAL_GIT=${real} should exit 127: ${r.stderr}`);
@@ -137,4 +139,25 @@ test('guardEnv keeps git from waiting for a person, on every platform: no prompt
   assert.equal(env.GIT_SEQUENCE_EDITOR, 'true');
   assert.equal(env.GIT_PAGER, 'cat');
   assert.equal(env.PAGER, 'cat');
+});
+
+test('layer 2 alone: with the shim bypassed (the real git by absolute path), ref updates and pushes are still refused', () => {
+  const { s } = setup();
+  const env = guardEnv({ ...process.env, ...s.env });
+  const key = Object.keys(env).find((k) => k.toLowerCase() === 'path') ?? 'PATH';
+  // Take the shim directory off PATH: what is left is git's own env config, which is all that login shells and absolute paths leave.
+  env[key] = env[key].split(path.delimiter).filter((d) => !d.includes(`${path.sep}shim${path.sep}`)).join(path.delimiter);
+  const remote = path.join(s.base, 'remote.git');
+  s.git('init', '-q', '--bare', remote);
+  s.git('remote', 'add', 'origin', remote);
+  const before = s.git('rev-parse', 'HEAD');
+  for (const args of [['commit', '--allow-empty', '-m', 'x'], ['branch', 'sneaky'], ['tag', 'v-sneaky'], ['push', 'origin', 'HEAD']]) {
+    const r = spawnSync('git', args, { cwd: s.repo, env, encoding: 'utf8', timeout: 15000 });
+    assert.notEqual(r.status, 0, `${args.join(' ')} must fail: ${r.stdout}`);
+    assert.match(r.stderr, args[0] === 'push' ? /pitroom-push-blocked/ : /blocked for workers/, args.join(' '));
+  }
+  assert.equal(s.git('rev-parse', 'HEAD'), before);
+  assert.equal(s.git('branch', '--list', 'sneaky'), '');
+  assert.equal(s.git('tag', '--list'), '');
+  assert.equal(fs.readdirSync(path.join(remote, 'refs', 'heads')).length, 0, 'nothing reached the remote');
 });

@@ -49,7 +49,7 @@ test('doctor echoes config warnings as warnings', () => {
   }
 });
 
-test('doctor git guard shim is ready', { skip: posixOnly }, () => {
+test('doctor git guard shim is ready', () => {
   const s = sandbox();
   assert.match(s.run(['doctor'], fakeHome(s)).stdout, /✔ git guard shim ready/);
 });

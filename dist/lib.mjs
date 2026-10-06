@@ -1725,7 +1725,9 @@ var planName = (file) => path10.basename(file).replace(/\.md$/i, "");
 // src/vcs/guard.ts
 import fs11 from "node:fs";
 import path11 from "node:path";
-var VERSION = 1;
+var VERSION = 2;
+var WINDOWS = process.platform === "win32";
+var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
 var SHIM = `#!/bin/sh
 # pitroom git guard v${VERSION}. Blocks git commands that change history, refs, the
 # index or discard work. The primary agent reviews and commits, not the worker.
@@ -1802,9 +1804,10 @@ function shimDir() {
   return path11.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
+  const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
   for (const dir of (process.env.PATH ?? "").split(path11.delimiter).filter(Boolean)) {
-    if (path11.resolve(dir) === skip) continue;
-    const p = path11.join(dir, "git");
+    if (same(path11.resolve(dir), skip)) continue;
+    const p = path11.join(dir, WINDOWS ? "git.exe" : "git");
     try {
       fs11.accessSync(p, fs11.constants.X_OK);
       if (fs11.statSync(p).isFile()) return p;
@@ -1813,6 +1816,24 @@ function findRealGit(skip) {
   }
   return void 0;
 }
+function findGitSh(realGit) {
+  let dir = path11.dirname(realGit);
+  for (let i = 0; i < 4; i++) {
+    for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
+      const p = path11.join(dir, rel);
+      if (fs11.existsSync(p)) return p;
+    }
+    const up = path11.dirname(dir);
+    if (up === dir) break;
+    dir = up;
+  }
+  return void 0;
+}
+var cmdShim = (sh) => `@echo off\r
+set "MSYS2_ARG_CONV_EXCL=*"\r
+"${sh}" "%~dp0git" %*\r
+exit /b %errorlevel%\r
+`;
 var HOOK_VERSION = 1;
 var REF_HOOK = `#!/bin/sh
 # pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
@@ -1826,7 +1847,7 @@ function writeIfChanged(file, content) {
   fs11.mkdirSync(path11.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs11.writeFileSync(tmp, content, { mode: 493 });
-  fs11.renameSync(tmp, file);
+  renameOver(tmp, file);
 }
 function withGitConfig(env, entries) {
   const out = { ...env };
@@ -1847,17 +1868,28 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  if (process.platform === "win32") return { ...env, ...quiet };
   writeIfChanged(path11.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(env, [
-    ["core.hooksPath", hooksDir()],
+    ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
   ]);
   const dir = shimDir();
   const real = findRealGit(dir);
   if (!real) return { ...env, ...quiet };
+  let sh;
+  if (WINDOWS) {
+    sh = findGitSh(real);
+    if (!sh) return { ...env, ...quiet };
+    writeIfChanged(path11.join(dir, "git.cmd"), cmdShim(sh));
+  }
   writeIfChanged(path11.join(dir, "git"), SHIM);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: real, PATH: `${dir}${path11.delimiter}${env.PATH ?? ""}` };
+  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path11.delimiter}${env[key] ?? ""}` };
+}
+function shimReady() {
+  const env = guardEnv({ ...process.env });
+  const key = Object.keys(env).find((k) => k.toLowerCase() === "path") ?? "PATH";
+  return Boolean(env[key]?.startsWith(shimDir()));
 }
 
 // src/core/slots.ts
@@ -2382,6 +2414,7 @@ export {
   savedUsd,
   secretWarning,
   shimDir,
+  shimReady,
   slotHolders,
   spawnWorker,
   totals,

@@ -7,7 +7,7 @@ import path from 'node:path';
 import { allBackends, getBackend } from '../backends/index.js';
 import type { DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
-import { guardEnv, shimDir } from '../vcs/guard.js';
+import { guardEnv, shimReady } from '../vcs/guard.js';
 import { pickAuditor } from './audit.js';
 import { activeCooldowns, untilText } from './cooldown.js';
 import { resolveChain } from './chain.js';
@@ -92,12 +92,9 @@ export function doctor(probe: boolean): number {
   const cfg = loadConfig();
   add(cfg.warnings.length ? 'warn' : 'ok', `config: ${configPath()}${fs.existsSync(configPath()) ? '' : ' (not present, defaults in use)'}`);
   for (const w of cfg.warnings) add('warn', w);
-  if (process.platform === 'win32') {
-    add('warn', "git guard: not available on Windows yet, so Pitroom does not block a worker's git history changes or pushes there (read-only runs are still limited by each worker CLI's own rules, and --isolate keeps edits in a copy); prefer --isolate and check the patch before apply");
-  } else {
-    const guarded = guardEnv(process.env).PATH?.startsWith(shimDir());
-    add(guarded ? 'ok' : 'warn', guarded ? 'git guard shim ready' : 'git guard unavailable (git not on PATH)');
-  }
+  if (shimReady()) add('ok', 'git guard shim ready');
+  else if (process.platform === 'win32') add('warn', "git guard: the ref and push guard is on, but the git shim needs the sh.exe of Git for Windows next to git (not found), so a worker's `git add`, `restore` or `clean` is not blocked; prefer --isolate and check the patch before apply");
+  else add('warn', 'git guard unavailable (git not on PATH)');
 
   // The worker chain, grouped per backend so each backend checks its own models once.
   section('Worker chain');
