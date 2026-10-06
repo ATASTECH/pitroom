@@ -1990,7 +1990,10 @@ var SCHEMA = {
   readIn: "string",
   cacheDays: "number",
   countRateLimits: "boolean",
-  mcpDash: "boolean"
+  mcpDash: "boolean",
+  notify: "boolean",
+  notifyCommand: "string",
+  notifyAfter: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
@@ -2085,7 +2088,10 @@ function effective(flags = {}) {
     readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
     cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
     countRateLimits: setting(void 0, void 0, c.countRateLimits, false),
-    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true)
+    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
+    notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
+    notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
+    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15)
   };
 }
 

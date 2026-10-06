@@ -45,6 +45,8 @@ export interface RunMeta {
   pid?: number;
   /** `pitroom stop` was asked for: a process that dies before it can say so is stopped, not crashed. */
   stopRequested?: boolean;
+  /** Started with --bg (or by a crew or an MCP client): nobody is waiting at its terminal when it ends. */
+  background?: boolean;
   startedAt: string;
   endedAt?: string;
   exitCode?: number;

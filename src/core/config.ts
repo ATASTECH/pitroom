@@ -31,6 +31,12 @@ export interface PitroomConfig {
   countRateLimits?: boolean;
   /** Whether a run an MCP client starts also starts the dashboard and says where it is (default true; PITROOM_MCP_DASH=0 turns it off). */
   mcpDash?: boolean;
+  /** A desktop notification when a run that went to the background has ended (default false; PITROOM_NOTIFY=1). */
+  notify?: boolean;
+  /** A command of your own instead of the built-in notifier; it runs in a shell with PITROOM_NOTIFY_TITLE and PITROOM_NOTIFY_BODY (also _RUN, _STATE) set. */
+  notifyCommand?: string;
+  /** Seconds a run must have taken to be announced (default 15): quick runs are not worth a notification. */
+  notifyAfter?: number;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -52,6 +58,9 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   cacheDays: 'number',
   countRateLimits: 'boolean',
   mcpDash: 'boolean',
+  notify: 'boolean',
+  notifyCommand: 'string',
+  notifyAfter: 'number',
 };
 
 export function configPath(): string {
@@ -175,5 +184,8 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     cacheDays: setting<number>(undefined, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
     countRateLimits: setting<boolean>(undefined, undefined, c.countRateLimits, false),
     mcpDash: setting<boolean>(undefined, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
+    notify: setting<boolean>(undefined, flag01(e.PITROOM_NOTIFY), c.notify, false),
+    notifyCommand: setting<string | undefined>(undefined, e.PITROOM_NOTIFY_COMMAND?.trim() || undefined, c.notifyCommand?.trim() || undefined, undefined),
+    notifyAfter: setting<number>(undefined, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
   };
 }
