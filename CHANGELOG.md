@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.20.0
 
 ### Notifications
 - **A desktop notification when a background run has ended.** Off by default; `"notify": true` in the config (or `PITROOM_NOTIFY=1`). A run that went to the background (`--bg`, a crew, an MCP call) says `Pitroom ✔ research done` with its task, time and changed files; a failed, timed-out or stopped one says so. Runs that went well but took less than `notifyAfter` seconds (default 15) and audits are left out (a failure is always announced), and a crew says so once, when its last run ends, judged as a whole (from its earliest start, by its worst run). A worker process that is killed outright never gets to say so. macOS (`osascript`) and Linux (`notify-send`) are built in; `notifyCommand` runs your own command in a shell with the text in `PITROOM_NOTIFY_TITLE` / `PITROOM_NOTIFY_BODY` (ntfy, a chat webhook, a sound), which is also how to get one on Windows.
@@ -16,6 +16,11 @@
 - **Secret-looking files are recognised in any letter case.** `ID_RSA`, `.ENV`, `PROD.ENV`, `Credentials.json`, `SECRETS.YML`, `.NETRC` were not flagged (the check was case-sensitive for those names), though on macOS and Windows they are the same files as their lower-case spellings: a read run then ran in the project instead of a clean snapshot, and the heads-up did not mention them. Found by the worker that wrote the direct tests for `secrets.ts`.
 - **A dashboard card could stay on its placeholder.** The page skipped every request while the browser said the page was hidden and waited for a `visibilitychange` that embedded browsers (the browser panes of the Claude Code and Codex apps) may never send; a card opened there showed grey boxes until the next poll, ten minutes later for a finished run. The first request is now always made; only the repeated ones are skipped while hidden.
 - **An audit read the answer's paths as missing.** An answer is written for you, with the paths turned back into your project's (`/Users/me/proj/src/a.ts:3`); the auditor works in a clean snapshot of its own, where that path does not exist, and disputed it ("this path does not exist in this project"). The project's paths now reach the auditor relative to its working directory, and the prompt says so. In one history, 2 of 12 non-agreeing audits were this; re-auditing them: one now agrees, the other still disputes a real claim.
+
+### Docs and tests
+- The README's reference parts are folded into accordions (the first screen shows about half as much text; headings and links are unchanged), and the PI-Desktop benchmark says what a later audit found: of its eight answers 3 agreed and 5 were marked partly right, mostly lists that leave things out.
+- Direct tests for the git guard, slots and locks, secret detection, receipts, the run store and process spawning, the MCP resources and prompts, and the doctor checks, which were only covered through the CLI; most were written by Pitroom workers in isolated copies and reviewed. A flaky MCP HTTP test was fixed at its cause (a blocked event loop reused sockets the server had closed).
+- `benchmarks/outcome-prediction`: what Pitroom's own history can predict (whether a run will fail, whether an answer will be audited as right). Result so far: failures are rate-limit bursts a worker's recent record explains, and the labels about answers are too few to learn from.
 
 ## 0.19.0
 
