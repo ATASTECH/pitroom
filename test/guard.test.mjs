@@ -129,3 +129,12 @@ test('shim exits 127 without a usable real git', { skip: posixOnly }, () => {
     assert.match(r.stderr, /cannot find the real git/);
   }
 });
+
+test('guardEnv keeps git from waiting for a person, on every platform: no prompt, editor, sequence editor or pager', () => {
+  const env = guardEnv({});
+  assert.equal(env.GIT_TERMINAL_PROMPT, '0');
+  assert.equal(env.GIT_EDITOR, 'true');
+  assert.equal(env.GIT_SEQUENCE_EDITOR, 'true');
+  assert.equal(env.GIT_PAGER, 'cat');
+  assert.equal(env.PAGER, 'cat');
+});

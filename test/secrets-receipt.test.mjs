@@ -44,12 +44,14 @@ test('looksSecret flags credential file names', () => {
     '.env', '.env.local', '.env.production', 'prod.env',
     'id_rsa', 'id_ed25519', 'cert.pem', 'a.p12', 'a.pfx', 'a.key', 'a.jks', 'a.keystore',
     '.netrc', 'credentials.json', 'secrets.json', 'secret.json', 'secrets.yml', 'secret.yaml', 'secrets.toml',
+    // the same files on a case-insensitive file system
+    '.ENV', '.Env.Local', 'PROD.ENV', 'ID_RSA', 'Id_Ed25519', '.NETRC', 'Credentials.json', 'SECRETS.YML', 'Cert.PEM',
   ]) assert.equal(looksSecret(n), true, n);
 });
 
 test('looksSecret ignores templates and innocent names', () => {
   for (const n of [
-    '.env.example', '.env.sample', '.env.template', '.env.dist',
+    '.env.example', '.env.sample', '.env.template', '.env.dist', '.ENV.EXAMPLE', 'id_rsa.pub',
     'README.md', 'environment.ts',
   ]) assert.equal(looksSecret(n), false, n);
 });
