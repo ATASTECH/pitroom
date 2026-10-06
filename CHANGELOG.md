@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.22.0
 
 ### Workers
 - **`--continue` works with Gemini.** It was refused ("cannot continue sessions") because Gemini CLI's `--resume` was known to take an index or `latest`, which is not safe with parallel workers. It takes the session id as well (checked live on 0.62: a follow-up remembered what the first run read), and the id is in the stream's first event, so Pitroom resumes by it like with the other workers: `pitroom run --continue last "…"`, or `continue` in `pitroom_run`.

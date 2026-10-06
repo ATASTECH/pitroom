@@ -8,13 +8,13 @@
     "url": "https://github.com/ATASTECH/pitroom",
     "source": "github"
   },
-  "version": "0.21.0",
+  "version": "0.22.0",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "pitroom",
-      "version": "0.21.0",
+      "version": "0.22.0",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
