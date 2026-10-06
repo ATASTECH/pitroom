@@ -3413,11 +3413,13 @@ var MARK = { done: "\u2714", failed: "\u2718", timeout: "\u23F1", stopped: "\u25
 function noticeFor(meta) {
   const group = meta.group ? safeGroup(meta.group) : [];
   if (group.length > 1) {
-    const done = group.filter((m) => m.state === "done").length;
-    const worse = group.length - done;
+    const count = (state) => group.filter((m) => m.state === state).length;
+    const worse = group.length - count("done");
+    const parts = [`${count("done")} done`, ...["failed", "timeout", "stopped"].filter(count).map((s) => `${count(s)} ${s}`)];
+    const changed2 = group.reduce((n, m) => n + (m.changes?.length ?? 0), 0);
     return {
       title: `Pitroom ${worse ? "\u26A0" : "\u2714"} group ${meta.group}`,
-      body: `${group.length} runs ended: ${done} done${worse ? `, ${worse} not done` : ""}`
+      body: `${group.length} runs ended: ${parts.join(", ")}${changed2 ? ` \xB7 ${changed2} file${changed2 === 1 ? "" : "s"} changed` : ""}`
     };
   }
   const changed = meta.changes?.length ? ` \xB7 ${meta.changes.length} file${meta.changes.length === 1 ? "" : "s"} changed` : "";
@@ -3433,17 +3435,25 @@ function safeGroup(name) {
 function shouldNotify(meta) {
   const eff = effective();
   if (!eff.notify.value || !meta.background || meta.auditOf || !TERMINAL.includes(meta.state)) return false;
-  const seconds = (Date.parse(meta.endedAt ?? "") - Date.parse(meta.startedAt)) / 1e3;
-  if (Number.isFinite(seconds) && seconds < eff.notifyAfter.value) return false;
-  if (!meta.group) return true;
-  const group = safeGroup(meta.group);
-  return group.length > 0 && group.every((m) => TERMINAL.includes(m.state));
+  const runs = meta.group ? safeGroup(meta.group) : [meta];
+  if (!runs.length || !runs.every((m) => TERMINAL.includes(m.state))) return false;
+  if (runs.every((m) => m.state === "done" || m.state === "stopped")) {
+    const start = Math.min(...runs.map((m) => Date.parse(m.startedAt)));
+    const end = Math.max(...runs.map((m) => Date.parse(m.endedAt ?? "")));
+    if (Number.isFinite(end - start) && (end - start) / 1e3 < eff.notifyAfter.value) return false;
+    if (runs.every((m) => m.state === "stopped")) return false;
+  }
+  return true;
 }
 function claimGroup(group) {
   try {
     const ids = groupIds(group).sort();
+    if (ids.length < 2) return true;
     const dir = path17.join(home(), "notified");
     fs21.mkdirSync(dir, { recursive: true });
+    for (const f of fs21.readdirSync(dir)) {
+      if (Date.now() - fs21.statSync(path17.join(dir, f)).mtimeMs > 30 * 864e5) fs21.rmSync(path17.join(dir, f), { force: true });
+    }
     fs21.writeFileSync(path17.join(dir, crypto5.createHash("sha1").update(ids.join(",")).digest("hex").slice(0, 16)), "", { flag: "wx" });
     return true;
   } catch {
@@ -3460,7 +3470,8 @@ function send(notice, meta) {
     } else if (process.platform === "darwin") {
       child = spawn2("osascript", ["-e", "on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run", notice.title, notice.body], { env, detached: true, stdio: "ignore" });
     } else if (process.platform === "linux") {
-      child = spawn2("notify-send", [notice.title, notice.body], { env, detached: true, stdio: "ignore" });
+      const plain2 = (t) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+      child = spawn2("notify-send", ["--", plain2(notice.title), plain2(notice.body)], { env, detached: true, stdio: "ignore" });
     } else {
       return;
     }

@@ -22,11 +22,13 @@ export interface Notice {
 export function noticeFor(meta: RunMeta): Notice {
   const group = meta.group ? safeGroup(meta.group) : [];
   if (group.length > 1) {
-    const done = group.filter((m) => m.state === 'done').length;
-    const worse = group.length - done;
+    const count = (state: string) => group.filter((m) => m.state === state).length;
+    const worse = group.length - count('done');
+    const parts = [`${count('done')} done`, ...['failed', 'timeout', 'stopped'].filter(count).map((s) => `${count(s)} ${s}`)];
+    const changed = group.reduce((n, m) => n + (m.changes?.length ?? 0), 0);
     return {
       title: `Pitroom ${worse ? '⚠' : '✔'} group ${meta.group}`,
-      body: `${group.length} runs ended: ${done} done${worse ? `, ${worse} not done` : ''}`,
+      body: `${group.length} runs ended: ${parts.join(', ')}${changed ? ` · ${changed} file${changed === 1 ? '' : 's'} changed` : ''}`,
     };
   }
   const changed = meta.changes?.length ? ` · ${meta.changes.length} file${meta.changes.length === 1 ? '' : 's'} changed` : '';
@@ -45,20 +47,31 @@ function safeGroup(name: string): RunMeta[] {
 export function shouldNotify(meta: RunMeta): boolean {
   const eff = effective();
   if (!eff.notify.value || !meta.background || meta.auditOf || !TERMINAL.includes(meta.state)) return false;
-  const seconds = (Date.parse(meta.endedAt ?? '') - Date.parse(meta.startedAt)) / 1000;
-  if (Number.isFinite(seconds) && seconds < eff.notifyAfter.value) return false;
-  if (!meta.group) return true;
-  const group = safeGroup(meta.group);
-  // a group is announced when its last run has ended (see claimGroup for two ending together)
-  return group.length > 0 && group.every((m) => TERMINAL.includes(m.state));
+  // A group is announced when its last run has ended (see claimGroup for two ending together) and judged as a whole:
+  // from the earliest start to the last end, and by its worst run.
+  const runs = meta.group ? safeGroup(meta.group) : [meta];
+  if (!runs.length || !runs.every((m) => TERMINAL.includes(m.state))) return false;
+  // Not worth announcing: everything went well and quickly. A failure is always worth it (stopping a run was the user's own doing).
+  if (runs.every((m) => m.state === 'done' || m.state === 'stopped')) {
+    const start = Math.min(...runs.map((m) => Date.parse(m.startedAt)));
+    const end = Math.max(...runs.map((m) => Date.parse(m.endedAt ?? '')));
+    if (Number.isFinite(end - start) && (end - start) / 1000 < eff.notifyAfter.value) return false;
+    if (runs.every((m) => m.state === 'stopped')) return false;
+  }
+  return true;
 }
 
 /** The first of the runs that end together to ask says the group's notice; the others find it taken (one file, made exclusively). */
 function claimGroup(group: string): boolean {
   try {
     const ids = groupIds(group).sort();
+    if (ids.length < 2) return true; // a group of one has no one to race with
     const dir = path.join(home(), 'notified');
     fs.mkdirSync(dir, { recursive: true });
+    for (const f of fs.readdirSync(dir)) {
+      // claims are tiny; the old ones go (a run that long ago cannot race with this one)
+      if (Date.now() - fs.statSync(path.join(dir, f)).mtimeMs > 30 * 86_400_000) fs.rmSync(path.join(dir, f), { force: true });
+    }
     fs.writeFileSync(path.join(dir, crypto.createHash('sha1').update(ids.join(',')).digest('hex').slice(0, 16)), '', { flag: 'wx' });
     return true;
   } catch {
@@ -78,7 +91,10 @@ export function send(notice: Notice, meta: Pick<RunMeta, 'id' | 'state'>): void 
     } else if (process.platform === 'darwin') {
       child = spawn('osascript', ['-e', 'on run argv\ndisplay notification (item 2 of argv) with title (item 1 of argv)\nend run', notice.title, notice.body], { env, detached: true, stdio: 'ignore' });
     } else if (process.platform === 'linux') {
-      child = spawn('notify-send', [notice.title, notice.body], { env, detached: true, stdio: 'ignore' });
+      // `--`: a task text such as `--help` or `-u critical` is a word to show, not an option. notify-send reads Pango markup, so
+      // the text is escaped.
+      const plain = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      child = spawn('notify-send', ['--', plain(notice.title), plain(notice.body)], { env, detached: true, stdio: 'ignore' });
     } else {
       return; // no built-in notifier here: set notifyCommand
     }
