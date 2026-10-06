@@ -2,7 +2,7 @@
 // drift from the CLI and every rule of the CLI applies unchanged. Their definitions sit in the client's context for
 // the whole session, so they are kept few and short: parallel work is `pitroom_run` with `tasks`, and everything
 // that only reports (runs, history, statistics, savings, models, cooldowns, config, doctor) is one `pitroom_info`.
-import { DEFAULT_WAIT, MAX_TASKS, MAX_WAIT, type Json, type Tool, ToolError, bool, oneOf, plain, since, startAndWait, startCrew, str, strs, waitFor, waitSeconds, workerFlags } from './mcp-support.js';
+import { DEFAULT_WAIT, MAX_TASKS, MAX_WAIT, type Json, type Tool, ToolError, bool, ensureDash, oneOf, plain, since, startAndWait, startCrew, str, strs, waitFor, waitSeconds, withLiveView, workerFlags } from './mcp-support.js';
 
 const WORKER_PROPS = {
   worker: { type: 'string', description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku". Default: configured.' },
@@ -121,7 +121,9 @@ export const TOOLS: Tool[] = [
       const runs = strs(a, 'runs');
       const group = str(a, 'group');
       if (!runs.length && !group) throw new ToolError('give "runs" or "group"');
-      return waitFor(runs, waitSeconds(a), ctx, runs.length ? undefined : group);
+      const result = await waitFor(runs, waitSeconds(a), ctx, runs.length ? undefined : group);
+      // still running: say where to watch it (the dashboard is started if it is not up)
+      return withLiveView(result, result.text.includes('Not finished yet') ? await ensureDash() : undefined);
     },
   },
   {

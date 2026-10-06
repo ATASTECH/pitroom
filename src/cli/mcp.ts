@@ -21,7 +21,7 @@ const PROTOCOLS = ['2025-06-18', '2025-03-26', '2024-11-05'];
 const INSTRUCTIONS = [
   'Pitroom hands bounded work to cheaper worker agents and returns a verified answer, the exact diff and a cost receipt. You decide, verify and answer.',
   'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard); pitroom_run with "tasks" for independent tasks in parallel; pitroom_info (topic history) finds an earlier answer before you ask again.',
-  'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it.',
+  'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it. A result that is still running also carries a "Live view" address (the dashboard, started for you): open it in your app\'s built-in browser pane if it has one, else give it to the user.',
   'Pitroom\'s skills (using-pitroom, pitroom-research, pitroom-implement, pitroom-review, pitroom-crew, pitroom-debugging, pitroom-tdd and more) say when to delegate and how to check what comes back: if you have them, use the matching one alongside these tools; if not, the prompts of the same names hold them.',
   'It is optional: for a small task you can do yourself, skip it.',
 ].join(' ');

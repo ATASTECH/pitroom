@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### MCP
+- **A live view for MCP clients.** A run that an MCP client starts and that is still going after a few seconds starts the dashboard (`pitroom dash --detach`, reused if it is up) and the "still running" result, also from `pitroom_wait`, carries its address with the instruction to open it in the app's own browser pane (the Claude Code and Codex apps have one), else to give it to the user. Before, only the skills told an agent about the dashboard, so an agent that used the MCP tools never mentioned it. A run that finishes quickly starts nothing; the system browser is never opened. The config's `"mcpDash": false` (or `PITROOM_MCP_DASH=0`) turns it off.
+
 ### Stats
 - **Rate limits no longer count against a worker.** Runs that failed on a rate limit or quota are left out of `pitroom history stats` and the dashboard's Stats (run counts, success rates, times, tokens) and shown apart as rate-limited: they say nothing about the worker's work, and on free models they made good workers look bad (in one history, 257 of 286 failures were rate limits). The config's `"countRateLimits": true` counts them as before.
 - A run records why its worker failed (`failureKind`: `rate-limited`, `model-unavailable`, `auth`, `other`); older records are recognised by the hint Pitroom adds to a rate-limit error.

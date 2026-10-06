@@ -1442,7 +1442,8 @@ var SCHEMA = {
   audit: "number",
   readIn: "string",
   cacheDays: "number",
-  countRateLimits: "boolean"
+  countRateLimits: "boolean",
+  mcpDash: "boolean"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path7.resolve(process.env.PITROOM_CONFIG);
@@ -1504,6 +1505,10 @@ var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
 };
+var flag01 = (v) => {
+  const t = v?.trim().toLowerCase();
+  return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
+};
 var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
 var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
 function setting(flag2, env, conf, fallback) {
@@ -1532,7 +1537,8 @@ function effective(flags = {}) {
     audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
     readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
     cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
-    countRateLimits: setting(void 0, void 0, c.countRateLimits, false)
+    countRateLimits: setting(void 0, void 0, c.countRateLimits, false),
+    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true)
   };
 }
 
@@ -4400,6 +4406,39 @@ async function stopQuietly(args) {
   if (r.code !== 0) process.stderr.write(`pitroom mcp: ${args.join(" ")} failed: ${r.err || r.out}
 `);
 }
+var dashAsked;
+function ensureDash() {
+  if (effective().mcpDash.value === false) return Promise.resolve(void 0);
+  if (dashAsked && Date.now() - dashAsked.at < 6e4) return dashAsked.url;
+  const url = pit(["dash", "--detach"], 3e4).then((r) => {
+    const found = /^https?:\/\/127\.0\.0\.1:\d+\/?/m.exec(r.out)?.[0];
+    if (!found) dashAsked = void 0;
+    return found;
+  });
+  dashAsked = { at: Date.now(), url };
+  return url;
+}
+function dashIfSlow(ids, delayMs = 3e3) {
+  return new Promise((resolve2) => {
+    const timer2 = setTimeout(() => {
+      try {
+        resolve2(ids().some((id) => isActive(freshMeta(id).state)) ? ensureDash() : void 0);
+      } catch {
+        resolve2(void 0);
+      }
+    }, delayMs);
+    timer2.unref();
+  });
+}
+function withLiveView(result, url) {
+  if (!url || !result.text.includes("Not finished yet")) return result;
+  return {
+    ...result,
+    text: `${result.text}
+
+Live view of every run: ${url} (pitroom dash). If your app has a built-in browser pane (the Claude Code and Codex apps do), open it there; otherwise give the user the address.`
+  };
+}
 async function startAndWait(start, seconds, ctx, task) {
   const started = await pit([...start, "--bg", "--json", ...task === void 0 ? [] : ["--", task]]);
   if (started.code !== 0) return asResult(started);
@@ -4410,7 +4449,9 @@ async function startAndWait(start, seconds, ctx, task) {
   } catch {
     return { text: `could not read the run id from: ${started.out.slice(0, 200)}`, isError: true };
   }
-  const result = await waitFor([id], seconds, ctx);
+  const dash = cached3 ? Promise.resolve(void 0) : dashIfSlow(() => [id]);
+  const waited = await waitFor([id], seconds, ctx);
+  const result = withLiveView(waited, waited.text.includes("Not finished yet") ? await dash : void 0);
   if (cancelled(ctx) && !cached3) await stopQuietly(["stop", id]);
   if (cached3) result.text = `Cached answer: the same question on the same code as run ${id}; no worker ran (fresh: true asks one).
 
@@ -4426,7 +4467,9 @@ async function startCrew(flags, tasks, seconds, ctx) {
   } catch {
     return { text: `could not read the group from: ${started.out.slice(0, 200)}`, isError: true };
   }
-  const result = await waitFor([], seconds, ctx, group);
+  const dash = dashIfSlow(() => groupIds(group));
+  const waited = await waitFor([], seconds, ctx, group);
+  const result = withLiveView(waited, waited.text.includes("Not finished yet") ? await dash : void 0);
   if (cancelled(ctx)) await stopQuietly(["stop", "-g", group]);
   return result;
 }
@@ -4669,7 +4712,8 @@ var TOOLS2 = [
       const runs = strs(a, "runs");
       const group = str(a, "group");
       if (!runs.length && !group) throw new ToolError('give "runs" or "group"');
-      return waitFor(runs, waitSeconds(a), ctx, runs.length ? void 0 : group);
+      const result = await waitFor(runs, waitSeconds(a), ctx, runs.length ? void 0 : group);
+      return withLiveView(result, result.text.includes("Not finished yet") ? await ensureDash() : void 0);
     }
   },
   {
@@ -4882,7 +4926,7 @@ var PROTOCOLS = ["2025-06-18", "2025-03-26", "2024-11-05"];
 var INSTRUCTIONS = [
   "Pitroom hands bounded work to cheaper worker agents and returns a verified answer, the exact diff and a cost receipt. You decide, verify and answer.",
   'Use pitroom_run with mode "read" for research and locating code, mode "isolate" for code changes (the worker edits a copy; check it with pitroom_review, then pitroom_apply or pitroom_discard); pitroom_run with "tasks" for independent tasks in parallel; pitroom_info (topic history) finds an earlier answer before you ask again.',
-  'A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it.',
+  `A run can take minutes: pitroom_run waits up to waitSeconds, then returns the run id as "still running"; call pitroom_wait with it. A result that is still running also carries a "Live view" address (the dashboard, started for you): open it in your app's built-in browser pane if it has one, else give it to the user.`,
   "Pitroom's skills (using-pitroom, pitroom-research, pitroom-implement, pitroom-review, pitroom-crew, pitroom-debugging, pitroom-tdd and more) say when to delegate and how to check what comes back: if you have them, use the matching one alongside these tools; if not, the prompts of the same names hold them.",
   "It is optional: for a small task you can do yourself, skip it."
 ].join(" ");

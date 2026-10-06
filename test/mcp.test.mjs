@@ -170,6 +170,56 @@ test('mcp: an isolated change is shown as a patch and applied on request', async
   }
 });
 
+test('mcp: a run that is still going starts the dashboard and says where it is, for the agent\'s own browser pane; short runs and mcpDash off do not', async () => {
+  const s = sandbox();
+  const registry = path.join(s.base, 'home', 'dash.json');
+  // a short run: finished within the wait, so no dashboard and no line
+  const quick = connect(s, { MOCK_ACTIONS: 'answer:SUMMARY: quick', PITROOM_MCP_DASH: '1' });
+  try {
+    await handshake(quick);
+    const done = await quick.call('pitroom_run', { task: 'quick one', waitSeconds: 30 });
+    assert.match(done.text, /pitroom ✔ done/);
+    assert.doesNotMatch(done.text, /Live view/);
+    await new Promise((r) => setTimeout(r, 3500)); // past the delay after which a still-going run would start it
+    assert.ok(!fs.existsSync(registry), 'a run that finished started no dashboard');
+  } finally {
+    await quick.close();
+  }
+  // a long run: the answer carries the address, the dashboard answers, and pitroom_wait repeats the line
+  const c = connect(s, { MOCK_ACTIONS: 'sleep:30;answer:late', PITROOM_MCP_DASH: '1' });
+  let id;
+  try {
+    const init = await handshake(c);
+    assert.match(init.result.instructions, /built-in browser pane/, 'the server tells the agent what to do with the address');
+    const first = await c.call('pitroom_run', { task: 'long one', waitSeconds: 5 });
+    const url = /Live view of every run: (http:\/\/127\.0\.0\.1:\d+\/)/.exec(first.text)?.[1];
+    assert.ok(url, first.text);
+    assert.match(first.text, /built-in browser pane \(the Claude Code and Codex apps do\)/);
+    id = RUN_ID.exec(first.text)[0];
+    const state = await (await fetch(`${url}api/state`)).json();
+    assert.ok(state.runs.some((r) => r.id === id), 'the dashboard lists the run');
+    const again = await c.call('pitroom_wait', { runs: [id], waitSeconds: 1 });
+    assert.match(again.text, new RegExp(`Live view of every run: ${url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`), 'the same address, from the dashboard that is already up');
+    await c.call('pitroom_stop', { run: id });
+  } finally {
+    await c.close();
+    s.run(['dash', '--stop']);
+  }
+  assert.ok(!fs.existsSync(registry), 'the dashboard is stopped');
+  // mcpDash off (the default of these tests, and PITROOM_MCP_DASH=0): neither the line nor a dashboard
+  const off = connect(s, { MOCK_ACTIONS: 'sleep:30;answer:late', PITROOM_MCP_DASH: '0' });
+  try {
+    await handshake(off);
+    const r = await off.call('pitroom_run', { task: 'long two', waitSeconds: 5 });
+    assert.match(r.text, /Not finished yet/);
+    assert.doesNotMatch(r.text, /Live view/);
+    assert.ok(!fs.existsSync(registry), 'no dashboard');
+    await off.call('pitroom_stop', { run: RUN_ID.exec(r.text)[0] });
+  } finally {
+    await off.close();
+  }
+});
+
 test('mcp: a run that takes longer than waitSeconds comes back "still running", and pitroom_wait collects it; pitroom_stop ends one', async () => {
   const s = sandbox();
   const c = connect(s, { MOCK_ACTIONS: 'sleep:4;answer:SUMMARY: slow but done' });
