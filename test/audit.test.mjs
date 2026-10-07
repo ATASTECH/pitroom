@@ -137,6 +137,12 @@ test('audit: the auditor is told to check the question\'s conditions, extra and 
   assert.match(prompt, /items that are missing and items that do not belong/);
   assert.match(prompt, /for a count, count again yourself/);
   assert.match(prompt, /QUESTION:\nlist the files under src\/ only/);
+  // one reply form and no economy rule: the worker contract's own would contradict the audit's
+  assert.match(prompt, /AUDIT: AGREE \| PARTIAL \| DISAGREE/);
+  assert.match(prompt, /End with the reply form the task gives/);
+  assert.doesNotMatch(prompt, /SUMMARY: 1-5 lines/);
+  assert.doesNotMatch(prompt, /Be economical/);
+  assert.doesNotMatch(prompt, /search the whole scope/);
 });
 
 test('audit: paths of the project in the answer reach the auditor as paths it can open from its own directory', () => {

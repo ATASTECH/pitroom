@@ -15,25 +15,34 @@ const RULES: Record<Mode, string[]> = {
   ],
 };
 
-export function buildPrompt(mode: Mode, task: string, followUp: boolean): string {
+// Audits found answers whose references were right but whose lists left items out and whose counts were off.
+const COMPLETE =
+  'When the task asks for all of something, a list or a count: search the whole scope (e.g. a project-wide grep) instead of stopping at the first hits, give the complete list or the exact count, and say how you found it. If you could not cover everything, say what is left out under OPEN ISSUES.';
+
+/** An audit's task brings its own reply form and asks for a recount, so the auditor gets neither the answer format nor the economy rule. */
+export function buildPrompt(mode: Mode, task: string, followUp: boolean, audit = false): string {
   if (followUp) return `Follow-up from the primary agent. Same rules and answer format as before.\n\n${task}`;
+  const rules = mode === 'read' && !audit ? [...RULES[mode], COMPLETE] : RULES[mode];
+  const economy = audit ? '' : '\n- Be economical: open only what you need, but do not cut a search short when the task asks for a complete list or a count.';
+  const format = audit
+    ? 'End with the reply form the task gives, and nothing else.'
+    : `End with this answer format (plain text, no preamble):
+SUMMARY: 1-5 lines that directly answer the task.
+DETAILS: key findings with file:line references; only what the primary agent needs, but a list or count the task asks for goes here in full.
+FILES CHANGED: paths, or "none".
+VERIFICATION: commands you ran (searches included) and their results, or "not run".
+OPEN ISSUES: risks, uncertainties, follow-ups, or "none".`;
   return `You are a worker agent. A primary coding agent delegated this bounded task to you. Your answer is draft work that the primary agent will verify, and it is the only thing the primary sees, so make it self-contained.
 
 Rules:
-- ${RULES[mode].join('\n- ')}
+- ${rules.join('\n- ')}
 - Stay inside the task scope and the project directory.
 - Never commit, push, reset, checkout, restore, stash, clean, rebase or merge, and never discard or overwrite uncommitted work you did not create.
 - Never read or reveal secrets (.env files, keys, tokens).
 - Delete a file only when the task explicitly asks for it, and name every file you delete under FILES CHANGED. Whether anything else should be deleted or overwritten is the primary agent's decision: propose it under OPEN ISSUES and leave the file alone.
-- Do not ask questions. If something is ambiguous, choose the safest reasonable interpretation and state the assumption.
-- Be economical: open only what you need.
+- Do not ask questions. If something is ambiguous, choose the safest reasonable interpretation and state the assumption.${economy}
 
-End with this answer format (plain text, no preamble):
-SUMMARY: 1-5 lines that directly answer the task.
-DETAILS: key findings with file:line references; only what the primary agent needs.
-FILES CHANGED: paths, or "none".
-VERIFICATION: commands you ran and their results, or "not run".
-OPEN ISSUES: risks, uncertainties, follow-ups, or "none".
+${format}
 
 Task:
 ${task}`;
