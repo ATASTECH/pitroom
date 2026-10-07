@@ -1,0 +1,14 @@
+{
+  "note": "Recorded from Kilo Code's CLI 7.8.8 (the real CLI, with Pitroom's own invocation, a `kilo daemon` running) against a scripted OpenAI-compatible endpoint, not a real model provider: the tool calls and answers are scripted, the events, permission decisions and errors are the CLI's.",
+  "events": {
+    "read.jsonl": { "sessionId": "ses_ee798c44effe3APLKQWQ7n2Sxz", "steps": 3, "total": 3840, "denied": 0, "edits": 0, "finalTextStartsWith": "SUMMARY: app.txt holds the single line \"line1\"" },
+    "read-denied.jsonl": { "sessionId": "ses_ee7989a38ffezhSAOSGyspHFt2", "steps": 6, "total": 7680, "denied": 3, "edits": 0, "finalTextStartsWith": "SUMMARY: read-only: the edit, the new file, the shell command and the secret file were refused" },
+    "isolate-edit.jsonl": { "sessionId": "ses_ee7986e40fferTpCEwBeagETB0", "steps": 7, "total": 8960, "denied": 2, "edits": 2, "finalTextStartsWith": "SUMMARY: added subtract(a, b) to math.js" },
+    "follow-up.jsonl": { "sessionId": "ses_ee798c44effe3APLKQWQ7n2Sxz", "steps": 1, "total": 1280, "denied": 0, "edits": 0, "finalTextStartsWith": "SUMMARY: math.js exports only add(a, b)" }
+  },
+  "failures": {
+    "model-not-found": { "exitCode": 1, "kind": "model-unavailable", "messageIncludes": "Model not found: fake/no-such-model" },
+    "auth-invalid-key": { "exitCode": 1, "kind": "auth", "messageIncludes": "Incorrect API key provided" },
+    "quota-exceeded": { "exitCode": 1, "kind": "rate-limited", "messageIncludes": "You exceeded your current quota" }
+  }
+}

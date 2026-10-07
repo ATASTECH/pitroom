@@ -46,6 +46,8 @@ commandPrefix = [
   "claude",
   "codex",
   "gemini",
-  "qwen"
+  "qwen",
+  "kilo",
+  "kilocode"
 ]
 deny_message = "Pitroom: history-changing git, destructive commands and other agents are not for workers."

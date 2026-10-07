@@ -121,6 +121,7 @@ test('targets: gemini is a worker; an unknown one gets a clear message', () => {
   assert.deepEqual(parseTarget('gemini:gemini-3-flash', 'opencode'), { backend: 'gemini', model: 'gemini-3-flash' });
   assert.equal(getBackend('gemini').id, 'gemini');
   assert.throws(() => getBackend('nope'), /unknown worker "nope"/);
+  assert.throws(() => getBackend('hermes'), /the "hermes" worker is not supported yet/, 'a considered worker gets a clear answer');
 });
 
 test('opencode: every run uses a private --standalone server and no removed v1 flags', async () => {
@@ -372,4 +373,25 @@ test('qwen: an API error is not work done, so the fallback chain may move on', (
   assert.equal(run.usage.steps, 0);
   assert.equal(run.finalText, '');
   assert.equal(b.failure(run, '', 1).kind, 'rate-limited');
+});
+
+test('kilo: OpenCode\'s profiles through KILO_CONFIG_CONTENT, a private state folder (no daemon to attach to), never --auto', () => {
+  const b = getBackend('kilo');
+  const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];
+  for (const mode of ['read', 'write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    assert.equal(after(inv, '--agent'), mode === 'read' ? 'pitroom-read' : 'pitroom-write');
+    assert.equal(after(inv, '--format'), 'json');
+    assert.equal(after(inv, '--log-level'), 'ERROR', 'Kilo takes the level in capitals only');
+    assert.equal(inv.args.at(-1), 'PROMPT-SENTINEL');
+    assert.ok(!inv.args.includes('--auto') && !inv.args.includes('--attach'));
+    assert.match(inv.env.XDG_STATE_HOME, /kilo-state$/, 'a running kilo daemon would ignore the injected config');
+    const config = JSON.parse(inv.env.KILO_CONFIG_CONTENT);
+    assert.equal(config.autoupdate, false);
+    const perm = config.agent[mode === 'read' ? 'pitroom-read' : 'pitroom-write'].permission;
+    if (mode === 'read') assert.equal(perm.edit, 'deny');
+    assert.equal(perm.bash['git commit*'] ?? perm.bash['*'], 'deny');
+    assert.ok(Object.keys(perm.external_directory).some((k) => k.includes(`${path.sep}kilo${path.sep}`)), 'Kilo\'s own scratch folders, not OpenCode\'s');
+  }
+  assert.equal(JSON.parse(b.invocation(request({ web: true })).env.KILO_CONFIG_CONTENT).agent['pitroom-read'].permission.webfetch, 'allow');
 });

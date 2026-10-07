@@ -6,7 +6,7 @@
 
 **Cheaper and faster: hand the reading, fixes, tests and reviews to workers that run in parallel. Keep the decisions.**
 
-Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code / Gemini CLI / Qwen Code workers
+Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code / Gemini CLI / Qwen Code / Kilo Code workers
 
 <br />
 
@@ -72,7 +72,7 @@ Pitroom uses your worker CLI's default model: a free tier, a local MLX/Ollama mo
 
 ### Any worker CLI
 
-OpenCode, Codex CLI, Claude Code, Gemini CLI and Qwen Code.
+OpenCode, Codex CLI, Claude Code, Gemini CLI, Qwen Code and Kilo Code.
 
 One group can mix them, and a fallback chain can cross them ([how adapters work](docs/backends.md)).
 
@@ -283,7 +283,7 @@ macOS and Linux are the main platforms. **Windows** runs the same test suite in 
 
 ## Quick start
 
-You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it) or [Qwen Code](https://github.com/QwenLM/qwen-code) (beta; any OpenAI-compatible provider, a DashScope key, or a local model).
+You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it) [Qwen Code](https://github.com/QwenLM/qwen-code) (beta; any OpenAI-compatible provider, a DashScope key, or a local model) or [Kilo Code](https://kilo.ai)'s CLI (beta; `npm i -g @kilocode/cli`, its 500+ models and providers).
 
 ### 1. Install: pick your agent
 
@@ -681,6 +681,7 @@ pitroom run --effort high "…"                           # model#level (Codex, 
 pitroom run -W claude:haiku "…"                          # Claude Code on a cheap model
 pitroom run -W gemini:gemini-3.8-flash "…"               # Gemini CLI (beta; needs a Google AI Studio API key)
 pitroom run -W qwen:qwen3-coder-plus "…"                 # Qwen Code (beta; your provider from ~/.qwen/settings.json)
+pitroom run -W kilo:kilo/<model> "…"                      # Kilo Code's CLI (beta; any model from `kilo models`)
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
 
@@ -691,6 +692,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
 | Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, but a read run with secret-looking files reads a [clean snapshot](#modes) without them; pin a model, e.g. `-W gemini:gemini-3.8-flash`; `--continue` works (by session id; see [the notes](docs/backends.md#gemini-cli-notes)) |
 | Qwen Code | beta | `--approval-mode plan`; edits only inside the working directory, the rest declined | tokens only | checked against Qwen Code 0.25 with a scripted model, not yet with a real provider; uses your sign-in and model from `~/.qwen/settings.json` (any OpenAI-compatible provider, DashScope, a local model); `--safe-mode` keeps your QWEN.md, hooks, skills and MCP servers out and stops the CLI writing memories of the run; reads `.env` if asked, so a read run with secret-looking files reads a [clean snapshot](#modes); see [the notes](docs/backends.md#qwen-code-notes) |
+| Kilo Code | beta | per-run permission rules (OpenCode's profiles) | reported | the CLI of `@kilocode/cli` (an OpenCode fork): the same `pitroom-read`/`pitroom-write` profiles through `KILO_CONFIG_CONTENT`, your sign-in and providers as they are; workers use a private state folder so a running `kilo daemon` (which would ignore the profiles) is never attached to; checked against Kilo 7.8.8 with a scripted model, not yet with a real provider; see [the notes](docs/backends.md#kilo-code-notes) |
 
 ### Models, costs and effort
 
