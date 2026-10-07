@@ -107,6 +107,20 @@ test('isolate follow-up reuses the session and accumulates one patch', () => {
   assert.match(patch, /^\+b$/m);
 });
 
+test('a read worker is asked for complete lists and counts, in the usual answer format; a write worker is not', () => {
+  const s = sandbox();
+  s.run(['run', 'list every caller of login'], { MOCK_ACTIONS: 'answer:SUMMARY: x' });
+  const read = s.calls().filter((c) => c.argv[0] === 'run').at(-1).argv.at(-1);
+  assert.match(read, /search the whole scope/);
+  assert.match(read, /say how you found it/);
+  assert.match(read, /do not cut a search short/);
+  for (const head of ['SUMMARY:', 'DETAILS:', 'FILES CHANGED:', 'VERIFICATION:', 'OPEN ISSUES:']) assert.match(read, new RegExp(`\\n${head}`));
+  s.run(['run', '--write', 'fix it'], { MOCK_ACTIONS: 'append:app.txt:x;answer:SUMMARY: ok' });
+  const write = s.calls().filter((c) => c.argv[0] === 'run').at(-1).argv.at(-1);
+  assert.doesNotMatch(write, /search the whole scope/);
+  assert.match(write, /\nSUMMARY:/);
+});
+
 test('an edit in read mode is flagged as a violation (exit 5)', () => {
   const s = sandbox();
   const r = s.run(['run', 'look'], { MOCK_ACTIONS: 'append:app.txt:oops;answer:SUMMARY: x' });

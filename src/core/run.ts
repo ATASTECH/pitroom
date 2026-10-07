@@ -381,7 +381,7 @@ function prepareTree(meta: RunMeta): void {
 function attempt(meta: RunMeta, backend: Backend, target: Target): Promise<ProcessResult> {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: buildPrompt(meta.mode, meta.task, !!meta.parent),
+    prompt: buildPrompt(meta.mode, meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
     model: target.model,
     sessionId: meta.sessionId,
