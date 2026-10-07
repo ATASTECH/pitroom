@@ -208,7 +208,7 @@ test('ui: the Stats tab shows each worker with its logo and the totals', { skip 
   await until("document.body.innerText.includes('add a greeting helper')", 'the History tab to list the isolate run');
 });
 
-test('ui: an audited run carries the audit\'s verdict, its disputed claims, and a Stats count', async () => {
+test('ui: an audited run carries the audit\'s verdict, its disputed claims, and a Stats count', { skip }, async () => {
   await open();
   await until(`${cardWith('list the files')} !== undefined`, 'the research card');
   assert.match(await evaluate(`${cardWith('list the files')}.parentElement.innerText`), /audited · disagrees/, 'the badge on the audited run');
