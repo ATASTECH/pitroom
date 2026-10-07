@@ -187,6 +187,8 @@ test('audit: with auditFix, a disputed answer goes back to its worker as a follo
   const fixAudit = await audited(s, a.fix);
   assert.equal(fixAudit.verdict, 'disagree');
   assert.equal(fixAudit.fix, undefined, 'a correction is never sent back again');
+  // the correction's own process still records its run after its audit has ended: let it exit first
+  for (const end = Date.now() + 30_000; meta(s, a.fix).pid && alive(meta(s, a.fix).pid) && Date.now() < end; ) await sleep(200);
   const show = s.run(['show', id]);
   assert.match(show.stdout, /── fix: the worker is correcting its answer as a follow-up \(pitroom show \d{8}-\d{6}-[0-9a-f]{4}\)/);
   assert.match(s.run(['show', a.fix]).stdout, new RegExp(`── correction: the answer of ${id}`));
@@ -219,7 +221,9 @@ test('audit focus: list and count questions and disputed workers are audited mor
 
 test('audit focus: on, a list question gets the raised chance recorded on its run; --no-audit still wins', () => {
   const s = sandbox();
-  two(s);
+  // one worker, so no auditor: the chance is recorded before an auditor is picked, and no audit is left running in the
+  // background when the test ends (it would still be writing into the directory the test removes)
+  s.config({ worker: 'opencode:mock/good-model' });
   const r = s.run(['run', 'list every file'], { PITROOM_AUDIT: '0.3', PITROOM_AUDIT_FOCUS: '1', MOCK_ACTIONS: `answer:${ANSWER}` });
   const m = meta(s, RUN_ID.exec(r.stdout)[0]);
   assert.deepEqual(m.auditFocus, { rate: 0.6, why: ['asks for a list or a count'] });

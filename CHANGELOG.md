@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.23.0
 
 ### Answers
 - **Complete lists and counts.** Audits kept finding answers whose references were right but whose lists left items out and whose counts were off (on PI-Desktop, 5 of 8 answers were partly right, mostly for that; one counted "about 40" tests where there are 59). The worker contract asked for none of it and told the worker to be economical. A read worker is now told, when the task asks for all of something, a list or a count, to search the whole scope instead of stopping at the first hits, to give the full list or the exact count in DETAILS and say how it found it, and to say under OPEN ISSUES what it did not cover; "be economical" no longer applies to such a search. The answer format is unchanged.
