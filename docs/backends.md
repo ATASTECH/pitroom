@@ -59,6 +59,7 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | **Codex** (`exec --json --ignore-user-config`) | `-c sandbox_mode="read-only"` (OS sandbox) | `-c sandbox_mode="workspace-write"` (writes only in the working dir, no network), `approval_policy="never"` | `exec resume <id>` | tokens only |
 | **Claude Code** (`-p --output-format stream-json --verbose`) | `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk`, tools `Read,Grep,Glob` only | same lockdown, tools `+Edit,Write,Bash`, `--disallowedTools Bash(git commit:*)`… | `--resume <id>` | `total_cost_usd` |
 | **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | by session id (`--resume <id>`) → `resume: 'by-id'` | tokens only |
+| **Qwen Code** (`<prompt> --safe-mode --output-format stream-json`) | `--approval-mode plan` (edits, shell and reads outside the working directory declined) | `--approval-mode default` + `--allowed-tools Edit(./**) write_file(./**) notebook_edit(./**) run_shell_command`, shell minus history-changing git via `--exclude-tools` | `--resume <id>` | tokens only |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -123,6 +124,31 @@ How a worker is started:
 - **Models**: Gemini CLI cannot list models; the catalogue is its built-in names (`gemini-3.8-flash`, `gemini-3.5-flash`, `gemini-3.5-flash-lite`, …). The 2.5 models are no longer served to new API keys. Its own default (`auto`) may be a larger model, so pin a worker, e.g. `-W gemini:gemini-3.8-flash`. The free tier has a small daily quota per model. No effort option: `#level` is dropped.
 - **Resume**: `--resume` takes the session id that the stream's `init` event reports (checked live on 0.62: the follow-up remembered what the first run read), as well as an index or `latest` (which are not safe with parallel workers, so Pitroom never uses them). `--continue` therefore works (`resume: 'by-id'`). Sessions are kept per project folder, so a follow-up runs in the same folder as its parent, which Pitroom does anyway.
 - **Sign-in**: a Google account sign-in (`oauth-personal`, Code Assist for individuals) is refused by Google for this client (`IneligibleTierError`); use an API key from Google AI Studio (`gemini` stores it, or set `GEMINI_API_KEY`).
+
+## Qwen Code notes
+
+Status: **beta**, checked against Qwen Code 0.25.0. The fixtures in `test/fixtures/qwen` were recorded from the real CLI, started with Pitroom's own command line, against a **scripted OpenAI-compatible endpoint** (a small local server that answers with prepared tool calls and text): the events, permission decisions, refusals and error output are the CLI's, the model is not. It has not yet been run against a real model provider.
+
+What was checked that way:
+
+- **Read** runs (`--approval-mode plan`): `read_file`, `grep_search` and `glob` work; `write_file`, `run_shell_command` and a read outside the working directory are declined.
+- **Write / isolate** runs: edits and new files inside the working directory land; an edit or a new file outside it (the user's real checkout from an isolated copy, another folder, a `../` path) is declined; `git commit` and `rm -rf` are refused by Pitroom's deny rules; other shell commands run. End to end (`pitroom run -i -W qwen:…`): the changes come back as the isolated copy's patch and the user's tree is untouched.
+- **`--continue`**: `--resume <session id>` (the id of the stream's `init` event) sends the earlier turns along.
+- **Failures**: a bad key (401, `auth`), an unknown model (404, `model-unavailable`) and a used-up quota (429, `rate-limited`) are classified, did no work, and let the chain move on.
+
+How a worker is started, and why:
+
+- **Not `--approval-mode auto-edit`.** It approves an edit *anywhere on disk*: in a test an isolated run edited the user's real checkout and wrote to `/tmp`. `default` declines whatever is not allowed (a headless run cannot ask), and the allow rules name edits inside the working directory only (`./**` is relative to the CLI's cwd, which the core sets to the isolated copy or the project).
+- **`--safe-mode`** keeps the user's QWEN.md, hooks, extensions, skills and MCP servers out, and turns off the **background memory extraction**: without it, every run ends with an extra request in which a subagent with `write_file` and `edit` writes "durable facts" from the run into `~/.qwen/memories` (user-wide) and the project's memory folder.
+- **`--exclude-tools`**: even in plan mode Qwen Code runs `enter_worktree` (it made a git worktree and a branch in the project in a test), and it has subagents, memory, cron, messaging and goal tools. They are excluded in every mode, and `web_fetch` / `web_search` unless `--web`. An excluded tool the model calls anyway is declined, with a message the model sees.
+- **The prompt is the first argument**: `--exclude-tools` and `--allowed-tools` take every following word, and Qwen Code reads no prompt after `--`. A prompt that starts with `-` gets a leading space.
+- **`QWEN_CODE_SYSTEM_DEFAULTS_PATH`** points at `policies/qwen/worker-defaults.json`: no auto-update, no memory extraction, and `maxRetries: 0`, which removes the CLI's 10 × 60 s waits on a rate limit. Its other retry layer (7 tries with backoff) stays, so a used-up quota surfaces after about 80 s, not 10 minutes. These are *defaults*: the user's own settings win, and an enterprise system settings file is left alone. `QWEN_CODE_DISABLE_CRON=1` and `QWEN_DISABLE_AUTO_TITLE=1` are set too.
+- **Sign-in and model** come from the user's `~/.qwen/settings.json` (`security.auth.selectedType`, `model.name`) and environment (`OPENAI_API_KEY`, `OPENAI_BASE_URL`, …); `-W qwen:<model>` passes `--model`. There is no effort option: `#level` is dropped. Cost is not reported (tokens only): give it a price with `workerPrices`.
+
+What is **not** enforced, so do not rely on it:
+
+- **Secret files.** `read_file` reads `.env` inside the working directory. What protects a read run is Pitroom's **read snapshot** (a directory with secret-looking files is read as a clean snapshot without them); edit runs rely on the worker being told not to read them.
+- **The shell is not confined.** An allowed shell command can write outside the working directory, as with the other workers that have a shell; the git guard still holds, and the deny rules are prefix based.
 
 ## Adding a worker
 

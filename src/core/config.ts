@@ -25,6 +25,10 @@ export interface PitroomConfig {
   readIn?: string;
   /** Chance (0 to 1) that a finished read run is re-checked by another worker in the background (default 0: off). */
   audit?: number;
+  /** When an audit disputes an answer, ask the worker that gave it to correct it, as a follow-up in its own session (default false; PITROOM_AUDIT_FIX=1). */
+  auditFix?: boolean;
+  /** Lean the audit sample to list and count questions and to workers whose answers audits disputed (default false; PITROOM_AUDIT_FOCUS=1). */
+  auditFocus?: boolean;
   /** Days an answer may be reused for the same read question on the same code (default 7; 0 turns the cache off). */
   cacheDays?: number;
   /** Count runs that failed on a rate limit or quota in the stats as failures (default false: they are left out of the run counts, success rates and averages, and shown apart). */
@@ -45,6 +49,10 @@ export interface PitroomConfig {
   priceFeedUrl?: string;
   /** Hours before the catalog is fetched again (default 24). */
   priceFeedHours?: number;
+  /** USD the workers may cost per day (reported or estimated, audits included); once spent only free workers run (default none; PITROOM_BUDGET_DAILY). */
+  budgetDaily?: number;
+  /** Order the worker and its fallbacks by their record: runs that ended well and audits that held up (default false; PITROOM_RANK_WORKERS=1). */
+  rankWorkers?: boolean;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -62,6 +70,8 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   tiers: 'record',
   costs: 'numbers',
   audit: 'number',
+  auditFix: 'boolean',
+  auditFocus: 'boolean',
   readIn: 'string',
   cacheDays: 'number',
   countRateLimits: 'boolean',
@@ -73,6 +83,8 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   priceFeed: 'boolean',
   priceFeedUrl: 'string',
   priceFeedHours: 'number',
+  budgetDaily: 'number',
+  rankWorkers: 'boolean',
 };
 
 export function configPath(): string {
@@ -150,6 +162,12 @@ const rate = (v: unknown) => {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : undefined;
 };
 
+/** An amount of money, 0 or more. */
+const amount = (v: unknown) => {
+  const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
+  return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined;
+};
+
 /** A whole number of days, 0 or more. */
 const days = (v: unknown) => {
   const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -192,6 +210,8 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     tiers: setting<Record<string, string>>(undefined, undefined, c.tiers, {}),
     costs: setting<Record<string, number>>(undefined, undefined, c.costs, {}),
     audit: setting<number>(undefined, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
+    auditFix: setting<boolean>(undefined, flag01(e.PITROOM_AUDIT_FIX), c.auditFix, false),
+    auditFocus: setting<boolean>(undefined, flag01(e.PITROOM_AUDIT_FOCUS), c.auditFocus, false),
     readIn: setting<string>(undefined, readIn(e.PITROOM_READ_IN), readIn(c.readIn), 'auto'),
     cacheDays: setting<number>(undefined, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
     countRateLimits: setting<boolean>(undefined, undefined, c.countRateLimits, false),
@@ -203,5 +223,7 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     priceFeed: setting<boolean>(undefined, flag01(e.PITROOM_PRICE_FEED), c.priceFeed, false),
     priceFeedUrl: setting<string>(undefined, e.PITROOM_PRICE_FEED_URL?.trim() || undefined, c.priceFeedUrl?.trim() || undefined, 'https://models.dev/api.json'),
     priceFeedHours: setting<number>(undefined, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
+    rankWorkers: setting<boolean>(undefined, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
+    budgetDaily: setting<number | undefined>(undefined, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), undefined),
   };
 }

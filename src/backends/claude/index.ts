@@ -40,7 +40,7 @@ const DENY_BASH = [
   'git rebase', 'git merge', 'git switch', 'git branch', 'git tag', 'git rm', 'git worktree', 'git update-ref',
   'git config', 'git remote', 'git cherry-pick', 'git revert', 'git am', 'git add',
   'rm -rf', 'rm -fr', 'sudo', 'chown', 'kill', 'pkill', 'killall', 'gh', 'npm publish',
-  'pitroom', 'opencode', 'claude', 'codex', 'gemini',
+  'pitroom', 'opencode', 'claude', 'codex', 'gemini', 'qwen',
 ].map((c) => `Bash(${c}:*)`);
 
 const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/id_rsa*', '**/id_ed25519*'].map((p) => `Read(${p})`);

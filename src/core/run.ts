@@ -15,7 +15,10 @@ import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
-import { auditTask, auditable, pickAuditor, sampled } from './audit.js';
+import { auditRate, auditTask, auditable, fixTask, focusedRate, pickAuditor, sampled, wantsFix } from './audit.js';
+import { workerRecord } from './history.js';
+import { withinBudget } from './budget.js';
+import { rankChain } from './rank.js';
 import { notifyEnded } from './notify.js';
 import { refreshInBackground } from './prices.js';
 import { brief, loadPlan, planName, planTask } from './plan.js';
@@ -57,6 +60,8 @@ export interface RunOptions {
   inPlace?: boolean;
   /** Set when Pitroom audits a run's answer (see audit.ts). */
   audit?: { of: string };
+  /** Set when Pitroom asks a disputed answer's worker to correct it (see audit.ts `wantsFix`). */
+  fix?: { of: string };
   /** This run's own audit chance, 0 to 1: --audit is 1, --no-audit is 0. */
   auditRate?: number;
   /** The answer cache's key, stored on the run so a later identical question finds it (see cache.ts). */
@@ -112,7 +117,18 @@ export function prepareRun(o: RunOptions): RunMeta {
     const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback });
     ({ worker, fallback } = chain);
     warnings.push(...chain.warnings);
+    // a worker you named (-W, -m, a tier, a plan task's tier, an audit's) is not reordered
+    if (effective().rankWorkers.value && !o.worker && !o.model && !work.tier && fallback.length) {
+      const since = Date.now() - 30 * 86_400_000;
+      const ranked = rankChain([worker, ...fallback], (t) => workerRecord(t.backend, t.model, since));
+      [worker, ...fallback] = ranked.chain as [Target, ...Target[]];
+      if (ranked.note) warnings.push(ranked.note);
+    }
   }
+  // the daily budget: once it is spent, only the free workers of the chain run (or none, and the run is refused)
+  const budget = withinBudget([worker, ...fallback]);
+  [worker, ...fallback] = budget.chain as [Target, ...Target[]];
+  if (budget.warning) warnings.push(budget.warning);
   const backend = getBackend(worker.backend);
   if (parent && backend.capabilities.resume === 'none') {
     throw new UserError(`the ${backend.name} worker cannot continue sessions`, 3);
@@ -171,6 +187,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     worktree: parent?.mode === 'isolate' ? parent.worktree : undefined,
     reviewOf: o.review?.of,
     auditOf: o.audit?.of,
+    fixOf: o.fix?.of,
     auditRate: o.auditRate,
     inPlace: o.inPlace || undefined,
     cache: o.cache,
@@ -303,7 +320,18 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
 /** Starts the audit of a finished run when the sample takes it. An audit is a bonus: it never fails or delays the run. */
 function autoAudit(meta: RunMeta): void {
   try {
-    if (!auditable(meta, read(runFile(meta.id, 'summary.md'))) || !sampled(meta)) return;
+    if (!auditable(meta, read(runFile(meta.id, 'summary.md')))) return;
+    let rate = auditRate(meta);
+    if (meta.auditRate === undefined && effective().auditFocus.value) {
+      const ran = meta.ran ?? meta.worker;
+      const focus = focusedRate(rate, meta.task, workerRecord(ran.backend, meta.resolvedModel ?? ran.model, Date.now() - 30 * 86_400_000));
+      rate = focus.rate;
+      if (focus.why.length) {
+        meta.auditFocus = { rate, why: focus.why };
+        writeMeta(meta);
+      }
+    }
+    if (!sampled(meta, rate)) return;
     startAudit(meta);
   } catch {
     // not audited
@@ -345,8 +373,38 @@ function settleAudit(a: RunMeta): void {
     const target = readMeta(a.auditOf!);
     target.audit = { id: a.id, state: a.state, verdict: a.state === 'done' ? a.auditVerdict : undefined, disputed: a.state === 'done' ? a.auditDisputed : undefined };
     writeMeta(target);
+    startFix(target);
   } catch {
     // the audited run is gone
+  }
+}
+
+/**
+ * A disputed answer goes back to the worker that gave it (config `auditFix`): a follow-up in its own session, which
+ * still holds what it read, with the disputed claims to check. Like an audit, a bonus: it never fails the audit.
+ */
+function startFix(target: RunMeta): void {
+  try {
+    const ran = target.ran ?? target.worker;
+    if (!wantsFix(target, getBackend(ran.backend).capabilities.resume !== 'none')) return;
+    const f = prepareRun({
+      mode: target.mode,
+      task: fixTask(target.audit!.disputed!),
+      dir: target.dir,
+      files: [],
+      link: [],
+      timeoutSec: target.timeoutSec,
+      continueFrom: target.id,
+      allowNonGit: true,
+      web: false,
+      noFallback: false,
+      fix: { of: target.id },
+    });
+    target.audit = { ...target.audit!, fix: f.id };
+    writeMeta(target);
+    startInBackground(f);
+  } catch {
+    // not corrected: the session or the snapshot is gone
   }
 }
 

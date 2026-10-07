@@ -1,0 +1,9 @@
+{
+  "general": { "enableAutoUpdate": false },
+  "model": { "generationConfig": { "maxRetries": 0 } },
+  "memory": {
+    "enableManagedAutoMemory": false,
+    "enableManagedAutoDream": false
+  },
+  "$version": 4
+}

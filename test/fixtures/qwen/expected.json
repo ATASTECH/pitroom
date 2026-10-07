@@ -1,0 +1,54 @@
+{
+  "note": "Recorded from Qwen Code 0.25.0 (the real CLI, with Pitroom's own invocation) against a scripted OpenAI-compatible endpoint, not a real model provider: the tool calls and answers are scripted, the events, permission decisions and errors are the CLI's.",
+  "events": {
+    "read.jsonl": {
+      "sessionId": "219fe913-a10c-4fa0-ae83-5d5570cefae3",
+      "steps": 3,
+      "total": 3840,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY: app.txt holds the single line \"line1\""
+    },
+    "read-denied.jsonl": {
+      "sessionId": "979396bd-e51c-4813-ac8f-e5513d6d3628",
+      "steps": 4,
+      "total": 5120,
+      "denied": 3,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY: read-only: the edit and the shell command were refused"
+    },
+    "isolate-edit.jsonl": {
+      "sessionId": "dc987801-9088-4c33-9bee-bcfdd88702ea",
+      "steps": 7,
+      "total": 8960,
+      "denied": 1,
+      "edits": 2,
+      "finalTextStartsWith": "SUMMARY: added subtract(a, b) to math.js"
+    },
+    "follow-up.jsonl": {
+      "sessionId": "219fe913-a10c-4fa0-ae83-5d5570cefae3",
+      "steps": 1,
+      "total": 5120,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY: math.js exports only add(a, b)"
+    }
+  },
+  "failures": {
+    "auth-invalid-key": {
+      "exitCode": 1,
+      "kind": "auth",
+      "messageIncludes": "401 Incorrect API key provided"
+    },
+    "model-not-found": {
+      "exitCode": 1,
+      "kind": "model-unavailable",
+      "messageIncludes": "The model `qwen9-nonexistent` does not exist"
+    },
+    "quota-exceeded": {
+      "exitCode": 1,
+      "kind": "rate-limited",
+      "messageIncludes": "429 You exceeded your current quota, please check your plan and billing details. Possible quota"
+    }
+  }
+}

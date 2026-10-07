@@ -18,6 +18,24 @@ export function groupIds(group: string): string[] {
   });
 }
 
+/** A shell word (POSIX): the text as is, in single quotes. */
+const quote = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+
+/**
+ * The commands that start a crew's failed, timed-out or stopped runs again, in the same group and directory, on the
+ * chain the config gives now. Audits, reviews and follow-ups are left out: they belong to another run.
+ */
+export function retryCommands(metas: RunMeta[]): string[] {
+  return metas
+    .filter((m) => ['failed', 'timeout', 'stopped'].includes(m.state) && !m.auditOf && !m.reviewOf && !m.parent && !m.fixOf)
+    .map((m) => {
+      const where = ['-d', quote(m.dir), ...(m.group ? ['-g', quote(m.group)] : [])];
+      if (m.plan) return ['pitroom run', m.mode === 'write' ? '-w' : '-i', '--plan', quote(m.plan.file), '--step', String(m.plan.step), ...where, '--bg'].join(' ');
+      const mode = m.mode === 'isolate' ? ['-i'] : m.mode === 'write' ? ['-w'] : [];
+      return ['pitroom run', ...mode, ...where, '--bg', '--', quote(m.task)].join(' ');
+    });
+}
+
 export const activeIds = (): string[] => listRunIds().filter((id) => isActive(freshMeta(id).state));
 
 const oneLine = (s: string, max: number) => {

@@ -209,7 +209,8 @@ var DENY_BASH = [
   "opencode",
   "claude",
   "codex",
-  "gemini"
+  "gemini",
+  "qwen"
 ].map((c) => `Bash(${c}:*)`);
 var SECRETS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*"].map((p) => `Read(${p})`);
 function toolsFor(mode, web2) {
@@ -982,9 +983,9 @@ function parseEvents4(ndjson) {
         }
         lastActivity = `${name} ${describe2(st.input)}`.trim();
         if (timeline.length < MAX_STEPS) {
-          const kind = EDIT_TOOLS3.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
-          const text = kind === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
-          timeline.push({ kind, name, text: clip4(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
+          const kind2 = EDIT_TOOLS3.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
+          const text = kind2 === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
+          timeline.push({ kind: kind2, name, text: clip4(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
         }
         break;
       }
@@ -1388,8 +1389,256 @@ var opencode = {
   doctor: doctor4
 };
 
+// src/backends/qwen/index.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
+import fs8 from "node:fs";
+import os7 from "node:os";
+import path7 from "node:path";
+import { fileURLToPath as fileURLToPath2 } from "node:url";
+
+// src/backends/qwen/events.ts
+var EDIT_TOOLS4 = /* @__PURE__ */ new Set(["write_file", "edit", "notebook_edit"]);
+var SHELL = "run_shell_command";
+var DENIED4 = /permission was declined|denied by permission rules|requires permission|not allowed/i;
+var API_ERROR = /^\[API Error: /;
+function parseEvents5(jsonl) {
+  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
+  const tools = {};
+  const edits = [];
+  const pendingEdits = /* @__PURE__ */ new Map();
+  const timeline = [];
+  const stepOf = /* @__PURE__ */ new Map();
+  let sessionId;
+  let model;
+  let lastText = "";
+  let finalText;
+  let lastActivity;
+  let error;
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    sessionId ??= e.session_id;
+    if (e.type === "system" && e.subtype === "init") {
+      model = e.model;
+    } else if (e.type === "system" && e.subtype === "retry") {
+      lastActivity = `waiting to retry (attempt ${e.data?.attempt ?? "?"} of ${e.data?.maxRetries ?? "?"})`;
+    } else if (e.type === "assistant") {
+      const content = e.message?.content ?? [];
+      const text = content.filter((c) => c.type === "text").map((c) => String(c.text ?? "")).join(" ").trim();
+      if (API_ERROR.test(text)) {
+        error = apiError(text);
+        continue;
+      }
+      usage.steps++;
+      for (const c of content) {
+        if (c.type === "text" && String(c.text ?? "").trim()) {
+          lastText = String(c.text).trim();
+          lastActivity = `says: ${oneLine5(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip5(lastText, 600) });
+        } else if (c.type === "tool_use") {
+          usage.toolCalls++;
+          tools[c.name] = (tools[c.name] ?? 0) + 1;
+          const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
+          lastActivity = `${c.name} ${target ? oneLine5(String(target), 60) : ""}`.trim();
+          if (EDIT_TOOLS4.has(c.name) && c.input?.file_path) pendingEdits.set(String(c.id), String(c.input.file_path));
+          if (timeline.length < MAX_STEPS) {
+            const step = { kind: EDIT_TOOLS4.has(c.name) ? "edit" : c.name === SHELL ? "shell" : "tool", name: c.name, text: clip5(String(target ?? ""), 240) };
+            timeline.push(step);
+            stepOf.set(String(c.id), step);
+          }
+        }
+      }
+    } else if (e.type === "user") {
+      for (const c of e.message?.content ?? []) {
+        if (c?.type !== "tool_result") continue;
+        const text = typeof c.content === "string" ? c.content : JSON.stringify(c.content ?? "");
+        const step = stepOf.get(String(c.tool_use_id));
+        if (step) step.ok = !c.is_error;
+        if (c.is_error) {
+          if (DENIED4.test(text)) usage.denied++;
+        } else if (pendingEdits.has(String(c.tool_use_id))) {
+          edits.push(pendingEdits.get(String(c.tool_use_id)));
+        }
+      }
+    } else if (e.type === "result") {
+      const u = e.usage ?? {};
+      usage.input += Math.max(0, num5(u.input_tokens) - num5(u.cache_read_input_tokens));
+      usage.cacheRead += num5(u.cache_read_input_tokens);
+      usage.output += num5(u.output_tokens);
+      usage.total += num5(u.total_tokens) || num5(u.input_tokens) + num5(u.output_tokens);
+      usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
+      if (e.is_error) {
+        error ??= apiError(String(e.error?.message ?? e.result ?? e.subtype ?? "Qwen Code error"));
+      } else if (typeof e.result === "string") {
+        finalText = e.result.trim();
+      }
+    }
+  }
+  return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
+}
+var apiError = (text) => text.replace(API_ERROR, "").replace(/\](?=\s*(\n|$))/, "").replace(/\s+/g, " ").trim() || text;
+var clip5 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var num5 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+var oneLine5 = (s, max = 80) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
+};
+
+// src/backends/qwen/index.ts
+var binary5 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
+var policyDir2 = () => path7.resolve(path7.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
+var EXCLUDED = [
+  "agent",
+  "send_message",
+  "skill",
+  "manage_memory",
+  "search_memory",
+  "enter_worktree",
+  "exit_worktree",
+  "record_artifact",
+  "cron_create",
+  "cron_list",
+  "cron_delete",
+  "loop_wakeup",
+  "task_stop",
+  "update_goal",
+  "get_goal",
+  "list_agents",
+  "report_findings",
+  "tool_call",
+  "tool_search",
+  "read_mcp_resource"
+];
+var WEB = ["web_fetch", "web_search"];
+var EDITS_HERE = ["Edit(./**)", "write_file(./**)", "notebook_edit(./**)"];
+var DENY_SHELL = [
+  "git commit",
+  "git push",
+  "git pull",
+  "git reset",
+  "git checkout",
+  "git restore",
+  "git clean",
+  "git stash",
+  "git rebase",
+  "git merge",
+  "git switch",
+  "git branch",
+  "git tag",
+  "git rm",
+  "git worktree",
+  "git update-ref",
+  "git config",
+  "git remote",
+  "git cherry-pick",
+  "git revert",
+  "git am",
+  "git add",
+  "rm -rf",
+  "rm -fr",
+  "sudo",
+  "chown",
+  "kill",
+  "pkill",
+  "killall",
+  "gh",
+  "npm publish",
+  "pitroom",
+  "opencode",
+  "claude",
+  "codex",
+  "gemini",
+  "qwen"
+].map((c) => `run_shell_command(${c})`);
+function invocation5(req) {
+  const read = req.mode === "read";
+  const exclude = [...EXCLUDED, ...req.web ? [] : WEB, ...read ? [] : DENY_SHELL];
+  const args = [
+    // The prompt is the first word: the list options below take every word that follows them, and Qwen Code reads
+    // no prompt after "--". One that starts with "-" would be read as an option: a leading space keeps it the prompt.
+    req.prompt.startsWith("-") ? ` ${req.prompt}` : req.prompt,
+    "--safe-mode",
+    "--output-format",
+    "stream-json",
+    "--approval-mode",
+    read ? "plan" : "default",
+    "--exclude-tools",
+    ...exclude
+  ];
+  if (!read) args.push("--allowed-tools", ...EDITS_HERE, "run_shell_command");
+  const model = (req.model ?? "").split("#")[0];
+  if (model) args.push("--model", model);
+  if (req.sessionId) args.push("--resume", req.sessionId);
+  const { command, prefix } = resolveCommand(binary5());
+  return {
+    command,
+    args: [...prefix, ...args],
+    env: {
+      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path7.join(policyDir2(), "worker-defaults.json"),
+      QWEN_CODE_DISABLE_CRON: "1",
+      QWEN_DISABLE_AUTO_TITLE: "1"
+    }
+  };
+}
+function classify5(message) {
+  if (/\b40[13]\b|incorrect api key|invalid api key|unauthori[sz]ed|authenticat|not logged in|no auth/i.test(message)) return "auth";
+  if (/\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
+  if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return "model-unavailable";
+  return "other";
+}
+function failure5(run, stderr, exitCode) {
+  if (exitCode === 0 && !run.error) return void 0;
+  const detail = stderr.trim().split("\n").filter((l) => l.trim() && !/SAFE MODE/.test(l)).pop();
+  const message = run.error ?? detail ?? `qwen exited with code ${exitCode}`;
+  return { kind: classify5(message), message };
+}
+function userSettings() {
+  try {
+    return JSON.parse(fs8.readFileSync(path7.join(process.env.QWEN_HOME ?? path7.join(os7.homedir(), ".qwen"), "settings.json"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+function defaultModel4() {
+  const name = userSettings().model?.name;
+  return typeof name === "string" && name ? name : void 0;
+}
+function doctor5({ models, hasFallback }) {
+  const { command, prefix } = resolveCommand(binary5());
+  const r = spawnSync5(command, [...prefix, "--version"], { encoding: "utf8", timeout: 6e4, stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error || r.status !== 0) return [{ level: "fail", message: `qwen not runnable (${binary5()}). Install Qwen Code (npm i -g @qwen-code/qwen-code), or set PITROOM_QWEN_BIN` }];
+  const checks = [{ level: "ok", message: `Qwen Code ${r.stdout.trim()} at ${binary5()} (beta worker: checked against Qwen Code 0.25)` }];
+  const auth = userSettings().security?.auth?.selectedType;
+  const key = process.env.OPENAI_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY;
+  checks.push(
+    auth || key ? { level: "ok", message: `Qwen Code: sign-in ${auth ?? "from an API key in the environment"}` } : { level: "warn", message: "Qwen Code has no sign-in method set: run `qwen` once to choose one, or set OPENAI_API_KEY (and OPENAI_BASE_URL) for an OpenAI-compatible provider" }
+  );
+  for (const m of models) {
+    const model = m ?? defaultModel4();
+    checks.push({ level: model ? "ok" : "warn", message: model ? `Qwen Code model: ${model}` : "Qwen Code model: none pinned (pass -W qwen:<model> or set model.name in ~/.qwen/settings.json)" });
+  }
+  if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Qwen Code runs" });
+  return checks;
+}
+var qwen = {
+  id: "qwen",
+  name: "Qwen Code",
+  capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
+  binary: binary5,
+  invocation: invocation5,
+  parse: parseEvents5,
+  failure: failure5,
+  defaultModel: defaultModel4,
+  doctor: doctor5
+};
+
 // src/backends/index.ts
-var REGISTRY = new Map([opencode, codex, claude, gemini].map((b) => [b.id, b]));
+var REGISTRY = new Map([opencode, codex, claude, gemini, qwen].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
 var PLANNED = [];
 var backendIds = () => [...REGISTRY.keys()];
@@ -1421,8 +1670,8 @@ var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
 var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
 
 // src/core/refs.ts
-import fs8 from "node:fs";
-import path7 from "node:path";
+import fs9 from "node:fs";
+import path8 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -1473,13 +1722,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path7.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path8.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs8.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs8.readFileSync(file, "utf8").split("\n");
+      const size = fs9.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs9.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -1490,9 +1739,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path7.isAbsolute(ref.file)) return [];
+    if (path8.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path7.basename(wanted)) ?? []).filter((f) => f.split(path7.sep).join("/").endsWith(`/${wanted}`) || path7.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path8.basename(wanted)) ?? []).filter((f) => f.split(path8.sep).join("/").endsWith(`/${wanted}`) || path8.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -1507,7 +1756,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path7.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path8.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -1528,7 +1777,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path7.basename(name);
+  const base = path8.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -1537,19 +1786,19 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs8.readdirSync(dir, { withFileTypes: true });
+      entries = fs9.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path7.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path8.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path7.join(dir, e.name));
-        else index.set(e.name, [path7.join(dir, e.name)]);
+        if (list2) list2.push(path8.join(dir, e.name));
+        else index.set(e.name, [path8.join(dir, e.name)]);
       }
     }
   };
@@ -1557,10 +1806,10 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path7.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path7.join(r, ref));
+  const candidates = path8.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path8.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs8.statSync(c).isFile() && inside(c, roots);
+      return fs9.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -1568,21 +1817,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path7.relative(r, path7.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path7.isAbsolute(rel);
+    const rel = path8.relative(r, path8.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path8.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
-import fs9 from "node:fs";
-import path9 from "node:path";
+import fs10 from "node:fs";
+import path10 from "node:path";
 
 // src/core/install.ts
-import path8 from "node:path";
-import { fileURLToPath as fileURLToPath2 } from "node:url";
+import path9 from "node:path";
+import { fileURLToPath as fileURLToPath3 } from "node:url";
 function packageRoot() {
-  return path8.resolve(path8.dirname(fileURLToPath2(import.meta.url)), "..");
+  return path9.resolve(path9.dirname(fileURLToPath3(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -1593,9 +1842,9 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path9.join(root, "skills", FILES[name]);
-  if (!fs9.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
-  return fs9.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  const file = path10.join(root, "skills", FILES[name]);
+  if (!fs10.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs10.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -1651,9 +1900,371 @@ function parseAudit(text) {
   return { verdict, disputed };
 }
 
+// src/core/config.ts
+import fs11 from "node:fs";
+import os8 from "node:os";
+import path11 from "node:path";
+var SCHEMA = {
+  worker: "string",
+  fallback: "string[]",
+  timeout: "string",
+  primary: "string",
+  price: "string",
+  link: "string[]",
+  web: "boolean",
+  maxParallel: "number",
+  models: "record",
+  tiers: "record",
+  costs: "numbers",
+  audit: "number",
+  auditFix: "boolean",
+  auditFocus: "boolean",
+  readIn: "string",
+  cacheDays: "number",
+  countRateLimits: "boolean",
+  mcpDash: "boolean",
+  notify: "boolean",
+  notifyCommand: "string",
+  notifyAfter: "number",
+  workerPrices: "record",
+  priceFeed: "boolean",
+  priceFeedUrl: "string",
+  priceFeedHours: "number",
+  budgetDaily: "number",
+  rankWorkers: "boolean"
+};
+function configPath() {
+  if (process.env.PITROOM_CONFIG) return path11.resolve(process.env.PITROOM_CONFIG);
+  const base = process.platform === "win32" ? process.env.APPDATA ?? path11.join(os8.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path11.join(os8.homedir(), ".config");
+  return path11.join(base, "pitroom", "config.json");
+}
+var cached;
+function loadConfig() {
+  if (cached) return cached;
+  const file = configPath();
+  const config = {};
+  const warnings = [];
+  if (fs11.existsSync(file)) {
+    let raw;
+    try {
+      raw = JSON.parse(fs11.readFileSync(file, "utf8"));
+    } catch (e) {
+      warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
+    }
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+      for (const [key, value] of Object.entries(raw)) {
+        const type = SCHEMA[key];
+        if (!type) {
+          warnings.push(`${file}: unknown key "${key}" ignored`);
+        } else if (matches(value, type)) {
+          config[key] = value;
+        } else {
+          warnings.push(`${file}: "${key}" must be ${type}; ignored`);
+        }
+      }
+    }
+  }
+  cached = { config, warnings };
+  return cached;
+}
+function matches(v, type) {
+  if (type === "string[]") return Array.isArray(v) && v.every((s) => typeof s === "string");
+  if (type === "record") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === "string");
+  }
+  if (type === "numbers") {
+    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
+  }
+  if (type === "number") return typeof v === "number" && Number.isFinite(v) && v >= 0;
+  return typeof v === type;
+}
+var DEFAULT_PARALLEL = 20;
+var MAX_PARALLEL_LIMIT = 30;
+var clampParallel = (s) => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT) });
+var positiveInt = (v) => {
+  const n = Number(v);
+  return v !== void 0 && v !== "" && Number.isInteger(n) && n > 0 ? n : void 0;
+};
+var rate = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
+};
+var amount = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : void 0;
+};
+var days = (v) => {
+  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
+  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
+};
+var flag01 = (v) => {
+  const t = v?.trim().toLowerCase();
+  return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
+};
+var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
+var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
+function setting(flag, env, conf, fallback) {
+  if (flag !== void 0) return { value: flag, source: "flag" };
+  if (env !== void 0) return { value: env, source: "env" };
+  if (conf !== void 0) return { value: conf, source: "config" };
+  return { value: fallback, source: "default" };
+}
+function effective(flags = {}) {
+  const c = loadConfig().config;
+  const e = process.env;
+  return {
+    worker: setting(flags.worker, e.PITROOM_WORKER, c.worker, DEFAULT_BACKEND),
+    /** Overrides the model of the preferred worker only. */
+    model: setting(flags.model, e.PITROOM_MODEL, void 0, void 0),
+    fallback: setting(void 0, list(e.PITROOM_FALLBACK), c.fallback, []),
+    timeout: setting(flags.timeout, e.PITROOM_TIMEOUT, c.timeout, "30m"),
+    primary: setting(void 0, e.PITROOM_PRIMARY, c.primary, "sonnet"),
+    price: setting(void 0, e.PITROOM_PRICE, c.price, void 0),
+    link: setting(void 0, void 0, c.link, []),
+    web: setting(void 0, void 0, c.web, false),
+    maxParallel: clampParallel(setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
+    models: setting(void 0, void 0, c.models, {}),
+    tiers: setting(void 0, void 0, c.tiers, {}),
+    costs: setting(void 0, void 0, c.costs, {}),
+    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
+    auditFix: setting(void 0, flag01(e.PITROOM_AUDIT_FIX), c.auditFix, false),
+    auditFocus: setting(void 0, flag01(e.PITROOM_AUDIT_FOCUS), c.auditFocus, false),
+    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
+    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
+    countRateLimits: setting(void 0, void 0, c.countRateLimits, false),
+    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
+    notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
+    notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
+    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
+    workerPrices: setting(void 0, void 0, c.workerPrices, {}),
+    priceFeed: setting(void 0, flag01(e.PITROOM_PRICE_FEED), c.priceFeed, false),
+    priceFeedUrl: setting(void 0, e.PITROOM_PRICE_FEED_URL?.trim() || void 0, c.priceFeedUrl?.trim() || void 0, "https://models.dev/api.json"),
+    priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
+    rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
+    budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0)
+  };
+}
+
+// src/core/audit.ts
+var ASKS_FOR_LIST = /\b(all|every|each|list|lists|enumerate|how many|count|which)\b/i;
+function focusedRate(base, task, record) {
+  if (base <= 0 || base >= 1) return { rate: base, why: [] };
+  let rate2 = base;
+  const why = [];
+  if (ASKS_FOR_LIST.test(task)) {
+    rate2 *= 2;
+    why.push("asks for a list or a count");
+  }
+  if (record && record.audited >= 3 && record.agreed / record.audited < 0.5) {
+    rate2 *= 2;
+    why.push(`the worker's audited answers were confirmed ${record.agreed} of ${record.audited} times`);
+  } else if (record && record.audited >= 5 && record.agreed === record.audited) {
+    rate2 /= 2;
+    why.push(`the worker's ${record.audited} audited answers were all confirmed`);
+  }
+  return { rate: Math.min(rate2, 1), why };
+}
+function fixTask(disputed) {
+  return [
+    "Another worker audited your answer above and disputed these claims:",
+    ...disputed.map((d) => `- ${d}`),
+    "",
+    "Check each one yourself against the files (the auditor can be wrong too). Then give your whole answer again,",
+    "corrected, in the same answer format: keep what holds, fix what does not, and add what was missing.",
+    "Under OPEN ISSUES, say which disputed claims you accepted and which you kept, and why."
+  ].join("\n");
+}
+
+// src/core/rank.ts
+var MIN_RUNS = 5;
+var MIN_AUDITS = 3;
+function scoreOf(r) {
+  if (!r || r.runs < MIN_RUNS) return void 0;
+  const ok = Math.min(r.ok, r.runs) / r.runs;
+  return r.audited >= MIN_AUDITS ? ok * (r.agreed / r.audited) : ok;
+}
+var pct = (x) => `${Math.round(x * 100)}%`;
+function rankChain(chain, recordOf) {
+  const scored = chain.map((t, i) => ({ t, i, score: scoreOf(recordOf(t)) }));
+  const slots = scored.filter((s) => s.score !== void 0);
+  if (slots.length < 2) return { chain };
+  const ranked = [...slots].sort((a, b) => Math.round(b.score * 10) - Math.round(a.score * 10) || a.i - b.i);
+  const out = [...chain];
+  slots.forEach((slot, k) => out[slot.i] = ranked[k].t);
+  if (out[0] === chain[0]) return { chain: out };
+  const by = (t) => scored.find((s) => s.t === t).score;
+  return {
+    chain: out,
+    note: `ranked by record ("rankWorkers"): ${describeTarget(out[0])} (${pct(by(out[0]))}) goes before ${describeTarget(chain[0])} (${pct(by(chain[0]))})`
+  };
+}
+
+// src/core/receipt.ts
+import fs13 from "node:fs";
+
+// src/core/prices.ts
+import fs12 from "node:fs";
+import path12 from "node:path";
+var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
+var catalogFile = () => path12.join(home(), "prices.json");
+function trim(raw) {
+  const out = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [provider, p] of Object.entries(raw)) {
+    for (const [id, m] of Object.entries(p?.models ?? {})) {
+      const c = m?.cost;
+      const ok = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
+      if (!c || !ok(c.input) || !ok(c.output)) continue;
+      out[`${provider}/${id}`] = [c.input, c.output, ok(c.cache_read) ? c.cache_read : c.input / 10];
+    }
+  }
+  return out;
+}
+var cached2;
+function readCatalog() {
+  const file = catalogFile();
+  try {
+    const { mtimeMs } = fs12.statSync(file);
+    if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
+    const parsed = JSON.parse(fs12.readFileSync(file, "utf8"));
+    const catalog5 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
+    cached2 = { file, mtimeMs, catalog: catalog5 };
+    return catalog5;
+  } catch {
+    return void 0;
+  }
+}
+var OWN = { codex: ["openai"], claude: ["anthropic"], gemini: ["google"] };
+function catalogPrice(backend, ...models) {
+  const catalog5 = readCatalog();
+  if (!catalog5) return void 0;
+  for (const raw of models) {
+    const id = raw?.split("#")[0];
+    if (!id) continue;
+    const keys = [id, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id}`)];
+    const any = keys.find((k) => catalog5.models[k]) ?? Object.keys(catalog5.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
+    const triple = any ? catalog5.models[any] : void 0;
+    if (any && triple && triple.length === 3 && triple.every((n) => Number.isFinite(n) && n >= 0)) {
+      const [input, output, cachedInput] = triple;
+      return { input, output, cachedInput, key: any };
+    }
+  }
+  return void 0;
+}
+
+// src/core/receipt.ts
+var PRESETS = {
+  sonnet: { name: "Claude Sonnet", input: 3, output: 15, cachedInput: 0.3 },
+  opus: { name: "Claude Opus", input: 5, output: 25, cachedInput: 0.5 },
+  haiku: { name: "Claude Haiku", input: 1, output: 5, cachedInput: 0.1 },
+  "gpt-5": { name: "GPT-5", input: 1.25, output: 10, cachedInput: 0.125 }
+};
+function primaryPrice() {
+  const eff = effective();
+  const custom = eff.price.value?.split(",").map(Number);
+  if (custom && custom.length >= 2 && custom.every((n) => Number.isFinite(n) && n >= 0)) {
+    return { name: "custom", input: custom[0], output: custom[1], cachedInput: custom[2] ?? custom[0] / 10 };
+  }
+  const named = eff.primary.value;
+  const preset = PRESETS[named.toLowerCase()];
+  if (preset) return preset;
+  const c = eff.priceFeed.value ? catalogPrice("", named) : void 0;
+  return c ? { name: named, source: "catalog", input: c.input, output: c.output, cachedInput: c.cachedInput } : PRESETS.sonnet;
+}
+var estimateTokens = (text) => Math.ceil(text.length / 4);
+function parsePriceSpec(spec, name = "worker") {
+  const parts = typeof spec === "string" ? spec.split(",").map((x) => Number(x.trim())) : [];
+  if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return void 0;
+  return { name, source: "config", input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
+}
+var costAt = (usage, price) => (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
+var workerCostOf = (usage) => usage?.cost ?? usage?.costEstimate;
+function savedUsd(usage, returnedTokens, price = primaryPrice()) {
+  const readingTheReport = returnedTokens * price.input / 1e6;
+  return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
+}
+function readLedger(sinceMs) {
+  if (!fs13.existsSync(ledgerFile())) return [];
+  return fs13.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+    try {
+      return [JSON.parse(l)];
+    } catch {
+      return [];
+    }
+  }).filter((e) => !sinceMs || Date.parse(e.at) >= sinceMs);
+}
+function totals(entries) {
+  const t = entries.reduce(
+    (a, e) => ({
+      runs: a.runs + 1,
+      tokens: a.tokens + e.tokens,
+      returned: a.returned + e.returned,
+      workerCost: a.workerCost + e.workerCost,
+      saved: a.saved + e.saved
+    }),
+    { runs: 0, tokens: 0, returned: 0, workerCost: 0, saved: 0 }
+  );
+  return { ...t, ratio: t.returned ? t.tokens / t.returned : 0 };
+}
+var usd = (n) => n >= 100 ? `$${n.toFixed(0)}` : n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
+function compact(n) {
+  const fmt = (v) => v.toFixed(v >= 100 ? 0 : 1).replace(/\.0$/, "");
+  if (n >= 1e6) return `${fmt(n / 1e6)}M`;
+  if (n >= 1e3) return `${fmt(n / 1e3)}k`;
+  return String(Math.round(n));
+}
+function badgeUrl(t) {
+  const msg = encodeURIComponent(`saved ${usd(t.saved)} \xB7 ${compact(t.tokens)} tokens offloaded`).replace(/-/g, "--");
+  return `https://img.shields.io/badge/pitroom-${msg}-7c3aed`;
+}
+var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+function card(t, period) {
+  const W = 720, H = 316, M = 32, GAP = 12;
+  const tile = (i, value, label) => {
+    const w = (W - 2 * M - 2 * GAP) / 3, x = M + i * (w + GAP);
+    return `<rect x="${x}" y="196" width="${w}" height="72" rx="14" fill="#fff" fill-opacity=".035" stroke="#fff" stroke-opacity=".1"/>
+<text x="${x + 18}" y="224" class="lab">${esc(label.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
+  };
+  const when = period.toUpperCase();
+  const pill = 22 + when.length * 7.4;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="pitroom saved ${esc(usd(t.saved))}">
+<style>
+text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#f4f4f5}
+.name{font-size:20px;font-weight:650;letter-spacing:-.01em}
+.sub{font-size:12.5px;fill:#a1a1aa}
+.pill{font-size:11px;font-weight:600;letter-spacing:.1em;fill:#a1a1aa}
+.lab{font-size:11px;font-weight:500;letter-spacing:.09em;fill:#a1a1aa}
+.big{font-size:60px;font-weight:700;letter-spacing:-.03em;fill:#3ddc97}
+.val{font-size:26px;font-weight:650;letter-spacing:-.02em}
+.foot{font-size:11.5px;fill:#71717a}
+</style>
+<defs>
+<radialGradient id="o" cx="1" cy="0" r=".7"><stop offset="0" stop-color="#ff6a2b" stop-opacity=".24"/><stop offset="1" stop-color="#ff6a2b" stop-opacity="0"/></radialGradient>
+<radialGradient id="b" cx="0" cy="0" r=".7"><stop offset="0" stop-color="#38bdf8" stop-opacity=".16"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
+<linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a2b"/><stop offset="1" stop-color="#ffa86b"/></linearGradient>
+<clipPath id="c"><rect width="${W}" height="${H}" rx="20"/></clipPath>
+</defs>
+<g clip-path="url(#c)"><rect width="${W}" height="${H}" fill="#0b0b0f"/><rect width="${W}" height="${H}" fill="url(#o)"/><rect width="${W}" height="${H}" fill="url(#b)"/></g>
+<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="19.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
+<rect x="${M}" y="28" width="38" height="38" rx="11" fill="url(#m)"/>
+<path d="M4 4h4v4H4zm8 0h4v4h-4zM8 8h4v4H8zm8 0h4v4h-4zM4 12h4v4H4zm8 0h4v4h-4zm-4 4h4v4H8zm8 0h4v4h-4z" fill="#fff" transform="translate(${M + 7} 35) scale(1)"/>
+<text x="${M + 52}" y="45" class="name">Pitroom</text><text x="${M + 52}" y="63" class="sub">Your agent's pit crew</text>
+<rect x="${W - M - pill}" y="34" width="${pill}" height="26" rx="13" fill="#fff" fill-opacity=".04" stroke="#fff" stroke-opacity=".14"/>
+<text x="${W - M - pill / 2}" y="51" class="pill" text-anchor="middle">${esc(when)}</text>
+<text x="${M}" y="112" class="lab">SAVED ON YOUR MAIN CODING AGENT</text>
+<text x="${M}" y="168" class="big">${esc(usd(t.saved))}</text>
+${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.round(t.ratio)}\xD7` : "\u2014", "Context compression")}${tile(2, String(t.runs), "Delegated tasks")}
+<text x="${M}" y="296" class="foot">Estimated against ${esc(primaryPrice().name)} pricing \xB7 npx pitroom</text>
+</svg>
+`;
+}
+
+// src/core/ui.ts
+var WEEK_MS = 7 * 24 * 3600 * 1e3;
+
 // src/core/plan.ts
-import fs10 from "node:fs";
-import path10 from "node:path";
+import fs14 from "node:fs";
+import path13 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -1700,9 +2311,9 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path10.resolve(file);
-  if (!fs10.existsSync(abs) || !fs10.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
-  const plan = parsePlan(fs10.readFileSync(abs, "utf8"), fs10.realpathSync(abs));
+  const abs = path13.resolve(file);
+  if (!fs14.existsSync(abs) || !fs14.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs14.readFileSync(abs, "utf8"), fs14.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
   return plan;
 }
@@ -1721,11 +2332,154 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path10.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path13.basename(file).replace(/\.md$/i, "");
+
+// src/core/style.ts
+var enabled = () => {
+  if (process.env.NO_COLOR) return false;
+  if (process.env.FORCE_COLOR && process.env.FORCE_COLOR !== "0") return true;
+  return !!process.stdout.isTTY && process.env.TERM !== "dumb";
+};
+var wrap = (open, close) => (text) => enabled() ? `\x1B[${open}m${text}\x1B[${close}m` : text;
+var bold = wrap(1, 22);
+var dim = wrap(2, 22);
+var red = wrap(31, 39);
+var green = wrap(32, 39);
+var yellow = wrap(33, 39);
+var blue = wrap(34, 39);
+var cyan = wrap(36, 39);
+
+// src/core/group.ts
+var quote = (s) => /^[\w./:@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
+function retryCommands(metas) {
+  return metas.filter((m) => ["failed", "timeout", "stopped"].includes(m.state) && !m.auditOf && !m.reviewOf && !m.parent && !m.fixOf).map((m) => {
+    const where = ["-d", quote(m.dir), ...m.group ? ["-g", quote(m.group)] : []];
+    if (m.plan) return ["pitroom run", m.mode === "write" ? "-w" : "-i", "--plan", quote(m.plan.file), "--step", String(m.plan.step), ...where, "--bg"].join(" ");
+    const mode = m.mode === "isolate" ? ["-i"] : m.mode === "write" ? ["-w"] : [];
+    return ["pitroom run", ...mode, ...where, "--bg", "--", quote(m.task)].join(" ");
+  });
+}
+
+// src/core/eval.ts
+import { spawnSync as spawnSync6 } from "node:child_process";
+import fs15 from "node:fs";
+var KINDS = ["definition", "count", "set"];
+function loadEval(file) {
+  let raw;
+  try {
+    raw = JSON.parse(fs15.readFileSync(file, "utf8"));
+  } catch (e) {
+    throw new UserError(`cannot read ${file}: ${e.message}`);
+  }
+  const list2 = raw?.questions;
+  if (!Array.isArray(list2) || !list2.length) throw new UserError(`${file}: expected {"questions": [{"id", "task", "kind", "truth"}, \u2026]}`);
+  const ids = /* @__PURE__ */ new Set();
+  return list2.map((q, i) => {
+    const where = `${file}: question ${i + 1}`;
+    if (!q || typeof q !== "object") throw new UserError(`${where} is not an object`);
+    const id = typeof q.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`;
+    if (ids.has(id)) throw new UserError(`${where}: the id "${id}" is used twice`);
+    ids.add(id);
+    if (typeof q.task !== "string" || !q.task.trim()) throw new UserError(`${where} (${id}) has no task`);
+    if (!KINDS.includes(q.kind)) throw new UserError(`${where} (${id}): kind must be one of ${KINDS.join(", ")}`);
+    const t = q.truth;
+    const grep = t && typeof t === "object" && !Array.isArray(t) && typeof t.grep === "string" && t.grep;
+    const literal = q.kind === "definition" && typeof t === "string" && /:\d+$/.test(t) || q.kind === "count" && typeof t === "number" && Number.isInteger(t) && t >= 0 || q.kind === "set" && Array.isArray(t) && t.every((s) => typeof s === "string");
+    if (!grep && !literal) {
+      const want = { definition: '"path:line"', count: "a whole number", set: "a list of paths" }[q.kind];
+      throw new UserError(`${where} (${id}): truth must be ${want} or {"grep": "pattern", \u2026}`);
+    }
+    return { id, task: q.task.trim(), kind: q.kind, truth: t };
+  });
+}
+var clean = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
+function gitGrep(root, flags, t) {
+  const r = spawnSync6("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024
+  });
+  if (r.status === 1) return [];
+  if (r.status !== 0) throw new UserError(`git grep "${t.grep}" failed: ${(r.stderr || r.error?.message || "").trim()}`);
+  const exclude = t.exclude ? new RegExp(t.exclude) : void 0;
+  return r.stdout.split("\n").filter(Boolean).filter((l) => !exclude?.test(l.split(":")[0]));
+}
+function truthOf(q, root) {
+  const t = q.truth;
+  if (t && typeof t === "object" && !Array.isArray(t)) {
+    if (!root) throw new UserError(`question ${q.id}: a "grep" truth needs a git repository`);
+    if (q.kind === "definition") {
+      const hit = gitGrep(root, ["-n"], t).map((l) => /^(.*?):(\d+):/.exec(l)).find(Boolean);
+      if (!hit) throw new UserError(`question ${q.id}: git grep found no definition for "${t.grep}"`);
+      return { path: clean(hit[1]), line: Number(hit[2]) };
+    }
+    const files = [...new Set(gitGrep(root, ["-l"], t).map(clean))];
+    return q.kind === "count" ? { count: files.length } : { files };
+  }
+  if (q.kind === "definition") {
+    const m = /^(.*):(\d+)$/.exec(t);
+    return { path: clean(m[1]), line: Number(m[2]) };
+  }
+  if (q.kind === "count") return { count: t };
+  return { files: [...new Set(t.map(clean))] };
+}
+function answerParts(answer) {
+  const text = answer.replace(/`/g, "");
+  const s = /SUMMARY:\s*([\s\S]*?)(?=^\s*(?:DETAILS|FILES CHANGED|VERIFICATION|OPEN ISSUES):|$(?![\s\S]))/m.exec(text);
+  const d = /^\s*DETAILS:\s*([\s\S]*?)(?=^\s*(?:FILES CHANGED|VERIFICATION|OPEN ISSUES):|$(?![\s\S]))/m.exec(text);
+  const summary = s ? s[1] : text.split(/^\s*(?:DETAILS|FILES CHANGED|VERIFICATION|OPEN ISSUES):/m)[0];
+  return { summary: summary.trim(), details: (d?.[1] ?? "").trim() };
+}
+function pathsIn(text) {
+  const found = text.replace(/\\/g, "/").match(/[A-Za-z0-9_.@\-/]+\.[A-Za-z0-9]{1,8}(?::\d+)?/g) ?? [];
+  return [...new Set(found.map((p) => clean(p.replace(/:\d+$/, ""))))];
+}
+function scoreAnswer(q, truth, answer, root) {
+  const prefix = root ? `${clean(root).replace(/\/$/, "")}/` : "";
+  const text = prefix ? answer.replace(/\\/g, "/").split(prefix).join("") : answer;
+  const { summary, details } = answerParts(text);
+  if (!summary && !details) return { score: 0, got: "(no answer)" };
+  if ("line" in truth) {
+    const flat = summary.replace(/\s+/g, " ");
+    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape2(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
+    const named = pathsIn(flat).includes(truth.path);
+    return { score: named ? 0.5 : 0, got: flat.slice(0, 120) };
+  }
+  if ("count" in truth) {
+    const n = /\d[\d,]*/.exec(summary);
+    const got2 = n ? Number(n[0].replace(/,/g, "")) : void 0;
+    return { score: got2 === truth.count ? 1 : 0, got: got2 === void 0 ? "(no number)" : String(got2) };
+  }
+  let got = pathsIn(summary);
+  if (!got.length) got = pathsIn(details);
+  const hit = got.filter((p) => truth.files.includes(p)).length;
+  const precision = got.length ? hit / got.length : 0;
+  const recall = truth.files.length ? hit / truth.files.length : got.length ? 0 : 1;
+  const f1 = precision + recall ? 2 * precision * recall / (precision + recall) : 0;
+  return { score: !truth.files.length && !got.length ? 1 : f1, got: `${hit}/${truth.files.length} found, ${got.length - hit} extra` };
+}
+var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
+var median = (a) => {
+  const s = a.filter((x) => x !== void 0).sort((x, y) => x - y);
+  return s.length ? s[Math.floor(s.length / 2)] : void 0;
+};
+function summarize(rows) {
+  const by = /* @__PURE__ */ new Map();
+  for (const r of rows) by.set(r.worker, [...by.get(r.worker) ?? [], r]);
+  return [...by.entries()].map(([worker, rs]) => ({
+    worker,
+    questions: rs.length,
+    failed: rs.filter((r) => r.state !== "done").length,
+    score: mean(rs.map((r) => r.score)),
+    byKind: Object.fromEntries(KINDS.filter((k) => rs.some((r) => r.kind === k)).map((k) => [k, mean(rs.filter((r) => r.kind === k).map((r) => r.score))])),
+    medianSeconds: median(rs.map((r) => r.seconds)),
+    medianTokens: median(rs.map((r) => r.tokens))
+  })).sort((a, b) => b.score - a.score || (a.medianSeconds ?? 1e9) - (b.medianSeconds ?? 1e9));
+}
 
 // src/vcs/guard.ts
-import fs11 from "node:fs";
-import path11 from "node:path";
+import fs16 from "node:fs";
+import path14 from "node:path";
 var VERSION = 2;
 var WINDOWS = process.platform === "win32";
 var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
@@ -1802,29 +2556,29 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path11.join(home(), "shim", `v${VERSION}`);
+  return path14.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const dir of (process.env.PATH ?? "").split(path11.delimiter).filter(Boolean)) {
-    if (same(path11.resolve(dir), skip)) continue;
-    const p = path11.join(dir, WINDOWS ? "git.exe" : "git");
+  for (const dir of (process.env.PATH ?? "").split(path14.delimiter).filter(Boolean)) {
+    if (same(path14.resolve(dir), skip)) continue;
+    const p = path14.join(dir, WINDOWS ? "git.exe" : "git");
     try {
-      fs11.accessSync(p, fs11.constants.X_OK);
-      if (fs11.statSync(p).isFile()) return p;
+      fs16.accessSync(p, fs16.constants.X_OK);
+      if (fs16.statSync(p).isFile()) return p;
     } catch {
     }
   }
   return void 0;
 }
 function findGitSh(realGit) {
-  let dir = path11.dirname(realGit);
+  let dir = path14.dirname(realGit);
   for (let i = 0; i < 4; i++) {
     for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
-      const p = path11.join(dir, rel);
-      if (fs11.existsSync(p)) return p;
+      const p = path14.join(dir, rel);
+      if (fs16.existsSync(p)) return p;
     }
-    const up = path11.dirname(dir);
+    const up = path14.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
@@ -1842,12 +2596,12 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path11.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path14.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
-  if (fs11.existsSync(file) && fs11.readFileSync(file, "utf8") === content) return;
-  fs11.mkdirSync(path11.dirname(file), { recursive: true });
+  if (fs16.existsSync(file) && fs16.readFileSync(file, "utf8") === content) return;
+  fs16.mkdirSync(path14.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs11.writeFileSync(tmp, content, { mode: 493 });
+  fs16.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
 }
 function pathKey(env) {
@@ -1879,7 +2633,7 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  writeIfChanged(path11.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path14.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -1891,11 +2645,11 @@ function guardEnv(env) {
   if (WINDOWS) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
-    writeIfChanged(path11.join(dir, "git.cmd"), cmdShim(sh));
+    writeIfChanged(path14.join(dir, "git.cmd"), cmdShim(sh));
   }
-  writeIfChanged(path11.join(dir, "git"), SHIM);
+  writeIfChanged(path14.join(dir, "git"), SHIM);
   const key = pathKey(env);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path11.delimiter}${env[key] ?? ""}` };
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path14.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
@@ -1904,10 +2658,10 @@ function shimReady() {
 
 // src/core/slots.ts
 import crypto2 from "node:crypto";
-import fs12 from "node:fs";
-import path12 from "node:path";
-var slotsDir = () => path12.join(home(), "slots");
-var locksDir = () => path12.join(home(), "locks");
+import fs17 from "node:fs";
+import path15 from "node:path";
+var slotsDir = () => path15.join(home(), "slots");
+var locksDir = () => path15.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -1921,23 +2675,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs12.mkdirSync(path12.dirname(file), { recursive: true });
+  fs17.mkdirSync(path15.dirname(file), { recursive: true });
   try {
-    fs12.writeFileSync(file, runId, { flag: "wx" });
+    fs17.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs12.readFileSync(file, "utf8").trim();
+    owner = fs17.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs12.rmSync(file, { force: true });
+  fs17.rmSync(file, { force: true });
   try {
-    fs12.writeFileSync(file, runId, { flag: "wx" });
+    fs17.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -1946,35 +2700,35 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs12.readFileSync(file, "utf8").trim() === runId) fs12.rmSync(file, { force: true });
+    if (fs17.readFileSync(file, "utf8").trim() === runId) fs17.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path12.join(slotsDir(), `slot-${n}`);
+    const file = path15.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
 function slotHolders() {
-  if (!fs12.existsSync(slotsDir())) return [];
-  return fs12.readdirSync(slotsDir()).map((f) => {
+  if (!fs17.existsSync(slotsDir())) return [];
+  return fs17.readdirSync(slotsDir()).map((f) => {
     try {
-      return fs12.readFileSync(path12.join(slotsDir(), f), "utf8").trim();
+      return fs17.readFileSync(path15.join(slotsDir(), f), "utf8").trim();
     } catch {
       return "";
     }
   }).filter((id) => holderActive(id, ""));
 }
-var lockFile = (repoRoot) => path12.join(locksDir(), `write-${crypto2.createHash("sha1").update(path12.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path15.join(locksDir(), `write-${crypto2.createHash("sha1").update(path15.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs12.readFileSync(file, "utf8").trim();
+    owner = fs17.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -1983,8 +2737,8 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 
 // src/core/secrets.ts
 import { execFileSync } from "node:child_process";
-import fs13 from "node:fs";
-import path13 from "node:path";
+import fs18 from "node:fs";
+import path16 from "node:path";
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_VISITED = 2e4;
 var MAX_DEPTH = 4;
@@ -2002,16 +2756,16 @@ function findSecretFiles(dir) {
     if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
     let entries;
     try {
-      entries = fs13.readdirSync(d, { withFileTypes: true });
+      entries = fs18.readdirSync(d, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       visited++;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path13.join(d, e.name), depth + 1);
+        if (!SKIP_DIRS2.has(e.name)) walk(path16.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(slash(path13.relative(dir, path13.join(d, e.name))));
+        found.push(slash(path16.relative(dir, path16.join(d, e.name))));
       }
     }
   };
@@ -2021,7 +2775,7 @@ function findSecretFiles(dir) {
 function findSecretFilesInTree(root, dir) {
   try {
     const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path13.basename(f)) && !path13.relative(dir, path13.join(root, f)).startsWith("..")).map((f) => slash(path13.relative(dir, path13.join(root, f)))).sort();
+    return out.split("\0").filter((f) => f && looksSecret(path16.basename(f)) && !path16.relative(dir, path16.join(root, f)).startsWith("..")).map((f) => slash(path16.relative(dir, path16.join(root, f)))).sort();
   } catch {
     return [];
   }
@@ -2033,307 +2787,14 @@ function secretWarning(files, mode) {
   const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
-var slash = (p) => p.split(path13.sep).join("/");
-
-// src/core/receipt.ts
-import fs16 from "node:fs";
-
-// src/core/config.ts
-import fs14 from "node:fs";
-import os7 from "node:os";
-import path14 from "node:path";
-var SCHEMA = {
-  worker: "string",
-  fallback: "string[]",
-  timeout: "string",
-  primary: "string",
-  price: "string",
-  link: "string[]",
-  web: "boolean",
-  maxParallel: "number",
-  models: "record",
-  tiers: "record",
-  costs: "numbers",
-  audit: "number",
-  readIn: "string",
-  cacheDays: "number",
-  countRateLimits: "boolean",
-  mcpDash: "boolean",
-  notify: "boolean",
-  notifyCommand: "string",
-  notifyAfter: "number",
-  workerPrices: "record",
-  priceFeed: "boolean",
-  priceFeedUrl: "string",
-  priceFeedHours: "number"
-};
-function configPath() {
-  if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
-  const base = process.platform === "win32" ? process.env.APPDATA ?? path14.join(os7.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path14.join(os7.homedir(), ".config");
-  return path14.join(base, "pitroom", "config.json");
-}
-var cached;
-function loadConfig() {
-  if (cached) return cached;
-  const file = configPath();
-  const config = {};
-  const warnings = [];
-  if (fs14.existsSync(file)) {
-    let raw;
-    try {
-      raw = JSON.parse(fs14.readFileSync(file, "utf8"));
-    } catch (e) {
-      warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
-    }
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) {
-      for (const [key, value] of Object.entries(raw)) {
-        const type = SCHEMA[key];
-        if (!type) {
-          warnings.push(`${file}: unknown key "${key}" ignored`);
-        } else if (matches(value, type)) {
-          config[key] = value;
-        } else {
-          warnings.push(`${file}: "${key}" must be ${type}; ignored`);
-        }
-      }
-    }
-  }
-  cached = { config, warnings };
-  return cached;
-}
-function matches(v, type) {
-  if (type === "string[]") return Array.isArray(v) && v.every((s) => typeof s === "string");
-  if (type === "record") {
-    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((s) => typeof s === "string");
-  }
-  if (type === "numbers") {
-    return typeof v === "object" && v !== null && !Array.isArray(v) && Object.values(v).every((n) => typeof n === "number" && Number.isFinite(n) && n >= 0);
-  }
-  if (type === "number") return typeof v === "number" && Number.isFinite(v) && v >= 0;
-  return typeof v === type;
-}
-var DEFAULT_PARALLEL = 20;
-var MAX_PARALLEL_LIMIT = 30;
-var clampParallel = (s) => ({ ...s, value: Math.min(s.value, MAX_PARALLEL_LIMIT) });
-var positiveInt = (v) => {
-  const n = Number(v);
-  return v !== void 0 && v !== "" && Number.isInteger(n) && n > 0 ? n : void 0;
-};
-var rate = (v) => {
-  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
-  return typeof n === "number" && Number.isFinite(n) && n >= 0 ? Math.min(n, 1) : void 0;
-};
-var days = (v) => {
-  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
-  return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
-};
-var flag01 = (v) => {
-  const t = v?.trim().toLowerCase();
-  return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
-};
-var readIn = (v) => v === "auto" || v === "snapshot" || v === "project" ? v : void 0;
-var list = (s) => s?.split(",").map((x) => x.trim()).filter(Boolean);
-function setting(flag, env, conf, fallback) {
-  if (flag !== void 0) return { value: flag, source: "flag" };
-  if (env !== void 0) return { value: env, source: "env" };
-  if (conf !== void 0) return { value: conf, source: "config" };
-  return { value: fallback, source: "default" };
-}
-function effective(flags = {}) {
-  const c = loadConfig().config;
-  const e = process.env;
-  return {
-    worker: setting(flags.worker, e.PITROOM_WORKER, c.worker, DEFAULT_BACKEND),
-    /** Overrides the model of the preferred worker only. */
-    model: setting(flags.model, e.PITROOM_MODEL, void 0, void 0),
-    fallback: setting(void 0, list(e.PITROOM_FALLBACK), c.fallback, []),
-    timeout: setting(flags.timeout, e.PITROOM_TIMEOUT, c.timeout, "30m"),
-    primary: setting(void 0, e.PITROOM_PRIMARY, c.primary, "sonnet"),
-    price: setting(void 0, e.PITROOM_PRICE, c.price, void 0),
-    link: setting(void 0, void 0, c.link, []),
-    web: setting(void 0, void 0, c.web, false),
-    maxParallel: clampParallel(setting(void 0, positiveInt(e.PITROOM_MAX_PARALLEL), positiveInt(c.maxParallel), DEFAULT_PARALLEL)),
-    models: setting(void 0, void 0, c.models, {}),
-    tiers: setting(void 0, void 0, c.tiers, {}),
-    costs: setting(void 0, void 0, c.costs, {}),
-    audit: setting(void 0, rate(e.PITROOM_AUDIT), rate(c.audit), 0),
-    readIn: setting(void 0, readIn(e.PITROOM_READ_IN), readIn(c.readIn), "auto"),
-    cacheDays: setting(void 0, days(e.PITROOM_CACHE_DAYS), days(c.cacheDays), 7),
-    countRateLimits: setting(void 0, void 0, c.countRateLimits, false),
-    mcpDash: setting(void 0, flag01(e.PITROOM_MCP_DASH), c.mcpDash, true),
-    notify: setting(void 0, flag01(e.PITROOM_NOTIFY), c.notify, false),
-    notifyCommand: setting(void 0, e.PITROOM_NOTIFY_COMMAND?.trim() || void 0, c.notifyCommand?.trim() || void 0, void 0),
-    notifyAfter: setting(void 0, days(e.PITROOM_NOTIFY_AFTER), days(c.notifyAfter), 15),
-    workerPrices: setting(void 0, void 0, c.workerPrices, {}),
-    priceFeed: setting(void 0, flag01(e.PITROOM_PRICE_FEED), c.priceFeed, false),
-    priceFeedUrl: setting(void 0, e.PITROOM_PRICE_FEED_URL?.trim() || void 0, c.priceFeedUrl?.trim() || void 0, "https://models.dev/api.json"),
-    priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24)
-  };
-}
-
-// src/core/prices.ts
-import fs15 from "node:fs";
-import path15 from "node:path";
-var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
-var catalogFile = () => path15.join(home(), "prices.json");
-function trim(raw) {
-  const out = {};
-  if (!raw || typeof raw !== "object") return out;
-  for (const [provider, p] of Object.entries(raw)) {
-    for (const [id, m] of Object.entries(p?.models ?? {})) {
-      const c = m?.cost;
-      const ok = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
-      if (!c || !ok(c.input) || !ok(c.output)) continue;
-      out[`${provider}/${id}`] = [c.input, c.output, ok(c.cache_read) ? c.cache_read : c.input / 10];
-    }
-  }
-  return out;
-}
-var cached2;
-function readCatalog() {
-  const file = catalogFile();
-  try {
-    const { mtimeMs } = fs15.statSync(file);
-    if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
-    const parsed = JSON.parse(fs15.readFileSync(file, "utf8"));
-    const catalog5 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
-    cached2 = { file, mtimeMs, catalog: catalog5 };
-    return catalog5;
-  } catch {
-    return void 0;
-  }
-}
-var OWN = { codex: ["openai"], claude: ["anthropic"], gemini: ["google"] };
-function catalogPrice(backend, ...models) {
-  const catalog5 = readCatalog();
-  if (!catalog5) return void 0;
-  for (const raw of models) {
-    const id = raw?.split("#")[0];
-    if (!id) continue;
-    const keys = [id, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id}`)];
-    const any = keys.find((k) => catalog5.models[k]) ?? Object.keys(catalog5.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
-    const triple = any ? catalog5.models[any] : void 0;
-    if (any && triple && triple.length === 3 && triple.every((n) => Number.isFinite(n) && n >= 0)) {
-      const [input, output, cachedInput] = triple;
-      return { input, output, cachedInput, key: any };
-    }
-  }
-  return void 0;
-}
-
-// src/core/receipt.ts
-var PRESETS = {
-  sonnet: { name: "Claude Sonnet", input: 3, output: 15, cachedInput: 0.3 },
-  opus: { name: "Claude Opus", input: 5, output: 25, cachedInput: 0.5 },
-  haiku: { name: "Claude Haiku", input: 1, output: 5, cachedInput: 0.1 },
-  "gpt-5": { name: "GPT-5", input: 1.25, output: 10, cachedInput: 0.125 }
-};
-function primaryPrice() {
-  const eff = effective();
-  const custom = eff.price.value?.split(",").map(Number);
-  if (custom && custom.length >= 2 && custom.every((n) => Number.isFinite(n) && n >= 0)) {
-    return { name: "custom", input: custom[0], output: custom[1], cachedInput: custom[2] ?? custom[0] / 10 };
-  }
-  const named = eff.primary.value;
-  const preset = PRESETS[named.toLowerCase()];
-  if (preset) return preset;
-  const c = eff.priceFeed.value ? catalogPrice("", named) : void 0;
-  return c ? { name: named, source: "catalog", input: c.input, output: c.output, cachedInput: c.cachedInput } : PRESETS.sonnet;
-}
-var estimateTokens = (text) => Math.ceil(text.length / 4);
-function parsePriceSpec(spec, name = "worker") {
-  const parts = typeof spec === "string" ? spec.split(",").map((x) => Number(x.trim())) : [];
-  if (parts.length < 2 || parts.length > 3 || !parts.every((n) => Number.isFinite(n) && n >= 0)) return void 0;
-  return { name, source: "config", input: parts[0], output: parts[1], cachedInput: parts[2] ?? parts[0] / 10 };
-}
-var costAt = (usage, price) => (usage.input * price.input + usage.cacheRead * price.cachedInput + (usage.output + usage.reasoning) * price.output) / 1e6;
-var workerCostOf = (usage) => usage?.cost ?? usage?.costEstimate;
-function savedUsd(usage, returnedTokens, price = primaryPrice()) {
-  const readingTheReport = returnedTokens * price.input / 1e6;
-  return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
-}
-function readLedger(sinceMs) {
-  if (!fs16.existsSync(ledgerFile())) return [];
-  return fs16.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
-    try {
-      return [JSON.parse(l)];
-    } catch {
-      return [];
-    }
-  }).filter((e) => !sinceMs || Date.parse(e.at) >= sinceMs);
-}
-function totals(entries) {
-  const t = entries.reduce(
-    (a, e) => ({
-      runs: a.runs + 1,
-      tokens: a.tokens + e.tokens,
-      returned: a.returned + e.returned,
-      workerCost: a.workerCost + e.workerCost,
-      saved: a.saved + e.saved
-    }),
-    { runs: 0, tokens: 0, returned: 0, workerCost: 0, saved: 0 }
-  );
-  return { ...t, ratio: t.returned ? t.tokens / t.returned : 0 };
-}
-var usd = (n) => n >= 100 ? `$${n.toFixed(0)}` : n >= 1 ? `$${n.toFixed(2)}` : `$${n.toFixed(3)}`;
-function compact(n) {
-  const fmt = (v) => v.toFixed(v >= 100 ? 0 : 1).replace(/\.0$/, "");
-  if (n >= 1e6) return `${fmt(n / 1e6)}M`;
-  if (n >= 1e3) return `${fmt(n / 1e3)}k`;
-  return String(Math.round(n));
-}
-function badgeUrl(t) {
-  const msg = encodeURIComponent(`saved ${usd(t.saved)} \xB7 ${compact(t.tokens)} tokens offloaded`).replace(/-/g, "--");
-  return `https://img.shields.io/badge/pitroom-${msg}-7c3aed`;
-}
-var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
-function card(t, period) {
-  const W = 720, H = 316, M = 32, GAP = 12;
-  const tile = (i, value, label) => {
-    const w = (W - 2 * M - 2 * GAP) / 3, x = M + i * (w + GAP);
-    return `<rect x="${x}" y="196" width="${w}" height="72" rx="14" fill="#fff" fill-opacity=".035" stroke="#fff" stroke-opacity=".1"/>
-<text x="${x + 18}" y="224" class="lab">${esc(label.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
-  };
-  const when = period.toUpperCase();
-  const pill = 22 + when.length * 7.4;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="pitroom saved ${esc(usd(t.saved))}">
-<style>
-text{font-family:ui-sans-serif,-apple-system,"Segoe UI",Inter,Helvetica,Arial,sans-serif;fill:#f4f4f5}
-.name{font-size:20px;font-weight:650;letter-spacing:-.01em}
-.sub{font-size:12.5px;fill:#a1a1aa}
-.pill{font-size:11px;font-weight:600;letter-spacing:.1em;fill:#a1a1aa}
-.lab{font-size:11px;font-weight:500;letter-spacing:.09em;fill:#a1a1aa}
-.big{font-size:60px;font-weight:700;letter-spacing:-.03em;fill:#3ddc97}
-.val{font-size:26px;font-weight:650;letter-spacing:-.02em}
-.foot{font-size:11.5px;fill:#71717a}
-</style>
-<defs>
-<radialGradient id="o" cx="1" cy="0" r=".7"><stop offset="0" stop-color="#ff6a2b" stop-opacity=".24"/><stop offset="1" stop-color="#ff6a2b" stop-opacity="0"/></radialGradient>
-<radialGradient id="b" cx="0" cy="0" r=".7"><stop offset="0" stop-color="#38bdf8" stop-opacity=".16"/><stop offset="1" stop-color="#38bdf8" stop-opacity="0"/></radialGradient>
-<linearGradient id="m" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#ff6a2b"/><stop offset="1" stop-color="#ffa86b"/></linearGradient>
-<clipPath id="c"><rect width="${W}" height="${H}" rx="20"/></clipPath>
-</defs>
-<g clip-path="url(#c)"><rect width="${W}" height="${H}" fill="#0b0b0f"/><rect width="${W}" height="${H}" fill="url(#o)"/><rect width="${W}" height="${H}" fill="url(#b)"/></g>
-<rect x=".5" y=".5" width="${W - 1}" height="${H - 1}" rx="19.5" fill="none" stroke="#fff" stroke-opacity=".1"/>
-<rect x="${M}" y="28" width="38" height="38" rx="11" fill="url(#m)"/>
-<path d="M4 4h4v4H4zm8 0h4v4h-4zM8 8h4v4H8zm8 0h4v4h-4zM4 12h4v4H4zm8 0h4v4h-4zm-4 4h4v4H8zm8 0h4v4h-4z" fill="#fff" transform="translate(${M + 7} 35) scale(1)"/>
-<text x="${M + 52}" y="45" class="name">Pitroom</text><text x="${M + 52}" y="63" class="sub">Your agent's pit crew</text>
-<rect x="${W - M - pill}" y="34" width="${pill}" height="26" rx="13" fill="#fff" fill-opacity=".04" stroke="#fff" stroke-opacity=".14"/>
-<text x="${W - M - pill / 2}" y="51" class="pill" text-anchor="middle">${esc(when)}</text>
-<text x="${M}" y="112" class="lab">SAVED ON YOUR MAIN CODING AGENT</text>
-<text x="${M}" y="168" class="big">${esc(usd(t.saved))}</text>
-${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.round(t.ratio)}\xD7` : "\u2014", "Context compression")}${tile(2, String(t.runs), "Delegated tasks")}
-<text x="${M}" y="296" class="foot">Estimated against ${esc(primaryPrice().name)} pricing \xB7 npx pitroom</text>
-</svg>
-`;
-}
+var slash = (p) => p.split(path16.sep).join("/");
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs17 from "node:fs";
+import fs19 from "node:fs";
 async function spawnWorker(inv, opts) {
-  const out = fs17.openSync(opts.stdoutFile, "w");
-  const err = fs17.openSync(opts.stderrFile, "w");
+  const out = fs19.openSync(opts.stdoutFile, "w");
+  const err = fs19.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -2356,7 +2817,7 @@ async function spawnWorker(inv, opts) {
   }, opts.timeoutSec * 1e3);
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
-      res.spawnError = e.code === "ENOENT" ? fs17.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      res.spawnError = e.code === "ENOENT" ? fs19.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
       resolve2(127);
     });
     child.on("close", (c) => resolve2(c));
@@ -2365,16 +2826,18 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs17.closeSync(out);
-  fs17.closeSync(err);
+  fs19.closeSync(out);
+  fs19.closeSync(err);
   return res;
 }
 export {
+  ASKS_FOR_LIST,
   DEFAULT_BACKEND,
   STOP_FILE,
   TERMINAL,
   acquireWriteLock,
   allBackends,
+  answerParts,
   backendIds,
   badgeUrl,
   brief,
@@ -2389,6 +2852,8 @@ export {
   fill,
   findSecretFiles,
   findSecretFilesInTree,
+  fixTask,
+  focusedRate,
   formatTarget,
   freshMeta,
   getBackend,
@@ -2397,6 +2862,7 @@ export {
   isActive,
   isAlive,
   listRunIds,
+  loadEval,
   loadPlan,
   loadTemplate,
   looksSecret,
@@ -2407,9 +2873,11 @@ export {
   parseStatus,
   parseTarget,
   parseVerdict,
+  pathsIn,
   planName,
   planTask,
   primaryPrice,
+  rankChain,
   readCatalog,
   readLedger,
   readMeta,
@@ -2418,17 +2886,22 @@ export {
   requestStop,
   resolveRun,
   retryAfterMs,
+  retryCommands,
   runDir,
   runFile,
   runsDir,
   savedUsd,
+  scoreAnswer,
+  scoreOf,
   secretWarning,
   shimDir,
   shimReady,
   slotHolders,
   spawnWorker,
+  summarize,
   totals,
   trim,
+  truthOf,
   tryAcquireSlot,
   usd,
   verifyRefs,

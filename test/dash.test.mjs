@@ -230,3 +230,12 @@ test('dash: a crew on the edge of the limit is returned whole', async () => {
     s.run(['dash', '--stop']);
   }
 });
+
+test('dash: retry commands quote the task for a POSIX shell and keep the mode, the plan task and the group', async () => {
+  const { retryCommands } = await import('../dist/lib.mjs');
+  const base = { dir: '/w/proj', group: 'g1', state: 'failed', mode: 'read', task: "it's \"quoted\" $HOME" };
+  assert.deepEqual(retryCommands([base]), [`pitroom run -d /w/proj -g g1 --bg -- 'it'\\''s "quoted" $HOME'`]);
+  assert.deepEqual(retryCommands([{ ...base, mode: 'isolate', state: 'timeout', task: 'fix it' }]), [`pitroom run -i -d /w/proj -g g1 --bg -- 'fix it'`]);
+  assert.deepEqual(retryCommands([{ ...base, mode: 'isolate', plan: { file: 'docs/my plan.md', step: 3, title: 't' } }]), [`pitroom run -i --plan 'docs/my plan.md' --step 3 -d /w/proj -g g1 --bg`]);
+  assert.deepEqual(retryCommands([{ ...base, state: 'done' }, { ...base, auditOf: 'x' }, { ...base, parent: 'y' }, { ...base, reviewOf: 'z' }]), [], 'finished runs and runs of another run are left out');
+});

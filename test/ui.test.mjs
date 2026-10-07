@@ -288,3 +288,17 @@ test('ui: runs of one group are one card with their progress; it opens onto the 
   await click(crew);
   await until(`${cardWith('crew job alpha')} === undefined`, 'the crew to close again');
 });
+
+test('ui: a crew with failed runs offers the commands to start them again; one that is all done offers nothing', { skip }, async () => {
+  for (const task of ['broken job one', 'broken job two']) s.run(['run', '-g', 'broken-crew', '--no-fallback', task], { MOCK_ACTIONS: 'fail:boom' });
+  await open();
+  const crew = "[...document.querySelectorAll('button[aria-expanded]')].find((b) => b.textContent.includes('broken-crew'))";
+  await until(`${crew} !== undefined`, 'the broken crew card');
+  await click(crew);
+  const retry = "[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Retry command (2)'))";
+  await until(`${retry} !== undefined`, 'the retry button');
+  await click(retry);
+  await until("[...document.querySelectorAll('pre')].some((p) => p.textContent.includes(\"-g broken-crew --bg -- 'broken job one'\"))", 'the commands');
+  assert.equal(await evaluate("[...document.querySelectorAll('button')].some((b) => /^Stop all|^Discard all/.test(b.textContent))"), false, 'nothing running, nothing to discard');
+  await click(crew);
+});

@@ -80,3 +80,39 @@ test('dash actions: discard only throws away a finished, unapplied isolate copy'
   });
   assert.ok(fs.existsSync(path.join(s.env.PITROOM_HOME, 'runs', isoId, 'changes.patch')), 'the patch stays');
 });
+
+test('dash actions: a crew is stopped or discarded as a whole, with the same secret and origin', async () => {
+  const s = sandbox();
+  const crew = s.run(['crew', '-g', 'my crew', 'slow one', 'slow two'], { MOCK_ACTIONS: 'sleep:30;answer:SUMMARY: late' });
+  assert.equal(crew.status, 0, crew.stderr);
+  const iso = ['first', 'second'].map((t) => s.run(['run', '-i', '-g', 'isos', `change ${t}`], { MOCK_ACTIONS: 'append:app.txt:x;answer:SUMMARY: ok' }));
+  for (const r of iso) assert.equal(r.status, 0, r.stderr);
+  await withDash(s, async ({ url, token, post }) => {
+    const group = encodeURIComponent('my crew');
+    assert.equal((await post(`api/group/${group}/stop`, { 'x-pitroom-token': token })).status, 403, 'no origin');
+    assert.equal((await post('api/group/nobody/stop')).status, 404, 'no such group');
+    assert.equal((await post(`api/group/${group}/other`)).status, 404, 'only stop and discard');
+    const ok = await post(`api/group/${group}/stop`);
+    assert.equal(ok.status, 200, ok.body);
+    assert.match(JSON.parse(ok.body).message, /stopping 2 runs of my crew/);
+    const ids = crew.stdout.match(new RegExp(RUN_ID.source, 'g'));
+    let states = [];
+    for (let i = 0; i < 80 && !(states.length && states.every((x) => x === 'stopped')); i++) {
+      states = await Promise.all(ids.map(async (id) => JSON.parse((await send(`${url}api/run/${id}`)).body).state));
+      if (!states.every((x) => x === 'stopped')) await sleep(100);
+    }
+    assert.deepEqual(states, ['stopped', 'stopped']);
+    assert.equal((await post(`api/group/${group}/stop`)).status, 409, 'nothing left to stop');
+
+    const discard = await post('api/group/isos/discard');
+    assert.equal(discard.status, 200, discard.body);
+    assert.match(JSON.parse(discard.body).message, /discarded the isolated copies of 2 runs of isos/);
+    assert.equal((await post('api/group/isos/discard')).status, 409, 'already discarded');
+
+    // the failed runs come back as commands to run, never started by the page
+    const retry = JSON.parse((await send(`${url}api/group/${group}/retry`)).body);
+    assert.equal(retry.commands.length, 2);
+    for (const c of retry.commands) assert.match(c, /^pitroom run -d \S+ -g 'my crew' --bg -- 'slow (one|two)'$/);
+    assert.equal((await send(`${url}api/group/nobody/retry`)).status, 404);
+  });
+});

@@ -6,7 +6,7 @@
 
 **Cheaper and faster: hand the reading, fixes, tests and reviews to workers that run in parallel. Keep the decisions.**
 
-Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code / Gemini CLI workers
+Model-agnostic · Verified answers · Receipts, not vibes · OpenCode / Codex / Claude Code / Gemini CLI / Qwen Code workers
 
 <br />
 
@@ -72,7 +72,7 @@ Pitroom uses your worker CLI's default model: a free tier, a local MLX/Ollama mo
 
 ### Any worker CLI
 
-OpenCode, Codex CLI, Claude Code and Gemini CLI.
+OpenCode, Codex CLI, Claude Code, Gemini CLI and Qwen Code.
 
 One group can mix them, and a fallback chain can cross them ([how adapters work](docs/backends.md)).
 
@@ -178,7 +178,7 @@ The screenshots below show sample data (an imaginary `shop-api` project), not a 
 
 <p align="center"><img src="docs/dash-history.png" width="49%" alt="The History tab: a search box, filters and every past run as a card"> <img src="docs/dash-stats.png" width="49%" alt="The Stats tab: totals, runs per day, and per worker and model its logo, success rate and how many of its audited answers another worker confirmed"></p>
 
-**Stop and Discard.** A running card has a Stop button, and a finished `--isolate` card that is not applied yet has Discard (the same as `pitroom stop` and `pitroom discard`; the patch file stays). Each asks once more. Nothing else can be done from the page: it never starts a run and never applies a patch. A POST needs the secret the page was served with (it changes every time the dashboard starts) and the page's own origin, so a web page on another site cannot press them.
+**Stop and Discard.** A running card has a Stop button, and a finished `--isolate` card that is not applied yet has Discard (the same as `pitroom stop` and `pitroom discard`; the patch file stays). A crew's card has the same for all its runs at once (**Stop all**, **Discard all**), and when some of its runs failed, timed out or were stopped, **Retry command** shows the `pitroom run … --bg` commands that start them again in the same crew, to copy into a terminal or hand to your agent. Each action asks once more. Nothing else can be done from the page: it never starts a run and never applies a patch. A POST needs the secret the page was served with (it changes every time the dashboard starts) and the page's own origin, so a web page on another site cannot press them.
 
 The dashboard is a React app built once into `dist/ui` and served as two static files, so the CLI still has no runtime dependencies. It follows your system's light or dark theme (a button switches it).
 
@@ -283,7 +283,7 @@ macOS and Linux are the main platforms. **Windows** runs the same test suite in 
 
 ## Quick start
 
-You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) or [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it).
+You need Node.js 22.13+ and at least one worker CLI: [OpenCode](https://opencode.ai) v2+ (the default worker, with free models), [Codex CLI](https://github.com/openai/codex), [Claude Code](https://claude.com/claude-code) [Gemini CLI](https://github.com/google-gemini/gemini-cli) (beta; it needs an API key from [Google AI Studio](https://aistudio.google.com/apikey), a Google account sign-in no longer works for it) or [Qwen Code](https://github.com/QwenLM/qwen-code) (beta; any OpenAI-compatible provider, a DashScope key, or a local model).
 
 ### 1. Install: pick your agent
 
@@ -490,6 +490,31 @@ or set `"audit": 0.1` in the config (or `PITROOM_AUDIT=0.1`) to have about one r
 
 </details>
 
+**Corrections** (`"auditFix": true`, or `PITROOM_AUDIT_FIX=1`; off by default). When an audit says `PARTIAL` or `DISAGREE` and names the claims it disputes, the answer goes back to the worker that gave it: a follow-up in its own session (which still holds what it read) with the disputed claims, to check against the files (the auditor can be wrong too) and to answer again in full, saying under OPEN ISSUES which claims it accepted. One round only: a correction is never sent back again. The audited run's card and `pitroom show` name the correction run (`── fix: …`). Every built-in worker can continue its session, which this needs.
+
+**A focused sample** (`"auditFocus": true`, or `PITROOM_AUDIT_FOCUS=1`; off by default). With an `audit` rate set, the sample leans to where audits find the most: the rate is doubled for a question that asks for all of something, a list or a count, doubled again for a worker whose audited answers were confirmed less than half the time (3 audits or more in 30 days), and halved for one whose last 5 or more were all confirmed. `--audit` and `--no-audit` are never changed; the run records the chance it got and why.
+
+## Evals
+
+Your own benchmark, on your own code: questions with known answers, put to the workers you want to compare, and scored.
+
+```bash
+pitroom eval questions.json -W opencode -W codex:gpt-6.1-sol    # every question to every worker, as one group
+pitroom eval questions.json --json                               # the same as JSON: truths, rows, a summary per worker
+```
+
+```json
+{
+  "questions": [
+    { "id": "def", "kind": "definition", "task": "Which file and line define `export function loadConfig(`? The SUMMARY line must be only path:line.", "truth": { "grep": "^export function loadConfig\\(", "regex": true, "dir": "src" } },
+    { "id": "count", "kind": "count", "task": "How many files under src/ contain the word effective? The SUMMARY line must be only the number.", "truth": { "grep": "effective", "word": true, "dir": "src" } },
+    { "id": "list", "kind": "set", "task": "List every file under src/ that mentions node:sqlite. The SUMMARY line must be only the paths, separated by commas.", "truth": ["src/cli/commands.ts", "src/core/history.ts"] }
+  ]
+}
+```
+
+A truth is written down (`"path:line"`, a number, a list of paths) or looked up when the eval starts with `git grep` (`grep`, and optionally `dir`, `word`, `regex`, `exclude`), so it stays right as the code changes. Scoring is that of [the multi-repo benchmark](benchmarks/multi-repo): a definition gets 1 for the exact `path:line` and 0.5 for the right file, a count only for the exact number, a list the F1 of the paths it names (from the SUMMARY, else the DETAILS). Each worker answers for itself: no fallback, no audit, no cached answer. The runs are an ordinary group, so `pitroom watch -g`, the dashboard and the history show them.
+
 ## Crews
 
 A real crew over this repository, four questions at once on a free OpenCode Zen model:
@@ -568,6 +593,7 @@ pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- sep
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom audit RUN [-W worker]
+pitroom eval QUESTIONS.json [-W worker]… [--json]   your questions with known answers, scored per worker
 pitroom mcp [-d DIR] [--http [--port N]]   # serve Pitroom as MCP tools on stdio, or over HTTP on 127.0.0.1 (bearer token)
 pitroom cooldown [--clear]
 pitroom plan status PLAN [--json] · pitroom plan note PLAN "Task N: …"
@@ -654,6 +680,7 @@ pitroom run -W 'codex:#low' "…"                          # the model from conf
 pitroom run --effort high "…"                           # model#level (Codex, Claude Code, OpenCode; Gemini CLI has no effort option)
 pitroom run -W claude:haiku "…"                          # Claude Code on a cheap model
 pitroom run -W gemini:gemini-3.8-flash "…"               # Gemini CLI (beta; needs a Google AI Studio API key)
+pitroom run -W qwen:qwen3-coder-plus "…"                 # Qwen Code (beta; your provider from ~/.qwen/settings.json)
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
 
@@ -663,6 +690,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | Codex CLI | ✅ | OS sandbox (`read-only` / `workspace-write`) | tokens only | `codex login`; your `~/.codex/config.toml` is ignored for workers (its MCP servers run outside the sandbox); models take `#effort` |
 | Claude Code | ✅ | tool allowlist (`--restricted --safe-mode`, `dontAsk`) | reported | `claude auth login`; its default is often Opus, so prefer `-W claude:haiku` |
 | Gemini CLI | beta | `--approval-mode plan` plus Pitroom's policy rules | tokens only | an API key from Google AI Studio (sign in with `gemini` or set `GEMINI_API_KEY`; Google account sign-in is refused by Google); workers run in a private Gemini home without your hooks, MCP servers and skills; secret-file rules are not enforced by Gemini 0.62, but a read run with secret-looking files reads a [clean snapshot](#modes) without them; pin a model, e.g. `-W gemini:gemini-3.8-flash`; `--continue` works (by session id; see [the notes](docs/backends.md#gemini-cli-notes)) |
+| Qwen Code | beta | `--approval-mode plan`; edits only inside the working directory, the rest declined | tokens only | checked against Qwen Code 0.25 with a scripted model, not yet with a real provider; uses your sign-in and model from `~/.qwen/settings.json` (any OpenAI-compatible provider, DashScope, a local model); `--safe-mode` keeps your QWEN.md, hooks, skills and MCP servers out and stops the CLI writing memories of the run; reads `.env` if asked, so a read run with secret-looking files reads a [clean snapshot](#modes); see [the notes](docs/backends.md#qwen-code-notes) |
 
 ### Models, costs and effort
 
@@ -734,6 +762,9 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 - `priceFeed`: keep a price catalog up to date (default `false`; `PITROOM_PRICE_FEED=1`). The catalog is the public [models.dev](https://models.dev) list OpenCode also reads (USD per 1M tokens of about 8,000 models): at most once a day (`priceFeedHours`, default 24), in a background process after a run, never while a run waits, Pitroom sends a plain `GET` for that one file (`priceFeedUrl` / `PITROOM_PRICE_FEED_URL` to use a mirror, `priceFeedHours` / `PITROOM_PRICE_FEED_HOURS` for the interval) and keeps a trimmed copy (about 400 KB) in its state directory; a failed refresh keeps the old copy and is not retried for an hour. It is only a fallback: your `workerPrices` come first, and the receipt says which was used (`estimated from models.dev prices`). With it, `"primary": "<model id>"` can name any model of the catalog for the savings comparison (`"primary": "claude-opus-5-5"`), where without it only the four presets exist. `pitroom prices` shows the feed, the catalog and the price each worker in use gets; `pitroom prices --refresh` fetches now. What it sends: [PRIVACY.md](PRIVACY.md). The listed prices are API list prices: a worker on a subscription (Codex with a ChatGPT account) does not pay them, so for such a worker the estimate is what the same tokens would cost on the API.
 - `notify`: a desktop notification when a run that went to the background (`--bg`, a crew, an MCP call) has ended, so a long job does not have to be watched (default `false`; `PITROOM_NOTIFY=1`). Runs that went well but took less than `notifyAfter` seconds (default 15; `PITROOM_NOTIFY_AFTER`) and audits are not announced (a failure always is), and a crew says so once, when its last run ends, judged as a whole. A worker process that is killed outright never gets to say so. The built-in notifier uses `osascript` on macOS and `notify-send` on Linux (none for Windows yet); `notifyCommand` runs a command of your own instead, in a shell, with the text in `PITROOM_NOTIFY_TITLE` and `PITROOM_NOTIFY_BODY` (and `PITROOM_NOTIFY_RUN`, `PITROOM_NOTIFY_STATE`): for example `"notifyCommand": "curl -s -d \"$PITROOM_NOTIFY_BODY\" ntfy.sh/my-topic"`.
 - `mcpDash`: whether a run that an MCP client starts, and that is still going after a few seconds, also starts the dashboard and returns its address (default `true`; `PITROOM_MCP_DASH=0` or `"mcpDash": false` turns it off), see [the MCP server](#1-install-pick-your-agent).
+- `auditFix` and `auditFocus`: send a disputed answer back to its worker for one correction, and lean the audit sample to list and count questions and to disputed workers (both default `false`; `PITROOM_AUDIT_FIX`, `PITROOM_AUDIT_FOCUS`), see [Audits](#audits).
+- `budgetDaily`: what the workers may cost per day, in USD (as their CLIs report it, or estimated from `workerPrices` and the price catalog; audits and corrections included). Past 80% a run warns; once it is spent only workers that cost nothing still run (a price of `0`, or a worker whose recent runs all cost exactly 0), a run with none in its chain is refused (exit 3), and audits and corrections do not start. A run counts once it ends, so a day can end a little over. `0` allows only free workers. Default: no budget (`PITROOM_BUDGET_DAILY`).
+- `rankWorkers`: order the worker and its fallbacks by their record of the last 30 days: the share of runs that ended well (rate limits left out), times the share of audited answers that were confirmed (with 3 or more). Only workers with 5 runs or more move, among the places such workers hold, in steps of 10%; a worker you name (`-W`, `-m`, a tier) is never reordered, and the run says when the first worker changed (default `false`; `PITROOM_RANK_WORKERS=1`).
 - `countRateLimits`: whether runs that failed on a rate limit or quota count in `pitroom history stats` and the dashboard's Stats (default `false`: they are left out of the run counts, success rates, times and tokens and shown apart as rate-limited, since they say nothing about the worker's work; `true` counts them as not ok).
 
 </details>
