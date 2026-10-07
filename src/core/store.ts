@@ -87,8 +87,12 @@ export interface RunMeta {
   auditDisputed?: string[];
   /** This run's own audit chance, 0 to 1 (--audit is 1, --no-audit 0); the config's `audit` applies when absent. */
   auditRate?: number;
-  /** On an audited run: its audit, kept up to date when the audit ends. */
-  audit?: { id: string; state: State; verdict?: AuditVerdict; disputed?: string[] };
+  /** The audit chance the audit focus gave this run, and why (config `auditFocus`); absent when it changed nothing. */
+  auditFocus?: { rate: number; why: string[] };
+  /** On an audited run: its audit, kept up to date when the audit ends; `fix` is the follow-up that corrects a disputed answer. */
+  audit?: { id: string; state: State; verdict?: AuditVerdict; disputed?: string[]; fix?: string };
+  /** For a follow-up that corrects a disputed answer (config `auditFix`): the run whose answer was disputed. */
+  fixOf?: string;
 }
 
 export const TERMINAL: State[] = ['done', 'failed', 'timeout', 'stopped'];

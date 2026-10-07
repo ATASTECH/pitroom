@@ -17,6 +17,8 @@ import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
 import { cacheKey, cachedNote, findCached } from '../core/cache.js';
+import { type EvalRow, formatEval, loadEval, scoreAnswer, summarize, truthOf } from '../core/eval.js';
+import { repoRoot } from '../vcs/git.js';
 import { prune as pruneSnapshots } from '../core/snapshot.js';
 import { activeCooldowns, clearCooldowns, untilText } from '../core/cooldown.js';
 import { TEMPLATE, pickReviewer, rangeReview, runReview, writePackage } from '../core/review.js';
@@ -238,6 +240,40 @@ export function cmdCrew(p: Parsed): number {
   console.log(`pitroom crew "${group}": ${metas.length} ${metas[0]!.mode} workers started (max ${effective().maxParallel.value} at once)`);
   for (const m of metas) console.log(`   ${m.id}  ${m.task.replace(/\s+/g, ' ').slice(0, 70)}`);
   console.log(`   live:    pitroom watch -g ${group}        (agents: add --json)\n   results: pitroom wait -g ${group}`);
+  return 0;
+}
+
+/**
+ * `pitroom eval QUESTIONS.json [-W worker]…`: every question to every worker (by default the configured one), as read
+ * runs of one group, then scored against the known answers. Each worker answers for itself: no fallback, no audit,
+ * no cached answer.
+ */
+export async function cmdEval(p: Parsed): Promise<number> {
+  const file = p.positional[0];
+  if (!file || p.positional.length > 1) throw new UserError('eval takes one questions file: pitroom eval QUESTIONS.json [-W worker]… (see pitroom --help)');
+  if (has(p, 'write') || has(p, 'isolate') || has(p, 'continue') || has(p, 'plan')) throw new UserError('eval asks read questions: drop -w/-i/--continue/--plan');
+  const questions = loadEval(file);
+  const base = runOptions(p, 'eval');
+  const root = repoRoot(path.resolve(base.dir));
+  // looked up before any worker starts: a truth that cannot be found stops the eval, not a score of 0
+  const truths = new Map(questions.map((q) => [q.id, truthOf(q, root)]));
+  const workers = [...new Set(p.flags.get('worker') ?? [effective().worker.value])];
+  const group = flag(p, 'group') ?? `eval-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+  const started = workers.flatMap((worker) =>
+    questions.map((q) => ({ q, worker, meta: startInBackground(prepareRun({ ...runOptions(p, q.task), worker, auditRate: 0, noFallback: true, group })) })),
+  );
+  if (!has(p, 'json')) console.error(`pitroom eval "${group}": ${questions.length} questions × ${workers.length} worker${workers.length === 1 ? '' : 's'} started (pitroom watch -g ${group})`);
+  // every run has its own timeout; this only guards against a run whose process vanished
+  const rounds = Math.ceil(started.length / effective().maxParallel.value);
+  const { metas } = await waitMany(started.map((s) => s.meta.id), { any: false, timeoutMs: (base.timeoutSec * rounds + 120) * 1000 });
+  const rows: EvalRow[] = started.map((s, i) => {
+    const m = metas[i]!;
+    const answer = readRunFile(m.id, 'summary.md') ?? '';
+    const res = m.state === 'done' ? scoreAnswer(s.q, truths.get(s.q.id)!, answer, root) : { score: 0, got: `(${m.state})` };
+    const seconds = m.endedAt ? Math.round((Date.parse(m.endedAt) - Date.parse(m.startedAt)) / 1000) : undefined;
+    return { question: s.q.id, kind: s.q.kind, worker: s.worker, run: m.id, state: m.state, score: res.score, got: res.got, seconds, tokens: m.usage?.total };
+  });
+  console.log(has(p, 'json') ? JSON.stringify({ group, truths: Object.fromEntries(truths), summary: summarize(rows), rows }, null, 2) : formatEval(rows, group));
   return 0;
 }
 

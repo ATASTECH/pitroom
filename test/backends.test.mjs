@@ -331,3 +331,45 @@ test('gemini: a follow-up resumes by the session id (never an index or "latest",
   assert.ok(!argv({}).includes('--resume'), 'a first run does not resume anything');
   assert.ok(!['latest', '-r'].some((a) => withId.includes(a)), 'no "latest" and no short flag');
 });
+
+test('qwen: safe mode in every mode; read is plan mode; tools that act outside the task are excluded; the prompt comes first', () => {
+  const b = getBackend('qwen');
+  const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];
+  const excluded = (inv) => {
+    const i = inv.args.indexOf('--exclude-tools');
+    const rest = inv.args.slice(i + 1);
+    return rest.slice(0, rest.findIndex((a) => a.startsWith('--')) === -1 ? rest.length : rest.findIndex((a) => a.startsWith('--')));
+  };
+  for (const mode of ['read', 'write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    assert.ok(inv.args.includes('--safe-mode'), `${mode}: no user hooks, skills, MCP or memory extraction`);
+    assert.equal(after(inv, '--output-format'), 'stream-json');
+    assert.ok(inv.args.indexOf('PROMPT-SENTINEL') < inv.args.indexOf('--safe-mode'), 'the prompt before every list option');
+    for (const tool of ['enter_worktree', 'manage_memory', 'agent', 'cron_create', 'web_fetch']) assert.ok(excluded(inv).includes(tool), `${mode}: ${tool} excluded`);
+    assert.ok(fs.existsSync(inv.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH), 'the worker defaults ship with the package');
+    assert.ok(!inv.args.includes('-y') && after(inv, '--approval-mode') !== 'yolo' && after(inv, '--approval-mode') !== 'auto');
+  }
+  const read = b.invocation(request({ mode: 'read' }));
+  assert.equal(after(read, '--approval-mode'), 'plan');
+  assert.ok(!read.args.includes('--allowed-tools'), 'no shell in read mode');
+  const write = b.invocation(request({ mode: 'write' }));
+  assert.equal(after(write, '--approval-mode'), 'default', 'not auto-edit, which approves an edit anywhere on disk');
+  const allowed = write.args.slice(write.args.indexOf('--allowed-tools') + 1);
+  assert.deepEqual(allowed.slice(0, 4), ['Edit(./**)', 'write_file(./**)', 'notebook_edit(./**)', 'run_shell_command'], 'edits only inside the working directory');
+  assert.ok(excluded(write).includes('run_shell_command(git commit)') && excluded(write).includes('run_shell_command(rm -rf)'));
+  assert.ok(!excluded(b.invocation(request({ web: true }))).includes('web_fetch'), '--web lets it fetch');
+  assert.equal(b.invocation(request({ prompt: '-x looks like a flag' })).args.find((a) => a.includes('looks like')), ' -x looks like a flag');
+  const model = b.invocation(request({ model: 'qwen3-coder-plus#high', sessionId: 'SES-1' }));
+  assert.equal(after(model, '--model'), 'qwen3-coder-plus', 'an effort level has no Qwen Code equivalent');
+  assert.equal(after(model, '--resume'), 'SES-1');
+  const defaults = JSON.parse(fs.readFileSync(read.env.QWEN_CODE_SYSTEM_DEFAULTS_PATH, 'utf8'));
+  assert.equal(defaults.model.generationConfig.maxRetries, 0, 'no 10 × 60 s waits on a quota error');
+});
+
+test('qwen: an API error is not work done, so the fallback chain may move on', () => {
+  const b = getBackend('qwen');
+  const run = b.parse(fs.readFileSync(path.join(FIXTURES, 'qwen', 'failures', 'quota-exceeded.stdout.jsonl'), 'utf8'));
+  assert.equal(run.usage.steps, 0);
+  assert.equal(run.finalText, '');
+  assert.equal(b.failure(run, '', 1).kind, 'rate-limited');
+});

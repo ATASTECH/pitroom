@@ -1,4 +1,4 @@
-// Types and fetchers for the dashboard's JSON API (see src/core/dash.ts). Reading is open to the page; stopping or discarding a run needs the secret the page was served with.
+// Types and fetchers for the dashboard's JSON API (see src/core/dash.ts). Reading is open to the page; stopping or discarding a run (or a whole crew) needs the secret the page was served with.
 import type { FileDiffData } from '../../src/core/file-diff';
 export type { FileDiffData, FileDiffLine } from '../../src/core/file-diff';
 export type RunState = 'queued' | 'running' | 'done' | 'failed' | 'timeout' | 'stopped';
@@ -113,6 +113,10 @@ async function post(path: string): Promise<string> {
 export const api = {
   stop: (id: string) => post(`/api/run/${id}/stop`),
   discard: (id: string) => post(`/api/run/${id}/discard`),
+  stopGroup: (group: string) => post(`/api/group/${encodeURIComponent(group)}/stop`),
+  discardGroup: (group: string) => post(`/api/group/${encodeURIComponent(group)}/discard`),
+  /** The commands that would start a crew's failed runs again: the page never starts a run itself. */
+  retryGroup: (group: string) => get<{ commands: string[] }>(`/api/group/${encodeURIComponent(group)}/retry`),
   state: (limit: number, group?: string) => get<DashState>('/api/state', { limit, group }),
   run: (id: string) => get<RunDetail>(`/api/run/${id}`),
   history: (p: { q?: string; state?: string; model?: string; days?: number; before?: string; limit?: number }) =>

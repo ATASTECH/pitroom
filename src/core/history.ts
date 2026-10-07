@@ -343,6 +343,69 @@ function auditStats(db: Db, since: string): { total: Stats['audits']; byWorker: 
   return { total, byWorker };
 }
 
+/** What one worker (and model) did lately: its runs (rate limits left out), how many ended well, and its audited answers. */
+export interface WorkerRecord {
+  runs: number;
+  ok: number;
+  audited: number;
+  agreed: number;
+}
+
+/**
+ * A worker's record since `sinceMs`, for the audit focus and the chain order. A target without a model matches all of
+ * the backend's models; one with a model matches it with or without its provider (`mock/x` for `x`). Undefined
+ * without a history.
+ */
+export function workerRecord(backend: string, model: string | undefined, sinceMs: number): WorkerRecord | undefined {
+  const db = openDb();
+  if (!db) return undefined;
+  const since = new Date(sinceMs).toISOString();
+  const fits = (m: string | null) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
+  const rec: WorkerRecord = { runs: 0, ok: 0, audited: 0, agreed: 0 };
+  try {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} GROUP BY model`).all(backend, since)) {
+      if (!fits(r.model)) continue;
+      rec.runs += r.runs ?? 0;
+      rec.ok += r.ok ?? 0;
+    }
+    const audits = db.prepare(`SELECT r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
+      FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
+      WHERE r.backend = ? AND a.started_at >= ? AND a.state = 'done' AND json_extract(a.meta_json, '$.auditOf') IS NOT NULL
+      GROUP BY r.model, v`).all(backend, since);
+    for (const r of audits) {
+      if (!fits(r.model)) continue;
+      rec.audited += r.n;
+      if (r.v === 'agree') rec.agreed += r.n;
+    }
+  } catch {
+    return undefined;
+  }
+  return rec;
+}
+
+/** What the workers cost since then (USD, reported or estimated), audits and corrections included; undefined without a history. */
+export function spentSince(sinceMs: number): number | undefined {
+  const db = openDb();
+  if (!db) return undefined;
+  try {
+    return db.prepare('SELECT COALESCE(SUM(cost),0) spent FROM runs WHERE started_at >= ?').get(new Date(sinceMs).toISOString()).spent as number;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The last known costs of a worker's runs, newest first (a model matches with or without its provider). */
+export function recentCosts(backend: string, model: string | undefined, n = 5): number[] {
+  const db = openDb();
+  if (!db) return [];
+  try {
+    const rows = db.prepare('SELECT model, cost FROM runs WHERE backend = ? AND cost IS NOT NULL AND steps > 0 ORDER BY started_at DESC LIMIT 200').all(backend);
+    return rows.filter((r) => !model || r.model === model || r.model?.endsWith(`/${model}`) || model.endsWith(`/${r.model}`)).slice(0, n).map((r) => r.cost as number);
+  } catch {
+    return [];
+  }
+}
+
 export interface Stats {
   /**
    * `limited`: runs that failed on a rate limit or quota, which says nothing about the work. Unless the config's

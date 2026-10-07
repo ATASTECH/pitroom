@@ -1,7 +1,8 @@
 // `pitroom dash`: a live page of what Pitroom is doing, for the places where hooks and status
 // lines do not reach (the Claude Code and Codex apps). A small HTTP server on 127.0.0.1 only that
-// reads run records; the one thing it changes is a run the user stops or discards from the page
-// (POST, with the secret the page was served with). It never starts a run or applies a patch.
+// reads run records; the one thing it changes is a run the user stops or discards from the page, one at a time or a
+// whole crew (POST, with the secret the page was served with). It never starts a run or applies a patch: for a crew's
+// failed runs it gives the commands that would start them again, for you to run.
 // Open the address in any browser, including the browser pane of an agent app.
 import { auditBadge } from './audit.js';
 import { spawn } from 'node:child_process';
@@ -15,7 +16,7 @@ import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { fileDiffs, type FileDiffData } from './file-diff.js';
 import { MISSING, page, THEME_SCRIPT } from './dash-page.js';
-import { headline } from './group.js';
+import { groupIds, headline, retryCommands } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
@@ -80,6 +81,25 @@ function findings(m: RunMeta): string {
 }
 
 const canDiscard = (m: RunMeta) => m.mode === 'isolate' && !isActive(m.state) && !m.applied && !m.discarded;
+
+/** Stops every active run of a group, or discards every finished isolate copy of it: what was done, as one line. */
+function groupAction(group: string, verb: 'stop' | 'discard'): { done: number; message: string } {
+  const metas = groupIds(group).map((id) => freshMeta(id));
+  let done = 0;
+  for (const m of metas) {
+    try {
+      if (verb === 'stop' && isActive(m.state) && stopRun(m.id)) done++;
+      if (verb === 'discard' && canDiscard(m)) {
+        discardRun(m);
+        done++;
+      }
+    } catch {
+      // one run that cannot be stopped or discarded does not keep the others
+    }
+  }
+  const what = verb === 'stop' ? 'stopping' : 'discarded the isolated copies of';
+  return { done, message: done ? `${what} ${done} run${done === 1 ? '' : 's'} of ${group}` : `nothing to ${verb} in ${group}` };
+}
 
 function toRun(m: RunMeta): DashRun {
   const l = m.state === 'running' ? live(m) : undefined;
@@ -279,6 +299,18 @@ function handler(touch: () => void, token: string): http.RequestListener {
     const given = Buffer.from(String(req.headers['x-pitroom-token'] ?? ''));
     if (given.length !== tokenBuf.length || !crypto.timingSafeEqual(given, tokenBuf)) return json(res, 403, { error: 'forbidden' });
     if (req.headers.origin !== `http://${req.headers.host}`) return json(res, 403, { error: 'forbidden origin' });
+    const g = /^\/api\/group\/([^/]+)\/(stop|discard)$/.exec(pathname);
+    if (g) {
+      let group: string;
+      try {
+        group = decodeURIComponent(g[1]!);
+      } catch {
+        return json(res, 404, { error: 'no such group' });
+      }
+      if (!group || group.length > 100 || !groupIds(group).length) return json(res, 404, { error: 'no such group' });
+      const r = groupAction(group, g[2] as 'stop' | 'discard');
+      return r.done ? json(res, 200, { ok: true, message: r.message }) : json(res, 409, { error: r.message });
+    }
     const m = /^\/api\/run\/([^/]+)\/(stop|discard)$/.exec(pathname);
     if (!m) return json(res, 404, { error: 'not found' });
     let meta: RunMeta;
@@ -332,6 +364,18 @@ function handler(touch: () => void, token: string): http.RequestListener {
     if (url.pathname === '/api/stats') {
       const days = Number(url.searchParams.get('days') ?? 30);
       return json(res, 200, { ...historyStats(days > 0 ? Date.now() - days * 86_400_000 : undefined), price: primaryPrice().name });
+    }
+    const retry = /^\/api\/group\/([^/]+)\/retry$/.exec(url.pathname);
+    if (retry) {
+      let group = '';
+      try {
+        group = decodeURIComponent(retry[1]!);
+      } catch {
+        // not a group name
+      }
+      const ids = group && group.length <= 100 ? groupIds(group) : [];
+      if (!ids.length) return json(res, 404, { error: 'no such group' });
+      return json(res, 200, { commands: retryCommands(ids.map((id) => freshMeta(id))) });
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {

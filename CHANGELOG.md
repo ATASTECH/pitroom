@@ -6,6 +6,26 @@
 - **Complete lists and counts.** Audits kept finding answers whose references were right but whose lists left items out and whose counts were off (on PI-Desktop, 5 of 8 answers were partly right, mostly for that; one counted "about 40" tests where there are 59). The worker contract asked for none of it and told the worker to be economical. A read worker is now told, when the task asks for all of something, a list or a count, to search the whole scope instead of stopping at the first hits, to give the full list or the exact count in DETAILS and say how it found it, and to say under OPEN ISSUES what it did not cover; "be economical" no longer applies to such a search. The answer format is unchanged.
 - **The auditor gets one reply form.** The audit's question was wrapped in the worker contract, so the auditor was also told to be economical (while asked to count again) and to end with the SUMMARY/DETAILS format (while asked to reply with `AUDIT:` and nothing else). It now gets the same rules without those two.
 
+### Audits
+- **A disputed answer can be corrected** (`"auditFix": true`, `PITROOM_AUDIT_FIX=1`; off by default). When an audit says PARTIAL or DISAGREE with disputed claims, the answer goes back to the worker that gave it, as a follow-up in its own session: check each disputed claim against the files (the auditor can be wrong too), answer again in full, and say which claims were accepted. One round: a correction is never sent back again. `pitroom show` and the card name the correction (`── fix: …`), and the correction says what it corrects.
+- **A focused audit sample** (`"auditFocus": true`, `PITROOM_AUDIT_FOCUS=1`; off by default). The `audit` rate is doubled for a question that asks for all of something, a list or a count, doubled again for a worker whose audited answers were confirmed less than half the time (3 audits or more in 30 days), and halved for one whose last 5 or more were all confirmed. `--audit` / `--no-audit` win; the run records the chance it got and why (`auditFocus`).
+
+### Evals
+- **`pitroom eval QUESTIONS.json [-W worker]… [--json]`**: your own questions about your own code, with known answers, put to each worker as read runs of one group (no fallback, no audit, no cached answer) and scored the way `benchmarks/multi-repo` scores: a definition 1 for the exact `path:line` (0.5 for the right file), a count only for the exact number, a list the F1 of its paths. A truth is written down or looked up with `git grep` when the eval starts, so it stays right as the code changes. Prints one line per answer and a table per worker (score, per kind, failures, median time and tokens).
+
+### Costs
+- **A daily budget** (`"budgetDaily": 5`, `PITROOM_BUDGET_DAILY`; none by default): what the workers may cost per day, as reported or estimated, audits and corrections included. Past 80% a run warns; once it is spent only workers that cost nothing still run (a price of 0, or a worker whose recent runs all cost exactly 0), a run with none of them in its chain is refused (exit 3), and audits and corrections do not start. A run counts once it has ended.
+
+### Workers
+- **Qwen Code worker (beta)**: `-W qwen[:model]`, with the user's sign-in and model from `~/.qwen/settings.json` (any OpenAI-compatible provider, DashScope, a local model). Read runs use plan mode; write and isolate runs approve edits only inside the working directory (`auto-edit` would approve them anywhere: in a test an isolated run edited the real checkout), with the shell minus history-changing git. `--safe-mode` keeps the user's QWEN.md, hooks, skills and MCP servers out and stops the CLI's background memory extraction, which otherwise writes what a run saw into `~/.qwen/memories`; worktree, cron, memory, subagent and messaging tools are excluded (plan mode alone let `enter_worktree` make a branch). `--continue` works by session id. A used-up quota surfaces in about 80 s instead of after 10 × 60 s of retries. Checked against Qwen Code 0.25.0 with a scripted model endpoint (the fixtures are the real CLI's output); not yet with a real provider. See docs/backends.md.
+- **Workers ranked by their record** (`"rankWorkers": true`, `PITROOM_RANK_WORKERS=1`; off by default): the worker and its fallbacks are ordered by the share of their runs that ended well in the last 30 days (rate limits left out) times the share of their audited answers that were confirmed. Only workers with 5 runs or more move, among the places such workers hold, in steps of 10%; a worker you name (`-W`, `-m`, a tier) is never reordered, and the run says when the first worker changed.
+
+### Dashboard
+- **Crew actions.** A crew's card has **Stop all** (its running and queued runs) and **Discard all** (its finished, unapplied isolated copies), each asking once more, and **Retry command**, which shows the `pitroom run … -g CREW --bg` commands that start its failed, timed-out or stopped runs again, to copy. The page still never starts a run itself.
+
+### Tests
+- The audited-run UI test is skipped without Chrome, like the other UI tests (it failed on machines without one).
+
 ## 0.22.0
 
 ### Workers

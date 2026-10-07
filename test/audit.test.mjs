@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { parseAudit } from '../dist/lib.mjs';
+import { focusedRate, parseAudit } from '../dist/lib.mjs';
 import { sandbox } from './helpers.mjs';
 
 const RUN_ID = /\d{8}-\d{6}-[0-9a-f]{4}/;
@@ -163,4 +163,70 @@ test('audit: paths of the project in the answer reach the auditor as paths it ca
   assert.ok(prompt.includes('app.txt holds line1 (app.txt:1)'), `the cited path is relative to the auditor's directory: ${prompt.slice(prompt.indexOf('ANSWER TO AUDIT:'))}`);
   assert.ok(prompt.includes(`${s.repo}-other/x.ts:1`), 'a path that only starts like the project directory is left alone');
   assert.ok(!prompt.replace(`${s.repo}-other`, '').includes(s.repo), 'the project directory itself is not in the answer the auditor reads');
+});
+
+test('audit: with auditFix, a disputed answer goes back to its worker as a follow-up, once; off by default', async () => {
+  const s = sandbox();
+  two(s);
+  const off = s.run(['run', 'what is in app.txt?'], { PITROOM_AUDIT: '1', MOCK_ACTIONS: `answer:${DISAGREE}` });
+  const offId = RUN_ID.exec(off.stdout)[0];
+  assert.equal((await audited(s, offId)).fix, undefined, 'the default is no fix');
+
+  const r = s.run(['run', 'what is in app.txt?'], { PITROOM_AUDIT: '1', PITROOM_AUDIT_FIX: '1', MOCK_ACTIONS: `answer:${DISAGREE}` });
+  const id = RUN_ID.exec(r.stdout)[0];
+  const a = await audited(s, id);
+  assert.equal(a.verdict, 'disagree');
+  assert.ok(a.fix, 'the audited run names its fix');
+  const fix = meta(s, a.fix);
+  assert.equal(fix.parent, id, 'a follow-up of the disputed run');
+  assert.equal(fix.fixOf, id);
+  assert.equal(fix.worker.model, 'mock/good-model', 'on the worker that answered, not the auditor');
+  assert.match(fix.task, /disputed these claims:\n- app\.txt has two lines — it has one \(app\.txt:1\)/);
+  assert.match(fix.task, /give your whole answer again/);
+  // the fix's own audit (PITROOM_AUDIT=1) disputes it too, and no second fix starts: one round
+  const fixAudit = await audited(s, a.fix);
+  assert.equal(fixAudit.verdict, 'disagree');
+  assert.equal(fixAudit.fix, undefined, 'a correction is never sent back again');
+  const show = s.run(['show', id]);
+  assert.match(show.stdout, /── fix: the worker is correcting its answer as a follow-up \(pitroom show \d{8}-\d{6}-[0-9a-f]{4}\)/);
+  assert.match(s.run(['show', a.fix]).stdout, new RegExp(`── correction: the answer of ${id}`));
+});
+
+test('audit: an agreeing audit sends nothing back', async () => {
+  const s = sandbox();
+  two(s);
+  const r = s.run(['run', 'what is in app.txt?'], { PITROOM_AUDIT: '1', PITROOM_AUDIT_FIX: '1', MOCK_ACTIONS: 'answer:SUMMARY: ok\nAUDIT: AGREE\nCHECKED: 1\nDISPUTED:\n- (none)' });
+  const a = await audited(s, RUN_ID.exec(r.stdout)[0]);
+  assert.equal(a.verdict, 'agree');
+  assert.equal(a.fix, undefined);
+});
+
+test('audit focus: list and count questions and disputed workers are audited more, confirmed ones less', () => {
+  assert.deepEqual(focusedRate(0.1, 'where is login handled?'), { rate: 0.1, why: [] });
+  const list = focusedRate(0.1, 'list every caller of login');
+  assert.equal(list.rate, 0.2);
+  assert.deepEqual(list.why, ['asks for a list or a count']);
+  assert.equal(focusedRate(0.1, 'How many tests are there?').rate, 0.2);
+  const bad = focusedRate(0.1, 'list the routes', { audited: 4, agreed: 1 });
+  assert.equal(bad.rate, 0.4, 'both reasons: four times the rate');
+  assert.match(bad.why[1], /confirmed 1 of 4 times/);
+  assert.equal(focusedRate(0.1, 'where is x?', { audited: 2, agreed: 0 }).rate, 0.1, 'two audits say too little');
+  assert.equal(focusedRate(0.1, 'where is x?', { audited: 6, agreed: 6 }).rate, 0.05, 'a confirmed worker is audited less');
+  assert.equal(focusedRate(0.4, 'list all', { audited: 3, agreed: 0 }).rate, 1, 'never above 1');
+  assert.equal(focusedRate(0, 'list all').rate, 0, 'off stays off');
+  assert.equal(focusedRate(1, 'where?', { audited: 9, agreed: 9 }).rate, 1, 'always stays always');
+});
+
+test('audit focus: on, a list question gets the raised chance recorded on its run; --no-audit still wins', () => {
+  const s = sandbox();
+  two(s);
+  const r = s.run(['run', 'list every file'], { PITROOM_AUDIT: '0.3', PITROOM_AUDIT_FOCUS: '1', MOCK_ACTIONS: `answer:${ANSWER}` });
+  const m = meta(s, RUN_ID.exec(r.stdout)[0]);
+  assert.deepEqual(m.auditFocus, { rate: 0.6, why: ['asks for a list or a count'] });
+  const off = s.run(['run', 'list every folder', '--no-audit'], { PITROOM_AUDIT: '0.3', PITROOM_AUDIT_FOCUS: '1', MOCK_ACTIONS: `answer:${ANSWER}` });
+  const o = meta(s, RUN_ID.exec(off.stdout)[0]);
+  assert.equal(o.auditFocus, undefined);
+  assert.equal(o.audit, undefined);
+  const plain = s.run(['run', 'list each test'], { PITROOM_AUDIT: '0.3', MOCK_ACTIONS: `answer:${ANSWER}` });
+  assert.equal(meta(s, RUN_ID.exec(plain.stdout)[0]).auditFocus, undefined, 'off by default');
 });

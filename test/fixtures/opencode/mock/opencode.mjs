@@ -10,6 +10,8 @@
 // MOCK_FAIL_MODELS=a,b     fail with "Model not found" when --model is one of these
 //                          ("default" = no --model given)
 // MOCK_RATE_LIMIT_MODELS=a,b  fail with a daily-quota error ("retry in 2h") when --model is one of these
+// MOCK_COST=0.5           the cost each step reports (default 0, a free model)
+// MOCK_EXPORT_MODEL=p/m    the model `session export` says ran (default mock/good-model)
 // Every invocation is appended to $MOCK_LOG as JSON (argv, cwd, config, stdin type).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
@@ -50,7 +52,8 @@ if (cmd === 'debug') {
   process.exit(0);
 }
 if (cmd === 'session' && argv[1] === 'export') {
-  console.log(JSON.stringify({ info: {}, messages: [{ type: 'assistant', agent: 'pitroom-read', model: { providerID: 'mock', id: 'good-model' } }] }));
+  const [providerID, ...id] = (process.env.MOCK_EXPORT_MODEL ?? 'mock/good-model').split('/');
+  console.log(JSON.stringify({ info: {}, messages: [{ type: 'assistant', agent: 'pitroom-read', model: { providerID, id: id.join('/') } }] }));
   process.exit(0);
 }
 if (cmd !== 'run') process.exit(2);
@@ -74,7 +77,7 @@ const step = (fn) => {
     messageID: `msg_${msg}`,
     // v2 reports no tokens.total
     tokens: { input: 10000, output: 400, reasoning: 100, cache: { read: 0, write: 0 } },
-    cost: 0,
+    cost: Number(process.env.MOCK_COST ?? 0),
   });
 };
 

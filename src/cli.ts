@@ -26,6 +26,9 @@ Usage
                                         fix round) or of a commit range; by default on another worker
   pitroom audit RUN [-W worker]         another worker re-checks a read run's answer (AGREE / PARTIAL / DISAGREE);
                                         "audit" in the config (0 to 1) does it for a share of read runs
+  pitroom eval QUESTIONS.json [-W worker]… [--json]
+                                        your questions with known answers, put to each worker and scored
+                                        (definition: path:line, count: the number, set: F1 of the paths)
   pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
   pitroom plan note PLAN "Task N: …"    record a completion, deferred finding or ruling (outside the repo)
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
@@ -109,9 +112,11 @@ Workers: ${backendIds().join(', ')} (targets: "opencode", "opencode:provider/mod
 Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, PITROOM_MAX_PARALLEL,
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
-     PITROOM_PRICE_FEED_HOURS, PITROOM_<WORKER>_BIN
+     PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
+     PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
-        countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours)`;
+        countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
+        auditFix, auditFocus, budgetDaily, rankWorkers)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 
@@ -120,6 +125,7 @@ const COMMANDS: Record<string, Command> = {
   crew: cmd.cmdCrew,
   review: cmd.cmdReview,
   audit: cmd.cmdAudit,
+  eval: cmd.cmdEval,
   cooldown: cmd.cmdCooldown,
   prices: cmd.cmdPrices,
   mcp: (p) => {
