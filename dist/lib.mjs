@@ -210,7 +210,9 @@ var DENY_BASH = [
   "claude",
   "codex",
   "gemini",
-  "qwen"
+  "qwen",
+  "kilo",
+  "kilocode"
 ].map((c) => `Bash(${c}:*)`);
 var SECRETS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*"].map((p) => `Read(${p})`);
 function toolsFor(mode, web2) {
@@ -925,6 +927,10 @@ var gemini = {
   doctor: doctor3
 };
 
+// src/backends/kilo/index.ts
+import { spawnSync as spawnSync5 } from "node:child_process";
+import path7 from "node:path";
+
 // src/backends/opencode/index.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
 
@@ -1134,17 +1140,19 @@ var FORBIDDEN_BASH = [
   "twine upload*",
   // no recursive delegation
   "opencode*",
+  "kilo *",
+  "kilocode*",
   "pitroom *",
   "*pitroom*"
 ];
-function scratchDirs() {
+function scratchDirs(app) {
   const data = process.env.XDG_DATA_HOME ?? path6.join(os6.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path6.join(data, "opencode", "tool-output", "*")]: "allow",
-    [path6.join(data, "opencode", "shell", "*", "*")]: "allow"
+    [path6.join(data, app, "tool-output", "*")]: "allow",
+    [path6.join(data, app, "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os6.tmpdir(), realpath(os6.tmpdir())])) rules[path6.join(tmp, "opencode", "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os6.tmpdir(), realpath(os6.tmpdir())])) rules[path6.join(tmp, app, "*")] = "allow";
   return rules;
 }
 function realpath(p) {
@@ -1165,7 +1173,7 @@ var COMMON = {
   doom_loop: "deny"
 };
 var web = (on) => ({ webfetch: on ? "allow" : "deny", websearch: on ? "allow" : "deny" });
-function readProfile(allowWeb = false) {
+function readProfile(allowWeb = false, app = "opencode") {
   return {
     "*": "deny",
     read: READ_FILES,
@@ -1181,11 +1189,11 @@ function readProfile(allowWeb = false) {
     bash: READ_ONLY_BASH,
     shell: READ_ONLY_BASH,
     edit: "deny",
-    external_directory: scratchDirs(),
+    external_directory: scratchDirs(app),
     ...COMMON
   };
 }
-function writeProfile(allowWeb = false) {
+function writeProfile(allowWeb = false, app = "opencode") {
   const bash = { "*": "allow" };
   for (const pattern of FORBIDDEN_BASH) bash[pattern] = "deny";
   return {
@@ -1194,25 +1202,26 @@ function writeProfile(allowWeb = false) {
     ...web(allowWeb),
     bash,
     shell: bash,
-    external_directory: scratchDirs(),
+    external_directory: scratchDirs(app),
     ...COMMON
   };
 }
 function agentFor(mode) {
   return mode === "read" ? AGENT.read : AGENT.write;
 }
-function configContent(existing, allowWeb = false) {
+function configContent(existing, allowWeb = false, app = "opencode", extra = {}) {
   const ours = {
+    ...extra,
     agent: {
       [AGENT.read]: {
         mode: "primary",
         description: "pitroom: read-only worker (research, search, review)",
-        permission: readProfile(allowWeb)
+        permission: readProfile(allowWeb, app)
       },
       [AGENT.write]: {
         mode: "primary",
         description: "pitroom: editing worker (no git history changes, no bulk deletes)",
-        permission: writeProfile(allowWeb)
+        permission: writeProfile(allowWeb, app)
       }
     }
   };
@@ -1389,11 +1398,99 @@ var opencode = {
   doctor: doctor4
 };
 
+// src/backends/kilo/index.ts
+var binary5 = () => findBinary("kilo", "PITROOM_KILO_BIN", ["~/.kilo/bin/kilo"]);
+function kilo(args, timeout = 6e4) {
+  const { command, prefix } = resolveCommand(binary5());
+  const r = spawnSync5(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
+}
+function invocation5(req) {
+  const args = [
+    "run",
+    "--agent",
+    agentFor(req.mode),
+    "--format",
+    "json",
+    "--title",
+    req.title,
+    // Some failure causes only appear in the server logs (Kilo takes the level in capitals only).
+    "--print-logs",
+    "--log-level",
+    "ERROR"
+  ];
+  if (req.model) args.push("--model", req.model);
+  if (req.sessionId) args.push("--session", req.sessionId);
+  for (const f of req.files) args.push("--file", f);
+  args.push(req.prompt);
+  const { command, prefix } = resolveCommand(binary5());
+  return {
+    command,
+    args: [...prefix, ...args],
+    env: {
+      // A worker run must not upgrade Kilo underneath the user.
+      KILO_CONFIG_CONTENT: configContent(process.env.KILO_CONFIG_CONTENT, req.web, "kilo", { autoupdate: false }),
+      // No daemon to attach to: a private server per run (see above).
+      XDG_STATE_HOME: path7.join(home(), "kilo-state")
+    }
+  };
+}
+function failure5(run, stderr, exitCode) {
+  if (exitCode === 0 && !run.error) return void 0;
+  const detail = stderr.match(/error="([^"]+)"/g)?.pop()?.slice(7, -1);
+  const raw = run.error ?? `kilo exited with code ${exitCode}`;
+  const message = detail && !raw.includes(detail) ? `${raw}: ${detail}` : raw;
+  return { kind: classify4(message), message };
+}
+function listModels2() {
+  return kilo(["models"]).out.split("\n").map((s) => s.trim()).filter((s) => /^[\w.-]+\/\S+$/.test(s));
+}
+function defaultModel4() {
+  try {
+    const out = kilo(["debug", "config"], 3e4).out;
+    const model = JSON.parse(out.slice(out.indexOf("{"))).model;
+    return typeof model === "string" ? model : void 0;
+  } catch {
+    return void 0;
+  }
+}
+function catalog5() {
+  return { models: listModels2().map((id) => ({ id })), source: "`kilo models` (reasoning variants are provider-specific: provider/model#variant)" };
+}
+function doctor5({ models, hasFallback }) {
+  const version = kilo(["--version"]);
+  if (version.missing || !version.ok) {
+    return [{ level: "fail", message: `kilo not runnable (${binary5()}). Install Kilo Code's CLI (npm i -g @kilocode/cli), or set PITROOM_KILO_BIN` }];
+  }
+  const checks = [{ level: "ok", message: `Kilo Code ${version.out.trim().split("\n").pop()} at ${binary5()} (beta worker: checked against 7.8)` }];
+  const def = defaultModel4();
+  for (const m of models) {
+    const model = m ?? def;
+    checks.push(model ? { level: "ok", message: `Kilo Code ${m ? "model" : "default model"}: ${model}` } : { level: "warn", message: 'Kilo Code has no default model: pass -W kilo:<provider/model> or set "model" in its config' });
+  }
+  if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Kilo Code runs" });
+  checks.push({ level: "ok", message: `permission profiles ${AGENT.read}/${AGENT.write} injected per run through KILO_CONFIG_CONTENT` });
+  return checks;
+}
+var kiloBackend = {
+  id: "kilo",
+  name: "Kilo Code",
+  capabilities: { readOnly: "permission-rules", resume: "by-id", reportsCost: true, attachFiles: true },
+  binary: binary5,
+  invocation: invocation5,
+  parse: parseEvents4,
+  failure: failure5,
+  defaultModel: defaultModel4,
+  listModels: listModels2,
+  catalog: catalog5,
+  doctor: doctor5
+};
+
 // src/backends/qwen/index.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
+import { spawnSync as spawnSync6 } from "node:child_process";
 import fs8 from "node:fs";
 import os7 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/backends/qwen/events.ts
@@ -1490,8 +1587,8 @@ var oneLine5 = (s, max = 80) => {
 };
 
 // src/backends/qwen/index.ts
-var binary5 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
-var policyDir2 = () => path7.resolve(path7.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
+var binary6 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
+var policyDir2 = () => path8.resolve(path8.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
 var EXCLUDED = [
   "agent",
   "send_message",
@@ -1553,9 +1650,11 @@ var DENY_SHELL = [
   "claude",
   "codex",
   "gemini",
-  "qwen"
+  "qwen",
+  "kilo",
+  "kilocode"
 ].map((c) => `run_shell_command(${c})`);
-function invocation5(req) {
+function invocation6(req) {
   const read = req.mode === "read";
   const exclude = [...EXCLUDED, ...req.web ? [] : WEB, ...read ? [] : DENY_SHELL];
   const args = [
@@ -1574,12 +1673,12 @@ function invocation5(req) {
   const model = (req.model ?? "").split("#")[0];
   if (model) args.push("--model", model);
   if (req.sessionId) args.push("--resume", req.sessionId);
-  const { command, prefix } = resolveCommand(binary5());
+  const { command, prefix } = resolveCommand(binary6());
   return {
     command,
     args: [...prefix, ...args],
     env: {
-      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path7.join(policyDir2(), "worker-defaults.json"),
+      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path8.join(policyDir2(), "worker-defaults.json"),
       QWEN_CODE_DISABLE_CRON: "1",
       QWEN_DISABLE_AUTO_TITLE: "1"
     }
@@ -1591,7 +1690,7 @@ function classify5(message) {
   if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return "model-unavailable";
   return "other";
 }
-function failure5(run, stderr, exitCode) {
+function failure6(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.trim().split("\n").filter((l) => l.trim() && !/SAFE MODE/.test(l)).pop();
   const message = run.error ?? detail ?? `qwen exited with code ${exitCode}`;
@@ -1599,27 +1698,27 @@ function failure5(run, stderr, exitCode) {
 }
 function userSettings() {
   try {
-    return JSON.parse(fs8.readFileSync(path7.join(process.env.QWEN_HOME ?? path7.join(os7.homedir(), ".qwen"), "settings.json"), "utf8"));
+    return JSON.parse(fs8.readFileSync(path8.join(process.env.QWEN_HOME ?? path8.join(os7.homedir(), ".qwen"), "settings.json"), "utf8"));
   } catch {
     return {};
   }
 }
-function defaultModel4() {
+function defaultModel5() {
   const name = userSettings().model?.name;
   return typeof name === "string" && name ? name : void 0;
 }
-function doctor5({ models, hasFallback }) {
-  const { command, prefix } = resolveCommand(binary5());
-  const r = spawnSync5(command, [...prefix, "--version"], { encoding: "utf8", timeout: 6e4, stdio: ["ignore", "pipe", "pipe"] });
-  if (r.error || r.status !== 0) return [{ level: "fail", message: `qwen not runnable (${binary5()}). Install Qwen Code (npm i -g @qwen-code/qwen-code), or set PITROOM_QWEN_BIN` }];
-  const checks = [{ level: "ok", message: `Qwen Code ${r.stdout.trim()} at ${binary5()} (beta worker: checked against Qwen Code 0.25)` }];
+function doctor6({ models, hasFallback }) {
+  const { command, prefix } = resolveCommand(binary6());
+  const r = spawnSync6(command, [...prefix, "--version"], { encoding: "utf8", timeout: 6e4, stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error || r.status !== 0) return [{ level: "fail", message: `qwen not runnable (${binary6()}). Install Qwen Code (npm i -g @qwen-code/qwen-code), or set PITROOM_QWEN_BIN` }];
+  const checks = [{ level: "ok", message: `Qwen Code ${r.stdout.trim()} at ${binary6()} (beta worker: checked against Qwen Code 0.25)` }];
   const auth = userSettings().security?.auth?.selectedType;
   const key = process.env.OPENAI_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY;
   checks.push(
     auth || key ? { level: "ok", message: `Qwen Code: sign-in ${auth ?? "from an API key in the environment"}` } : { level: "warn", message: "Qwen Code has no sign-in method set: run `qwen` once to choose one, or set OPENAI_API_KEY (and OPENAI_BASE_URL) for an OpenAI-compatible provider" }
   );
   for (const m of models) {
-    const model = m ?? defaultModel4();
+    const model = m ?? defaultModel5();
     checks.push({ level: model ? "ok" : "warn", message: model ? `Qwen Code model: ${model}` : "Qwen Code model: none pinned (pass -W qwen:<model> or set model.name in ~/.qwen/settings.json)" });
   }
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Qwen Code runs" });
@@ -1629,18 +1728,18 @@ var qwen = {
   id: "qwen",
   name: "Qwen Code",
   capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
-  binary: binary5,
-  invocation: invocation5,
+  binary: binary6,
+  invocation: invocation6,
   parse: parseEvents5,
-  failure: failure5,
-  defaultModel: defaultModel4,
-  doctor: doctor5
+  failure: failure6,
+  defaultModel: defaultModel5,
+  doctor: doctor6
 };
 
 // src/backends/index.ts
-var REGISTRY = new Map([opencode, codex, claude, gemini, qwen].map((b) => [b.id, b]));
+var REGISTRY = new Map([opencode, codex, claude, gemini, qwen, kiloBackend].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
-var PLANNED = [];
+var PLANNED = ["hermes"];
 var backendIds = () => [...REGISTRY.keys()];
 var allBackends = () => [...REGISTRY.values()];
 var isBackendId = (id) => REGISTRY.has(id) || PLANNED.includes(id);
@@ -1671,7 +1770,7 @@ var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default m
 
 // src/core/refs.ts
 import fs9 from "node:fs";
-import path8 from "node:path";
+import path9 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -1722,7 +1821,7 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path8.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path9.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
@@ -1739,9 +1838,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path8.isAbsolute(ref.file)) return [];
+    if (path9.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path8.basename(wanted)) ?? []).filter((f) => f.split(path8.sep).join("/").endsWith(`/${wanted}`) || path8.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path9.basename(wanted)) ?? []).filter((f) => f.split(path9.sep).join("/").endsWith(`/${wanted}`) || path9.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -1756,7 +1855,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path8.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path9.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -1777,7 +1876,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path8.basename(name);
+  const base = path9.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -1793,12 +1892,12 @@ function indexFiles(roots) {
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path8.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path9.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path8.join(dir, e.name));
-        else index.set(e.name, [path8.join(dir, e.name)]);
+        if (list2) list2.push(path9.join(dir, e.name));
+        else index.set(e.name, [path9.join(dir, e.name)]);
       }
     }
   };
@@ -1806,7 +1905,7 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path8.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path8.join(r, ref));
+  const candidates = path9.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path9.join(r, ref));
   return candidates.find((c) => {
     try {
       return fs9.statSync(c).isFile() && inside(c, roots);
@@ -1817,21 +1916,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path8.relative(r, path8.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path8.isAbsolute(rel);
+    const rel = path9.relative(r, path9.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path9.isAbsolute(rel);
   });
 }
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
 import fs10 from "node:fs";
-import path10 from "node:path";
+import path11 from "node:path";
 
 // src/core/install.ts
-import path9 from "node:path";
+import path10 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function packageRoot() {
-  return path9.resolve(path9.dirname(fileURLToPath3(import.meta.url)), "..");
+  return path10.resolve(path10.dirname(fileURLToPath3(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -1842,7 +1941,7 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path10.join(root, "skills", FILES[name]);
+  const file = path11.join(root, "skills", FILES[name]);
   if (!fs10.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
   return fs10.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
@@ -1903,7 +2002,7 @@ function parseAudit(text) {
 // src/core/config.ts
 import fs11 from "node:fs";
 import os8 from "node:os";
-import path11 from "node:path";
+import path12 from "node:path";
 var SCHEMA = {
   worker: "string",
   fallback: "string[]",
@@ -1934,9 +2033,9 @@ var SCHEMA = {
   rankWorkers: "boolean"
 };
 function configPath() {
-  if (process.env.PITROOM_CONFIG) return path11.resolve(process.env.PITROOM_CONFIG);
-  const base = process.platform === "win32" ? process.env.APPDATA ?? path11.join(os8.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path11.join(os8.homedir(), ".config");
-  return path11.join(base, "pitroom", "config.json");
+  if (process.env.PITROOM_CONFIG) return path12.resolve(process.env.PITROOM_CONFIG);
+  const base = process.platform === "win32" ? process.env.APPDATA ?? path12.join(os8.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path12.join(os8.homedir(), ".config");
+  return path12.join(base, "pitroom", "config.json");
 }
 var cached;
 function loadConfig() {
@@ -2104,9 +2203,9 @@ import fs13 from "node:fs";
 
 // src/core/prices.ts
 import fs12 from "node:fs";
-import path12 from "node:path";
+import path13 from "node:path";
 var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
-var catalogFile = () => path12.join(home(), "prices.json");
+var catalogFile = () => path13.join(home(), "prices.json");
 function trim(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
@@ -2127,23 +2226,23 @@ function readCatalog() {
     const { mtimeMs } = fs12.statSync(file);
     if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
     const parsed = JSON.parse(fs12.readFileSync(file, "utf8"));
-    const catalog5 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
-    cached2 = { file, mtimeMs, catalog: catalog5 };
-    return catalog5;
+    const catalog6 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
+    cached2 = { file, mtimeMs, catalog: catalog6 };
+    return catalog6;
   } catch {
     return void 0;
   }
 }
 var OWN = { codex: ["openai"], claude: ["anthropic"], gemini: ["google"] };
 function catalogPrice(backend, ...models) {
-  const catalog5 = readCatalog();
-  if (!catalog5) return void 0;
+  const catalog6 = readCatalog();
+  if (!catalog6) return void 0;
   for (const raw of models) {
     const id = raw?.split("#")[0];
     if (!id) continue;
     const keys = [id, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id}`)];
-    const any = keys.find((k) => catalog5.models[k]) ?? Object.keys(catalog5.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
-    const triple = any ? catalog5.models[any] : void 0;
+    const any = keys.find((k) => catalog6.models[k]) ?? Object.keys(catalog6.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
+    const triple = any ? catalog6.models[any] : void 0;
     if (any && triple && triple.length === 3 && triple.every((n) => Number.isFinite(n) && n >= 0)) {
       const [input, output, cachedInput] = triple;
       return { input, output, cachedInput, key: any };
@@ -2264,7 +2363,7 @@ var WEEK_MS = 7 * 24 * 3600 * 1e3;
 
 // src/core/plan.ts
 import fs14 from "node:fs";
-import path13 from "node:path";
+import path14 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -2311,7 +2410,7 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path13.resolve(file);
+  const abs = path14.resolve(file);
   if (!fs14.existsSync(abs) || !fs14.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
   const plan = parsePlan(fs14.readFileSync(abs, "utf8"), fs14.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
@@ -2332,7 +2431,7 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path13.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path14.basename(file).replace(/\.md$/i, "");
 
 // src/core/style.ts
 var enabled = () => {
@@ -2361,7 +2460,7 @@ function retryCommands(metas) {
 }
 
 // src/core/eval.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
+import { spawnSync as spawnSync7 } from "node:child_process";
 import fs15 from "node:fs";
 var KINDS = ["definition", "count", "set"];
 function loadEval(file) {
@@ -2394,7 +2493,7 @@ function loadEval(file) {
 }
 var clean = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
 function gitGrep(root, flags, t) {
-  const r = spawnSync6("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
+  const r = spawnSync7("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024
   });
@@ -2479,7 +2578,7 @@ function summarize(rows) {
 
 // src/vcs/guard.ts
 import fs16 from "node:fs";
-import path14 from "node:path";
+import path15 from "node:path";
 var VERSION = 2;
 var WINDOWS = process.platform === "win32";
 var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
@@ -2556,13 +2655,13 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path14.join(home(), "shim", `v${VERSION}`);
+  return path15.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const dir of (process.env.PATH ?? "").split(path14.delimiter).filter(Boolean)) {
-    if (same(path14.resolve(dir), skip)) continue;
-    const p = path14.join(dir, WINDOWS ? "git.exe" : "git");
+  for (const dir of (process.env.PATH ?? "").split(path15.delimiter).filter(Boolean)) {
+    if (same(path15.resolve(dir), skip)) continue;
+    const p = path15.join(dir, WINDOWS ? "git.exe" : "git");
     try {
       fs16.accessSync(p, fs16.constants.X_OK);
       if (fs16.statSync(p).isFile()) return p;
@@ -2572,13 +2671,13 @@ function findRealGit(skip) {
   return void 0;
 }
 function findGitSh(realGit) {
-  let dir = path14.dirname(realGit);
+  let dir = path15.dirname(realGit);
   for (let i = 0; i < 4; i++) {
     for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
-      const p = path14.join(dir, rel);
+      const p = path15.join(dir, rel);
       if (fs16.existsSync(p)) return p;
     }
-    const up = path14.dirname(dir);
+    const up = path15.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
@@ -2596,10 +2695,10 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path14.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path15.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
   if (fs16.existsSync(file) && fs16.readFileSync(file, "utf8") === content) return;
-  fs16.mkdirSync(path14.dirname(file), { recursive: true });
+  fs16.mkdirSync(path15.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
   fs16.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
@@ -2633,7 +2732,7 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  writeIfChanged(path14.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path15.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -2645,11 +2744,11 @@ function guardEnv(env) {
   if (WINDOWS) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
-    writeIfChanged(path14.join(dir, "git.cmd"), cmdShim(sh));
+    writeIfChanged(path15.join(dir, "git.cmd"), cmdShim(sh));
   }
-  writeIfChanged(path14.join(dir, "git"), SHIM);
+  writeIfChanged(path15.join(dir, "git"), SHIM);
   const key = pathKey(env);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path14.delimiter}${env[key] ?? ""}` };
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path15.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
@@ -2659,9 +2758,9 @@ function shimReady() {
 // src/core/slots.ts
 import crypto2 from "node:crypto";
 import fs17 from "node:fs";
-import path15 from "node:path";
-var slotsDir = () => path15.join(home(), "slots");
-var locksDir = () => path15.join(home(), "locks");
+import path16 from "node:path";
+var slotsDir = () => path16.join(home(), "slots");
+var locksDir = () => path16.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -2675,7 +2774,7 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs17.mkdirSync(path15.dirname(file), { recursive: true });
+  fs17.mkdirSync(path16.dirname(file), { recursive: true });
   try {
     fs17.writeFileSync(file, runId, { flag: "wx" });
     return true;
@@ -2706,7 +2805,7 @@ function releaseIfOwner(file, runId) {
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path15.join(slotsDir(), `slot-${n}`);
+    const file = path16.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
@@ -2716,13 +2815,13 @@ function slotHolders() {
   if (!fs17.existsSync(slotsDir())) return [];
   return fs17.readdirSync(slotsDir()).map((f) => {
     try {
-      return fs17.readFileSync(path15.join(slotsDir(), f), "utf8").trim();
+      return fs17.readFileSync(path16.join(slotsDir(), f), "utf8").trim();
     } catch {
       return "";
     }
   }).filter((id) => holderActive(id, ""));
 }
-var lockFile = (repoRoot) => path15.join(locksDir(), `write-${crypto2.createHash("sha1").update(path15.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path16.join(locksDir(), `write-${crypto2.createHash("sha1").update(path16.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
@@ -2738,7 +2837,7 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 // src/core/secrets.ts
 import { execFileSync } from "node:child_process";
 import fs18 from "node:fs";
-import path16 from "node:path";
+import path17 from "node:path";
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_VISITED = 2e4;
 var MAX_DEPTH = 4;
@@ -2763,9 +2862,9 @@ function findSecretFiles(dir) {
     for (const e of entries) {
       visited++;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path16.join(d, e.name), depth + 1);
+        if (!SKIP_DIRS2.has(e.name)) walk(path17.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(slash(path16.relative(dir, path16.join(d, e.name))));
+        found.push(slash(path17.relative(dir, path17.join(d, e.name))));
       }
     }
   };
@@ -2775,7 +2874,7 @@ function findSecretFiles(dir) {
 function findSecretFilesInTree(root, dir) {
   try {
     const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path16.basename(f)) && !path16.relative(dir, path16.join(root, f)).startsWith("..")).map((f) => slash(path16.relative(dir, path16.join(root, f)))).sort();
+    return out.split("\0").filter((f) => f && looksSecret(path17.basename(f)) && !path17.relative(dir, path17.join(root, f)).startsWith("..")).map((f) => slash(path17.relative(dir, path17.join(root, f)))).sort();
   } catch {
     return [];
   }
@@ -2787,7 +2886,7 @@ function secretWarning(files, mode) {
   const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
-var slash = (p) => p.split(path16.sep).join("/");
+var slash = (p) => p.split(path17.sep).join("/");
 
 // src/core/process.ts
 import { spawn } from "node:child_process";

@@ -60,6 +60,7 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | **Claude Code** (`-p --output-format stream-json --verbose`) | `--safe-mode --restricted --strict-mcp-config`, `--permission-mode dontAsk`, tools `Read,Grep,Glob` only | same lockdown, tools `+Edit,Write,Bash`, `--disallowedTools Bash(git commit:*)`… | `--resume <id>` | `total_cost_usd` |
 | **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | by session id (`--resume <id>`) → `resume: 'by-id'` | tokens only |
 | **Qwen Code** (`<prompt> --safe-mode --output-format stream-json`) | `--approval-mode plan` (edits, shell and reads outside the working directory declined) | `--approval-mode default` + `--allowed-tools Edit(./**) write_file(./**) notebook_edit(./**) run_shell_command`, shell minus history-changing git via `--exclude-tools` | `--resume <id>` | tokens only |
+| **Kilo Code** (`kilo run --format json`) | OpenCode's read profile through `KILO_CONFIG_CONTENT` | OpenCode's write profile | `--session <id>` | reported |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -149,6 +150,35 @@ What is **not** enforced, so do not rely on it:
 
 - **Secret files.** `read_file` reads `.env` inside the working directory. What protects a read run is Pitroom's **read snapshot** (a directory with secret-looking files is read as a clean snapshot without them); edit runs rely on the worker being told not to read them.
 - **The shell is not confined.** An allowed shell command can write outside the working directory, as with the other workers that have a shell; the git guard still holds, and the deny rules are prefix based.
+
+## Kilo Code notes
+
+Status: **beta**, checked against `@kilocode/cli` 7.8.8. Kilo Code's CLI is a fork of OpenCode: the same `run --format json` events, agents and permission rules, so the adapter reuses OpenCode's profiles and parser. Like the Qwen Code fixtures, `test/fixtures/kilo` was recorded from the real CLI, started with Pitroom's own command line, against a **scripted OpenAI-compatible endpoint**; not yet with a real provider.
+
+What was checked that way, with a `kilo daemon` running:
+
+- **Read** runs: `read` and `grep` work; the edit tools are not offered at all, and `bash`, a `.env` read and a read outside the project are refused by the profile.
+- **Write / isolate**: edits and new files inside the project land; a write outside it and `git commit` are refused. End to end (`pitroom run -i -W kilo:…`), the change comes back as the isolated copy's patch and the user's tree is untouched.
+- **`--continue`**: `--session <id>` sends the earlier turns along.
+- **Failures**: an unknown model (`model-unavailable`), a bad key (`auth`) and a used-up quota (`rate-limited`, after about 80 s of the CLI's own retries) did no work, so the chain moves on.
+
+How a worker is started, and why:
+
+- **`KILO_CONFIG_CONTENT`**, not `OPENCODE_CONFIG_CONTENT`: Kilo reads its own variable (checked with `kilo debug config`). The profiles' scratch-folder rules point at Kilo's folders (`~/.local/share/kilo/…`, `$TMPDIR/kilo/…`), and the config sets `autoupdate: false`.
+- **A private `XDG_STATE_HOME`** (`<pitroom home>/kilo-state`). `kilo run` has no `--standalone`: when the user's `kilo daemon` is up, it attaches to it (found through `~/.local/state/kilo/daemon.json`), and the daemon, started with its own environment, ignores the injected config, the git guard and `PITROOM_ACTIVE` (seen: "Agent not found: pitroom-read"; `--port` and `--pure` do not prevent it). With a state folder of its own the worker finds no daemon and starts a private server. Sign-in, config and sessions live in the data and config folders, which stay the user's.
+- **`--log-level ERROR`** in capitals: Kilo rejects `error` and prints its help instead of running.
+- Never `--auto` ("auto-approve permissions that are not explicitly denied"), never `--attach`.
+
+## Hermes Agent: not supported yet
+
+[Hermes Agent](https://pypi.org/project/hermes-agent/) (Nous Research; looked at 0.19.0 from PyPI) was considered and left out, because it lacks the controls every other worker gets from its own CLI:
+
+- **No read-only mode.** Tools come in toolsets, and the `file` toolset holds `read_file` together with `write_file` and `patch`; single tools cannot be turned off, and there is no plan or approval mode for files.
+- **Writes outside the working directory are allowed.** The file tools warn when a path resolves outside the workspace and write anyway.
+- **Dangerous shell commands are auto-approved without a person.** In a non-interactive run that is not its messaging gateway, the approval check lets them through (`-z` bypasses approvals outright); a fail-closed path exists in the code, but not as a CLI switch.
+- **No event stream.** `chat -q -Q` prints the final answer and the session id, nothing about steps, tool calls or tokens (`--usage-file` only works with `-z`).
+
+Pitroom's own guards (the git guard, isolated copies, the read snapshot) would still apply, but not the CLI-level confinement the other workers have, so it would be the one worker that can write anywhere. `-W hermes` therefore says it is not supported yet. What would change that: a read-only (or per-tool) switch, file tools confined to the working directory, a fail-closed approval switch for headless runs, and a JSON event stream; or its Docker terminal backend with the project mounted, which would need Docker on the user's machine.
 
 ## Adding a worker
 

@@ -5,11 +5,11 @@ import opencode from '@/assets/mascots/opencode.gif';
 import { cn } from '@/lib/utils';
 
 const MASCOTS: Record<string, string> = { claude, codex, gemini, opencode };
-const TITLES: Record<string, string> = { opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini CLI', qwen: 'Qwen Code' };
+const TITLES: Record<string, string> = { opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', gemini: 'Gemini CLI', qwen: 'Qwen Code', kilo: 'Kilo Code' };
 
 /**
  * Which tool a run used: its animated pixel mascot (CodeIsland, MIT) while the worker is active, its mark
- * (OpenCode from svgl; Codex, Claude Code and Gemini from LobeHub icons; a plain "Q" for Qwen Code, which has no mascot) once it has stopped.
+ * (OpenCode from svgl; Codex, Claude Code and Gemini from LobeHub icons; plain letters for Qwen Code and Kilo Code, which have no mascot) once it has stopped.
  */
 export function WorkerIcon({ backend, active, className }: { backend: string; active?: boolean; className?: string }) {
   const title = TITLES[backend];
@@ -36,6 +36,12 @@ export function WorkerIcon({ backend, active, className }: { backend: string; ac
         <>
           <rect width="24" height="24" rx="5" className="fill-[#615CED]" />
           <text x="12" y="17" textAnchor="middle" fontSize="15" fontWeight="700" fill="white" fontFamily="ui-sans-serif, system-ui, sans-serif">Q</text>
+        </>
+      )}
+      {backend === 'kilo' && (
+        <>
+          <rect width="24" height="24" rx="5" className="fill-[#1C1C1C] dark:fill-[#F8F675]" />
+          <text x="12" y="17" textAnchor="middle" fontSize="15" fontWeight="700" className="fill-[#F8F675] dark:fill-[#1C1C1C]" fontFamily="ui-sans-serif, system-ui, sans-serif">K</text>
         </>
       )}
       {backend === 'claude' && (

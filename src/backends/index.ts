@@ -4,16 +4,18 @@ import { UserError } from '../core/errors.js';
 import { claude } from './claude/index.js';
 import { codex } from './codex/index.js';
 import { gemini } from './gemini/index.js';
+import { kiloBackend } from './kilo/index.js';
 import { opencode } from './opencode/index.js';
 import { qwen } from './qwen/index.js';
 import type { Backend } from './types.js';
 
-const REGISTRY = new Map<string, Backend>([opencode, codex, claude, gemini, qwen].map((b) => [b.id, b]));
+const REGISTRY = new Map<string, Backend>([opencode, codex, claude, gemini, qwen, kiloBackend].map((b) => [b.id, b]));
 
 export const DEFAULT_BACKEND = opencode.id;
 
 /** Recognised so users get a clear message instead of a confusing model-not-found. */
-const PLANNED: string[] = [];
+// Hermes Agent: no read-only mode, file tools not confined to the project, auto-approved shell (docs/backends.md).
+const PLANNED: string[] = ['hermes'];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
 export const allBackends = (): Backend[] => [...REGISTRY.values()];

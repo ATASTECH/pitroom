@@ -1,0 +1,31 @@
+timestamp=2026-10-07T22:07:45.906Z level=ERROR run=7c3959c4 message="Failed to fetch models.dev" cause="Cause([Fail(HttpClientError: StatusCode: non 2xx status code (403 GET https://models.dev/api.json))])"
+timestamp=2026-10-07T22:07:51.551Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+timestamp=2026-10-07T22:07:53.860Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+telemetry background flush failed PostHogFetchHttpError: HTTP error while fetching PostHog: 403
+ response: Response (74 bytes) {
+  ok: false,
+  url: "https://us.i.posthog.com/batch/",
+  status: 403,
+  statusText: "Forbidden",
+  headers: Headers {
+    "content-type": "text/plain; charset=utf-8",
+    "x-content-type-options": "nosniff",
+    "content-length": "74",
+    "connection": "close",
+  },
+  redirected: false,
+  bodyUsed: false,
+  Blob (74 bytes)
+},
+
+      at <anonymous> (/$bunfs/root/kilo:341:17057)
+      at async cjH (/$bunfs/root/kilo:341:6016)
+      at async fetchWithRetry (/$bunfs/root/kilo:341:16866)
+      at async _flush (/$bunfs/root/kilo:341:16574)
+
+timestamp=2026-10-07T22:07:58.059Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+timestamp=2026-10-07T22:08:07.367Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+timestamp=2026-10-07T22:08:23.873Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+timestamp=2026-10-07T22:09:02.944Z level=ERROR run=7c3959c4 message="stream error" providerID=fake modelID=fake-model session.id=ses_ee7977920ffeZ3olmO36BBGMfU small=false agent=pitroom-read mode=primary error.error="AI_APICallError: You exceeded your current quota, please check your plan and billing details."
+timestamp=2026-10-07T22:09:02.946Z level=ERROR run=7c3959c4 message=process session.id=ses_ee7977920ffeZ3olmO36BBGMfU messageID=msg_118689c42001dvkfDy0ekE0j09 error="You exceeded your current quota, please check your plan and billing details." stack="AI_APICallError: You exceeded your current quota, please check your plan and billing details.\n    at <anonymous> (/$bunfs/root/kilo:500:16383)\n    at async <anonymous> (/$bunfs/root/kilo:500:15396)\n    at processTicksAndRejections (native:7:39)"
+[91m[1mError: [0mYou exceeded your current quota, please check your plan and billing details.

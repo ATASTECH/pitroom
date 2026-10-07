@@ -1,0 +1,4 @@
+timestamp=2026-10-07T22:07:26.215Z level=ERROR run=71eebe1d message="Failed to fetch models.dev" cause="Cause([Fail(HttpClientError: StatusCode: non 2xx status code (403 GET https://models.dev/api.json))])"
+timestamp=2026-10-07T22:07:31.130Z level=ERROR run=71eebe1d message=failed ref=err_21396973 error="ProviderModelNotFoundError: Model not found: fake/no-such-model. Did you mean: fake-model?" cause="ProviderModelNotFoundError: Model not found: fake/no-such-model. Did you mean: fake-model?\n    at <anonymous> (/$bunfs/root/kilo:5330:130115)\n    at SessionHttpApi.prompt (/$bunfs/root/kilo:3236:23624)\n    at SessionHttpApi.prompt (definition) (/$bunfs/root/kilo:5039:15758)"
+ERROR 2026-10-07T22:07:31 +6656ms service=kilo-sessions type=message.updated cause=Model not found: fake/no-such-model. Did you mean: fake-model? subscriber failed
+[91m[1mError: [0mModel not found: fake/no-such-model. Did you mean: fake-model?

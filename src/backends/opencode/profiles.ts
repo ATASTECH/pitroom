@@ -1,4 +1,5 @@
-// Per-run permission profiles, injected through OPENCODE_CONFIG_CONTENT.
+// Per-run permission profiles, injected through OPENCODE_CONFIG_CONTENT (and KILO_CONFIG_CONTENT: Kilo Code's CLI is
+// an OpenCode fork with the same permission system, see ../kilo).
 // The user's OpenCode config (models, providers, keys) is never modified, and no
 // model is chosen here: agents without a `model` use OpenCode's configured default.
 //
@@ -63,21 +64,24 @@ const FORBIDDEN_BASH = [
   // publishing / remote side effects
   'gh *', 'npm publish*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*',
   // no recursive delegation
-  'opencode*', 'pitroom *', '*pitroom*',
+  'opencode*', 'kilo *', 'kilocode*', 'pitroom *', '*pitroom*',
 ];
 
-/** OpenCode's own scratch dirs must stay usable (tool output and shell sessions spill there). */
-function scratchDirs(): Record<string, Rule> {
+/** The CLI's own scratch dirs must stay usable (tool output and shell sessions spill there): `app` is its folder name. */
+function scratchDirs(app: App): Record<string, Rule> {
   const data = process.env.XDG_DATA_HOME ?? path.join(os.homedir(), '.local', 'share');
   const rules: Record<string, Rule> = {
     '*': 'deny',
-    [path.join(data, 'opencode', 'tool-output', '*')]: 'allow',
-    [path.join(data, 'opencode', 'shell', '*', '*')]: 'allow',
+    [path.join(data, app, 'tool-output', '*')]: 'allow',
+    [path.join(data, app, 'shell', '*', '*')]: 'allow',
   };
   // macOS reports /var/folders/… while OpenCode resolves /private/var/folders/….
-  for (const tmp of new Set([os.tmpdir(), realpath(os.tmpdir())])) rules[path.join(tmp, 'opencode', '*')] = 'allow';
+  for (const tmp of new Set([os.tmpdir(), realpath(os.tmpdir())])) rules[path.join(tmp, app, '*')] = 'allow';
   return rules;
 }
+
+/** Which CLI the profiles are for: OpenCode, or Kilo Code's fork of it (its own data and temp folders). */
+export type App = 'opencode' | 'kilo';
 
 function realpath(p: string): string {
   try {
@@ -102,7 +106,7 @@ const COMMON: Record<string, Perm> = {
  */
 const web = (on: boolean): Record<string, Rule> => ({ webfetch: on ? 'allow' : 'deny', websearch: on ? 'allow' : 'deny' });
 
-export function readProfile(allowWeb = false): Record<string, Perm> {
+export function readProfile(allowWeb = false, app: App = 'opencode'): Record<string, Perm> {
   return {
     '*': 'deny',
     read: READ_FILES,
@@ -118,12 +122,12 @@ export function readProfile(allowWeb = false): Record<string, Perm> {
     bash: READ_ONLY_BASH,
     shell: READ_ONLY_BASH,
     edit: 'deny',
-    external_directory: scratchDirs(),
+    external_directory: scratchDirs(app),
     ...COMMON,
   };
 }
 
-export function writeProfile(allowWeb = false): Record<string, Perm> {
+export function writeProfile(allowWeb = false, app: App = 'opencode'): Record<string, Perm> {
   const bash: Record<string, Rule> = { '*': 'allow' };
   for (const pattern of FORBIDDEN_BASH) bash[pattern] = 'deny';
   return {
@@ -132,7 +136,7 @@ export function writeProfile(allowWeb = false): Record<string, Perm> {
     ...web(allowWeb),
     bash,
     shell: bash,
-    external_directory: scratchDirs(),
+    external_directory: scratchDirs(app),
     ...COMMON,
   };
 }
@@ -141,19 +145,20 @@ export function agentFor(mode: Mode): string {
   return mode === 'read' ? AGENT.read : AGENT.write;
 }
 
-/** Builds OPENCODE_CONFIG_CONTENT, merged over any value the user already set. */
-export function configContent(existing: string | undefined, allowWeb = false): string {
+/** Builds OPENCODE_CONFIG_CONTENT (or KILO_CONFIG_CONTENT), merged over any value the user already set. */
+export function configContent(existing: string | undefined, allowWeb = false, app: App = 'opencode', extra: Record<string, unknown> = {}): string {
   const ours = {
+    ...extra,
     agent: {
       [AGENT.read]: {
         mode: 'primary',
         description: 'pitroom: read-only worker (research, search, review)',
-        permission: readProfile(allowWeb),
+        permission: readProfile(allowWeb, app),
       },
       [AGENT.write]: {
         mode: 'primary',
         description: 'pitroom: editing worker (no git history changes, no bulk deletes)',
-        permission: writeProfile(allowWeb),
+        permission: writeProfile(allowWeb, app),
       },
     },
   };
