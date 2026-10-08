@@ -239,3 +239,12 @@ test('dash: retry commands quote the task for a POSIX shell and keep the mode, t
   assert.deepEqual(retryCommands([{ ...base, mode: 'isolate', plan: { file: 'docs/my plan.md', step: 3, title: 't' } }]), [`pitroom run -i --plan 'docs/my plan.md' --step 3 -d /w/proj -g g1 --bg`]);
   assert.deepEqual(retryCommands([{ ...base, state: 'done' }, { ...base, auditOf: 'x' }, { ...base, parent: 'y' }, { ...base, reviewOf: 'z' }]), [], 'finished runs and runs of another run are left out');
 });
+
+test('dash: on Windows the retry commands are for PowerShell: \'\' inside quotes, Windows paths as they are, no "--" it would drop', async () => {
+  const { retryCommands } = await import('../dist/lib.mjs');
+  const base = { dir: 'C:\\work\\my proj', group: 'g1', state: 'failed', mode: 'read', task: "it's \"quoted\" $HOME" };
+  assert.deepEqual(retryCommands([base], 'powershell'), [`pitroom run -d 'C:\\work\\my proj' -g g1 --bg 'it''s "quoted" $HOME'`]);
+  assert.deepEqual(retryCommands([{ ...base, dir: 'C:\\work\\proj', task: 'fix it', mode: 'isolate' }], 'powershell'), [`pitroom run -i -d C:\\work\\proj -g g1 --bg 'fix it'`]);
+  assert.deepEqual(retryCommands([{ ...base, task: '-x is a flag-looking task' }], 'powershell'), [`pitroom run -d 'C:\\work\\my proj' -g g1 --bg -- '-x is a flag-looking task'`], 'a task that looks like an option keeps its "--"');
+  assert.deepEqual(retryCommands([{ ...base, dir: '/w/a\\b', task: 'x' }], 'sh'), [`pitroom run -d '/w/a\\b' -g g1 --bg -- x`], 'a POSIX shell gets a backslash quoted');
+});

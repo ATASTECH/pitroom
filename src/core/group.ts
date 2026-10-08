@@ -18,21 +18,30 @@ export function groupIds(group: string): string[] {
   });
 }
 
-/** A shell word (POSIX): the text as is, in single quotes. */
-const quote = (s: string) => (/^[\w./:@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+/** The shell the retry commands are written for: PowerShell on Windows, a POSIX shell elsewhere. */
+export type RetryShell = 'sh' | 'powershell';
+export const retryShell = (platform: NodeJS.Platform = process.platform): RetryShell => (platform === 'win32' ? 'powershell' : 'sh');
+
+/** A shell word: the text as is, or in single quotes (POSIX: ' becomes '\''; PowerShell: ' becomes ''). */
+const quoteFor = (shell: RetryShell) => (s: string) =>
+  /^[\w./:@=\\-]+$/.test(s) && !(shell === 'sh' && s.includes('\\')) ? s : shell === 'sh' ? `'${s.replace(/'/g, `'\\''`)}'` : `'${s.replace(/'/g, "''")}'`;
 
 /**
  * The commands that start a crew's failed, timed-out or stopped runs again, in the same group and directory, on the
- * chain the config gives now. Audits, reviews and follow-ups are left out: they belong to another run.
+ * chain the config gives now. Audits, reviews and follow-ups are left out: they belong to another run. Written for
+ * the shell of the machine the dashboard runs on; Windows PowerShell 5.1 drops a "--" given to a program, so there
+ * the task follows it only when it starts with "-".
  */
-export function retryCommands(metas: RunMeta[]): string[] {
+export function retryCommands(metas: RunMeta[], shell: RetryShell = retryShell()): string[] {
+  const quote = quoteFor(shell);
   return metas
     .filter((m) => ['failed', 'timeout', 'stopped'].includes(m.state) && !m.auditOf && !m.reviewOf && !m.parent && !m.fixOf)
     .map((m) => {
       const where = ['-d', quote(m.dir), ...(m.group ? ['-g', quote(m.group)] : [])];
       if (m.plan) return ['pitroom run', m.mode === 'write' ? '-w' : '-i', '--plan', quote(m.plan.file), '--step', String(m.plan.step), ...where, '--bg'].join(' ');
       const mode = m.mode === 'isolate' ? ['-i'] : m.mode === 'write' ? ['-w'] : [];
-      return ['pitroom run', ...mode, ...where, '--bg', '--', quote(m.task)].join(' ');
+      const end = shell === 'sh' || m.task.startsWith('-') ? ['--'] : [];
+      return ['pitroom run', ...mode, ...where, '--bg', ...end, quote(m.task)].join(' ');
     });
 }
 

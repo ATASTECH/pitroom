@@ -17,6 +17,7 @@ function GroupActions({ name, running, discardable, problem }: { name: string; r
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<{ text: string; bad?: boolean }>();
   const [commands, setCommands] = useState<string[]>();
+  const [shell, setShell] = useState<'sh' | 'powershell'>();
   const [copied, setCopied] = useState(false);
   if (!running && !discardable && !problem) return null;
   const go = async (verb: 'stop' | 'discard') => {
@@ -33,7 +34,9 @@ function GroupActions({ name, running, discardable, problem }: { name: string; r
   };
   const retry = async () => {
     try {
-      setCommands((await api.retryGroup(name)).commands);
+      const r = await api.retryGroup(name);
+      setCommands(r.commands);
+      setShell(r.shell);
     } catch (e) {
       setNote({ text: (e as Error).message, bad: true });
     }
@@ -60,7 +63,7 @@ function GroupActions({ name, running, discardable, problem }: { name: string; r
       {commands && (
         commands.length ? (
           <div className="space-y-1.5">
-            <p className="text-[13px] text-muted-foreground">Run in a terminal (or ask your agent) to start the failed runs again in this crew:</p>
+            <p className="text-[13px] text-muted-foreground">{shell === 'powershell' ? 'Run in PowerShell' : 'Run in a terminal'} (or ask your agent) to start the failed runs again in this crew:</p>
             <pre className="overflow-x-auto rounded-md bg-muted p-2.5 font-mono text-xs">{commands.join('\n')}</pre>
             <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard?.writeText(commands.join('\n')); setCopied(true); setTimeout(() => setCopied(false), 1400); }}>
               {copied ? <Check /> : <Copy />}{copied ? 'Copied' : 'Copy'}

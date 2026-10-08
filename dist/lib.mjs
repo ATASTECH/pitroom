@@ -2449,13 +2449,16 @@ var blue = wrap(34, 39);
 var cyan = wrap(36, 39);
 
 // src/core/group.ts
-var quote = (s) => /^[\w./:@=-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`;
-function retryCommands(metas) {
+var retryShell = (platform = process.platform) => platform === "win32" ? "powershell" : "sh";
+var quoteFor = (shell) => (s) => /^[\w./:@=\\-]+$/.test(s) && !(shell === "sh" && s.includes("\\")) ? s : shell === "sh" ? `'${s.replace(/'/g, `'\\''`)}'` : `'${s.replace(/'/g, "''")}'`;
+function retryCommands(metas, shell = retryShell()) {
+  const quote = quoteFor(shell);
   return metas.filter((m) => ["failed", "timeout", "stopped"].includes(m.state) && !m.auditOf && !m.reviewOf && !m.parent && !m.fixOf).map((m) => {
     const where = ["-d", quote(m.dir), ...m.group ? ["-g", quote(m.group)] : []];
     if (m.plan) return ["pitroom run", m.mode === "write" ? "-w" : "-i", "--plan", quote(m.plan.file), "--step", String(m.plan.step), ...where, "--bg"].join(" ");
     const mode = m.mode === "isolate" ? ["-i"] : m.mode === "write" ? ["-w"] : [];
-    return ["pitroom run", ...mode, ...where, "--bg", "--", quote(m.task)].join(" ");
+    const end = shell === "sh" || m.task.startsWith("-") ? ["--"] : [];
+    return ["pitroom run", ...mode, ...where, "--bg", ...end, quote(m.task)].join(" ");
   });
 }
 

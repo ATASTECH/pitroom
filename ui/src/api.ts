@@ -116,7 +116,7 @@ export const api = {
   stopGroup: (group: string) => post(`/api/group/${encodeURIComponent(group)}/stop`),
   discardGroup: (group: string) => post(`/api/group/${encodeURIComponent(group)}/discard`),
   /** The commands that would start a crew's failed runs again: the page never starts a run itself. */
-  retryGroup: (group: string) => get<{ commands: string[] }>(`/api/group/${encodeURIComponent(group)}/retry`),
+  retryGroup: (group: string) => get<{ commands: string[]; shell?: 'sh' | 'powershell' }>(`/api/group/${encodeURIComponent(group)}/retry`),
   state: (limit: number, group?: string) => get<DashState>('/api/state', { limit, group }),
   run: (id: string) => get<RunDetail>(`/api/run/${id}`),
   history: (p: { q?: string; state?: string; model?: string; days?: number; before?: string; limit?: number }) =>

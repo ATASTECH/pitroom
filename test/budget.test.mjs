@@ -63,3 +63,20 @@ test('budget: PITROOM_BUDGET_DAILY sets it too, and an audit does not start once
   assert.equal(m.audit, undefined, 'no audit over the budget');
   assert.equal(s.run(['run', 'again?'], { PITROOM_BUDGET_DAILY: '1' }).status, 3);
 });
+
+test('budget: a run that is still going counts with what it has used so far', async () => {
+  const s = sandbox();
+  s.config({ worker: 'opencode:mock/good-model', budgetDaily: 1 });
+  // one step that costs 0.9, then it waits: still running when the next run asks
+  const bg = s.run(['run', '--bg', 'long one'], { MOCK_ACTIONS: 'exec:true;sleep:20;answer:SUMMARY: late', MOCK_COST: '0.9' });
+  const id = /run (\S+) in background/.exec(bg.stdout)[1];
+  const events = path.join(s.base, 'home', 'runs', id, 'events.jsonl');
+  for (let i = 0; i < 100 && !(fs.existsSync(events) && fs.readFileSync(events, 'utf8').includes('step_finish')); i++) await new Promise((r) => setTimeout(r, 100));
+  try {
+    const next = s.run(['run', 'another question'], { MOCK_COST: '0.9' });
+    assert.equal(next.status, 0, next.stderr);
+    assert.match(next.stdout, /the workers cost \$0\.9\d* today, of your \$1\.00 daily budget/, 'the running run\'s cost so far counts');
+  } finally {
+    s.run(['stop', id]);
+  }
+});

@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Costs
+- **The daily budget counts runs that are still going.** A run's cost so far (reported, or estimated from your prices) is read from its stream when the next run asks, so one long run, or a crew past its first steps, no longer lets later runs start on a budget it has already spent. Before, a run counted only once it had ended.
+
+### Dashboard
+- **Retry commands for Windows.** On Windows a crew's **Retry command** is written for PowerShell: single quotes with `''` inside, Windows paths as they are, and no `--` before the task (Windows PowerShell 5.1 drops it), unless the task itself starts with `-`. Elsewhere they stay POSIX shell commands.
+
 ## 0.23.0
 
 ### Answers
