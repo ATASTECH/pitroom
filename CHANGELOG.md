@@ -1,13 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Costs
-- **The daily budget counts runs that are still going.** A run's cost so far (reported, or estimated from your prices) is read from its stream when the next run asks, so one long run, or a crew past its first steps, no longer lets later runs start on a budget it has already spent. Before, a run counted only once it had ended.
-
-### Dashboard
-- **Retry commands for Windows.** On Windows a crew's **Retry command** is written for PowerShell: single quotes with `''` inside, Windows paths as they are, and no `--` before the task (Windows PowerShell 5.1 drops it), unless the task itself starts with `-`. Elsewhere they stay POSIX shell commands.
-
 ## 0.23.0
 
 ### Answers
@@ -23,6 +15,7 @@
 
 ### Costs
 - **A daily budget** (`"budgetDaily": 5`, `PITROOM_BUDGET_DAILY`; none by default): what the workers may cost per day, as reported or estimated, audits and corrections included. Past 80% a run warns; once it is spent only workers that cost nothing still run (a price of 0, or a worker whose recent runs all cost exactly 0), a run with none of them in its chain is refused (exit 3), and audits and corrections do not start. A run counts once it has ended.
+- **The daily budget counts runs that are still going.** A run's cost so far (reported, or estimated from your prices) is read from its stream when the next run asks, so one long run, or a crew past its first steps, no longer lets later runs start on a budget it has already spent. Before, a run counted only once it had ended.
 
 ### Workers
 - **Qwen Code worker (beta)**: `-W qwen[:model]`, with the user's sign-in and model from `~/.qwen/settings.json` (any OpenAI-compatible provider, DashScope, a local model). Read runs use plan mode; write and isolate runs approve edits only inside the working directory (`auto-edit` would approve them anywhere: in a test an isolated run edited the real checkout), with the shell minus history-changing git. `--safe-mode` keeps the user's QWEN.md, hooks, skills and MCP servers out and stops the CLI's background memory extraction, which otherwise writes what a run saw into `~/.qwen/memories`; worktree, cron, memory, subagent and messaging tools are excluded (plan mode alone let `enter_worktree` make a branch). `--continue` works by session id. A used-up quota surfaces in about 80 s instead of after 10 × 60 s of retries. Checked against Qwen Code 0.25.0 with a scripted model endpoint (the fixtures are the real CLI's output); not yet with a real provider. See docs/backends.md.
@@ -33,6 +26,7 @@
 
 ### Dashboard
 - **Crew actions.** A crew's card has **Stop all** (its running and queued runs) and **Discard all** (its finished, unapplied isolated copies), each asking once more, and **Retry command**, which shows the `pitroom run … -g CREW --bg` commands that start its failed, timed-out or stopped runs again, to copy. The page still never starts a run itself.
+- **Retry commands for Windows.** On Windows a crew's **Retry command** is written for PowerShell: single quotes with `''` inside, Windows paths as they are, and no `--` before the task (Windows PowerShell 5.1 drops it), unless the task itself starts with `-`. Elsewhere they stay POSIX shell commands.
 
 ### Tests
 - The audited-run UI test is skipped without Chrome, like the other UI tests (it failed on machines without one).
