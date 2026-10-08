@@ -78,5 +78,16 @@ test('budget: a run that is still going counts with what it has used so far', as
     assert.match(next.stdout, /the workers cost \$0\.9\d* today, of your \$1\.00 daily budget/, 'the running run\'s cost so far counts');
   } finally {
     s.run(['stop', id]);
+    // a stopped run still writes its record as it exits: let it go before the test directory is removed
+    const pid = JSON.parse(fs.readFileSync(path.join(s.base, 'home', 'runs', id, 'meta.json'), 'utf8')).pid;
+    const alive = () => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; pid && alive() && i < 150; i++) await new Promise((r) => setTimeout(r, 100));
   }
 });

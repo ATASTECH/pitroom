@@ -102,6 +102,17 @@ test('dash actions: a crew is stopped or discarded as a whole, with the same sec
       if (!states.every((x) => x === 'stopped')) await sleep(100);
     }
     assert.deepEqual(states, ['stopped', 'stopped']);
+    // a stopped run still writes its record as it exits: let both go before the test directory is removed
+    const pids = ids.map((id) => JSON.parse(fs.readFileSync(path.join(s.base, 'home', 'runs', id, 'meta.json'), 'utf8')).pid).filter(Boolean);
+    const alive = (pid) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    for (let i = 0; pids.some(alive) && i < 150; i++) await sleep(100);
     assert.equal((await post(`api/group/${group}/stop`)).status, 409, 'nothing left to stop');
 
     const discard = await post('api/group/isos/discard');
