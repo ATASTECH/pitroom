@@ -16,7 +16,7 @@ import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { fileDiffs, type FileDiffData } from './file-diff.js';
 import { MISSING, page, THEME_SCRIPT } from './dash-page.js';
-import { groupIds, headline, retryCommands } from './group.js';
+import { groupIds, headline, retryCommands, retryShell } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
 import { primaryPrice, readLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
@@ -375,7 +375,7 @@ function handler(touch: () => void, token: string): http.RequestListener {
       }
       const ids = group && group.length <= 100 ? groupIds(group) : [];
       if (!ids.length) return json(res, 404, { error: 'no such group' });
-      return json(res, 200, { commands: retryCommands(ids.map((id) => freshMeta(id))) });
+      return json(res, 200, { commands: retryCommands(ids.map((id) => freshMeta(id))), shell: retryShell() });
     }
     const m = /^\/api\/run\/([^/]+)$/.exec(url.pathname);
     if (m) {

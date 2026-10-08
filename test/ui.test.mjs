@@ -298,7 +298,7 @@ test('ui: a crew with failed runs offers the commands to start them again; one t
   const retry = "[...document.querySelectorAll('button')].find((b) => b.textContent.includes('Retry command (2)'))";
   await until(`${retry} !== undefined`, 'the retry button');
   await click(retry);
-  await until("[...document.querySelectorAll('pre')].some((p) => p.textContent.includes(\"-g broken-crew --bg -- 'broken job one'\"))", 'the commands');
+  await until("[...document.querySelectorAll('pre')].some((p) => /-g broken-crew --bg (-- )?'broken job one'/.test(p.textContent))", 'the commands');
   assert.equal(await evaluate("[...document.querySelectorAll('button')].some((b) => /^Stop all|^Discard all/.test(b.textContent))"), false, 'nothing running, nothing to discard');
   await click(crew);
 });
