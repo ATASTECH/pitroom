@@ -446,12 +446,12 @@ function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { a
   return out;
 }
 
+/** A run in which no worker was started (its read snapshot could not be made) says nothing about the worker. */
+const ATTEMPTED = `json_extract(meta_json,'$.noAttempt') IS NULL`;
 /**
  * A run that failed on a rate limit or quota. Newer records say so (`failureKind`); older ones carry the hint
  * Pitroom adds to such an error.
  */
-/** A run in which no worker was started (its read snapshot could not be made) says nothing about the worker. */
-const ATTEMPTED = `json_extract(meta_json,'$.noAttempt') IS NULL`;
 const LIMITED = `(state='failed' AND (json_extract(meta_json,'$.failureKind')='rate-limited' OR error LIKE '%the model is rate-limited or overloaded%'))`;
 
 export function historyStats(sinceMs?: number): Stats {
@@ -463,9 +463,9 @@ export function historyStats(sinceMs?: number): Stats {
   if (!db) return empty;
   const since = sinceMs ? new Date(sinceMs).toISOString() : '';
   try {
-    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
-    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
+    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED}`).get(since);
+    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
     const audits = auditStats(db, since);
     // Savings come from the ledger, the same figures the Live page, `pitroom savings` and the status line add up,
     // so one number is never calculated two ways. The database only supplies counts and times.

@@ -288,6 +288,7 @@ var OK = /^(success|succeeded|ok|done|completed?)$/i;
 function parseEvents(jsonl) {
   const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
   const stepUsage = [];
+  const usageSeen = /* @__PURE__ */ new Set();
   const tools = {};
   const edits = [];
   const timeline = [];
@@ -380,7 +381,10 @@ function parseEvents(jsonl) {
           if (ok && EDIT_TOOLS.has(name) && file) edits.push(String(file));
         }
       }
-      if (finished && s.usage && typeof s.usage === "object") stepUsage.push(s.usage);
+      if (finished && s.usage && typeof s.usage === "object" && !usageSeen.has(`${kind2}:${key}`)) {
+        usageSeen.add(`${kind2}:${key}`);
+        stepUsage.push(s.usage);
+      }
     } else if (type === "result") {
       sessionId ??= id(e.conversation_id);
       model ??= id(e.model);
@@ -396,7 +400,7 @@ function parseEvents(jsonl) {
         error ??= message || (/^waiting$/i.test(status) ? "agy stopped waiting for an approval a headless run cannot give" : `agy ended with status ${status}`);
       }
     } else if (type === "error") {
-      streamError ??= errText(e) || errText(e.error) || "Antigravity CLI error";
+      streamError ??= typeof e.message === "string" && e.message || errText(e.error) || "Antigravity CLI error";
     }
   }
   if (streamError && (!resultSeen || !response)) error ??= streamError;
@@ -415,7 +419,13 @@ function add(u, r) {
   u.total += num(r.total_tokens) || input + num(r.output_tokens) + num(r.thinking_tokens ?? r.reasoning_tokens);
 }
 var id = (v) => typeof v === "string" && v ? v : void 0;
-var errText = (v) => typeof v === "string" ? v : typeof v?.message === "string" ? v.message : "";
+function errText(v) {
+  if (typeof v === "string") return v;
+  if (!v || typeof v !== "object" || !Object.keys(v).length) return "";
+  const code = typeof v.code === "string" || typeof v.code === "number" ? String(v.code) : "";
+  const message = typeof v.message === "string" ? v.message : typeof v.reason === "string" ? v.reason : "";
+  return [code, message].filter(Boolean).join(": ") || JSON.stringify(v);
+}
 var str = (v) => typeof v === "string" ? v : v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
 
 // src/backends/antigravity/index.ts
@@ -427,15 +437,20 @@ function agy(args, timeout = 3e4) {
 }
 var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path4.join(os3.homedir(), ".gemini", "antigravity-cli");
 var TOKEN = "antigravity-oauth-token";
-var words = (c) => escapeRegex(c).replace(/ /g, "\\s+");
-var WRAPPER = "(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*";
-var START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
+var words = (c) => {
+  const spaced = (t) => escapeRegex(t).replace(/ /g, "\\s+");
+  return c.startsWith("git ") ? `git(\\s+-[^\\s;&|]+)*\\s+${spaced(c.slice(4))}` : spaced(c);
+};
+var ASSIGN = `\\w+=("[^"]*"|'[^']*'|\\S*)`;
+var OPTION = `(-\\S+(\\s+[^-\\s;&|]\\S*)?|\\d\\S*|${ASSIGN})`;
+var WRAPPER = `(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+${OPTION})*`;
+var START = `(^|[;&|(\`\\n]|\\$\\(|\\s-(exec|execdir|ok|okdir)\\s)\\s*((${ASSIGN}|${WRAPPER})\\s+)*`;
 var END = "(\\s|$|[;&|)`])";
 function denyCommandRules() {
   return [
     `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join("|")})${END})`,
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
-    `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
+    `command(regex:${START}(\\S*[\\\\/])?git(\\s+-[^\\s;&|]+)*\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
     // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
     `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,

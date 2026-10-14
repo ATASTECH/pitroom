@@ -304,6 +304,7 @@ var OK = /^(success|succeeded|ok|done|completed?)$/i;
 function parseEvents(jsonl) {
   const usage2 = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
   const stepUsage = [];
+  const usageSeen = /* @__PURE__ */ new Set();
   const tools = {};
   const edits = [];
   const timeline = [];
@@ -396,7 +397,10 @@ function parseEvents(jsonl) {
           if (ok && EDIT_TOOLS.has(name) && file2) edits.push(String(file2));
         }
       }
-      if (finished && s.usage && typeof s.usage === "object") stepUsage.push(s.usage);
+      if (finished && s.usage && typeof s.usage === "object" && !usageSeen.has(`${kind2}:${key}`)) {
+        usageSeen.add(`${kind2}:${key}`);
+        stepUsage.push(s.usage);
+      }
     } else if (type === "result") {
       sessionId ??= id(e.conversation_id);
       model ??= id(e.model);
@@ -412,7 +416,7 @@ function parseEvents(jsonl) {
         error ??= message || (/^waiting$/i.test(status) ? "agy stopped waiting for an approval a headless run cannot give" : `agy ended with status ${status}`);
       }
     } else if (type === "error") {
-      streamError ??= errText(e) || errText(e.error) || "Antigravity CLI error";
+      streamError ??= typeof e.message === "string" && e.message || errText(e.error) || "Antigravity CLI error";
     }
   }
   if (streamError && (!resultSeen || !response)) error ??= streamError;
@@ -431,7 +435,13 @@ function add(u, r) {
   u.total += num(r.total_tokens) || input + num(r.output_tokens) + num(r.thinking_tokens ?? r.reasoning_tokens);
 }
 var id = (v) => typeof v === "string" && v ? v : void 0;
-var errText = (v) => typeof v === "string" ? v : typeof v?.message === "string" ? v.message : "";
+function errText(v) {
+  if (typeof v === "string") return v;
+  if (!v || typeof v !== "object" || !Object.keys(v).length) return "";
+  const code = typeof v.code === "string" || typeof v.code === "number" ? String(v.code) : "";
+  const message = typeof v.message === "string" ? v.message : typeof v.reason === "string" ? v.reason : "";
+  return [code, message].filter(Boolean).join(": ") || JSON.stringify(v);
+}
 var str = (v) => typeof v === "string" ? v : v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
 
 // src/backends/antigravity/index.ts
@@ -443,15 +453,20 @@ function agy(args, timeout = 3e4) {
 }
 var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path4.join(os3.homedir(), ".gemini", "antigravity-cli");
 var TOKEN = "antigravity-oauth-token";
-var words = (c) => escapeRegex(c).replace(/ /g, "\\s+");
-var WRAPPER = "(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*";
-var START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
+var words = (c) => {
+  const spaced = (t) => escapeRegex(t).replace(/ /g, "\\s+");
+  return c.startsWith("git ") ? `git(\\s+-[^\\s;&|]+)*\\s+${spaced(c.slice(4))}` : spaced(c);
+};
+var ASSIGN = `\\w+=("[^"]*"|'[^']*'|\\S*)`;
+var OPTION = `(-\\S+(\\s+[^-\\s;&|]\\S*)?|\\d\\S*|${ASSIGN})`;
+var WRAPPER = `(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+${OPTION})*`;
+var START = `(^|[;&|(\`\\n]|\\$\\(|\\s-(exec|execdir|ok|okdir)\\s)\\s*((${ASSIGN}|${WRAPPER})\\s+)*`;
 var END = "(\\s|$|[;&|)`])";
 function denyCommandRules() {
   return [
     `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join("|")})${END})`,
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
-    `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
+    `command(regex:${START}(\\S*[\\\\/])?git(\\s+-[^\\s;&|]+)*\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
     // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
     `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,
@@ -2982,6 +2997,16 @@ function readSnapshot(root, owner) {
     touch(dest);
     return { dir: dest, tree, created: false };
   }
+  materialize(root, tree, dest);
+  prune();
+  return { dir: dest, tree, created: true };
+}
+function restoreSnapshot(root, dir, tree) {
+  const rel = path16.relative(snapshotsDir(), dir);
+  if (!rel || rel.startsWith("..") || path16.isAbsolute(rel)) throw new Error(`not a snapshot: ${dir}`);
+  if (!fs18.existsSync(path16.join(dir, ".git"))) materialize(root, tree, dir);
+}
+function materialize(root, tree, dest) {
   const tmp = path16.join(snapshotsDir(), `.tmp-${process.pid}-${crypto4.randomBytes(3).toString("hex")}`);
   try {
     createIsolatedCopy(root, tree, tmp);
@@ -2999,8 +3024,6 @@ function readSnapshot(root, owner) {
     }
     throw e;
   }
-  prune();
-  return { dir: dest, tree, created: true };
 }
 function touch(dir) {
   try {
@@ -3970,9 +3993,9 @@ function historyStats(sinceMs2) {
   if (!db) return empty;
   const since2 = sinceMs2 ? new Date(sinceMs2).toISOString() : "";
   try {
-    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since2);
-    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since2);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since2);
+    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED}`).get(since2);
+    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since2);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since2);
     const audits = auditStats(db, since2);
     const ledger = readLedger(sinceMs2);
     const byDay = /* @__PURE__ */ new Map();
@@ -5010,7 +5033,16 @@ function prepareRun(o) {
     warnings.push(`this read run is not in a snapshot${root ? "" : " (not a git repository)"}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
   }
   if (parent?.snapshot?.dir && !fs31.existsSync(parent.snapshot.dir)) {
-    throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
+    let restored = false;
+    if (parent.snapshot.private && root && parent.snapshot.tree) {
+      try {
+        restoreSnapshot(root, parent.snapshot.dir, parent.snapshot.tree);
+        restored = true;
+        warnings.push(`the snapshot run ${parent.id} read was cleaned up and has been made again from the same state (anything its worker wrote there is gone)`);
+      } catch {
+      }
+    }
+    if (!restored) throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
   }
   if (!parent && !snap && !process.env.PITROOM_NO_SECRET_WARNING) {
     const secrets = mode === "isolate" && root ? findSecretFilesInTree(root, dir) : findSecretFiles(dir);
@@ -5118,6 +5150,7 @@ async function execute(meta) {
     prepareTree(meta);
     writeMeta(meta);
     const planned = { snapshot: meta.snapshot && { ...meta.snapshot }, cwd: meta.cwd };
+    let lastFailure;
     const chain = [];
     for (const t of [meta.worker, ...meta.fallback]) if (!chain.some((c) => sameTarget(c, t))) chain.push(t);
     for (let i = 0; i < chain.length; i++) {
@@ -5129,26 +5162,28 @@ async function execute(meta) {
         writeMeta(meta);
         continue;
       }
-      const cannot = readPlace(meta, backend, planned, i + 1);
-      if (cannot) {
+      const place2 = readPlace(meta, backend, planned, i + 1);
+      if (place2.error) {
         if (i === chain.length - 1) {
-          meta.error = cannot;
-          if (!meta.ran) meta.noAttempt = true;
+          meta.error = lastFailure ? `${lastFailure.message}; then ${place2.error}` : place2.error;
+          if (lastFailure) meta.failureKind = lastFailure.kind;
+          else meta.noAttempt = true;
           break;
         }
-        (meta.attempts ??= []).push({ target: describeTarget(target), error: cannot });
+        (meta.attempts ??= []).push({ target: describeTarget(target), error: place2.error });
         writeMeta(meta);
         continue;
       }
       meta.ran = target;
       writeMeta(meta);
       const own = meta.snapshot?.private && readsOwnSnapshot(backend);
-      const before = own ? changedIn(meta.snapshot.dir) : [];
+      const before = own ? place2.before ?? changedIn(meta.snapshot.dir) : [];
       result = await attempt(meta, backend, target);
       if (own) strayWrites(meta, backend, before);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
+      lastFailure = why;
       if (why.kind === "rate-limited") recordCooldown(cooldownKey(target, backend), describeTarget(target), why.message);
       if (!target.model && backend.defaultModel) {
         const failed = backend.defaultModel();
@@ -5265,31 +5300,40 @@ function prepareTree(meta) {
 }
 function readPlace(meta, backend, planned, attemptNo) {
   const root = meta.repoRoot;
-  if (!root || meta.mode !== "read") return void 0;
-  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, attemptNo);
+  if (!root || meta.mode !== "read") return {};
+  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, planned, attemptNo);
   if (meta.snapshot?.private && !meta.parent) {
     meta.snapshot = planned.snapshot && { ...planned.snapshot };
     meta.cwd = planned.cwd;
   }
-  if (meta.snapshot && !meta.snapshot.dir) sharedSnapshot(meta, root);
-  return void 0;
+  if (meta.snapshot && !meta.snapshot.dir) {
+    sharedSnapshot(meta, root);
+    planned.snapshot = meta.snapshot && { ...meta.snapshot };
+    planned.cwd = meta.cwd;
+  }
+  return {};
 }
-function ownSnapshot(meta, root, backend, attemptNo) {
-  if (meta.parent || meta.inPlace || meta.reviewOf) return void 0;
-  if (meta.snapshot?.private && !changedIn(meta.snapshot.dir).length) return void 0;
-  const left = meta.snapshot?.left ?? [];
+function ownSnapshot(meta, root, backend, planned, attemptNo) {
+  if (meta.parent || meta.inPlace || meta.reviewOf) return {};
+  if (planned.own && !changedIn(planned.own.snapshot.dir).length) {
+    meta.snapshot = { ...planned.own.snapshot };
+    meta.cwd = planned.own.cwd;
+    return { before: [] };
+  }
+  const left = planned.snapshot?.left ?? [];
   try {
-    const s = readSnapshot(root, meta.snapshot?.private ? `${meta.id}-${attemptNo}` : meta.id);
+    const s = readSnapshot(root, planned.own ? `${meta.id}-${attemptNo}` : meta.id);
     meta.snapshot = { dir: s.dir, tree: s.tree, left, private: true };
     meta.cwd = path27.join(s.dir, path27.relative(root, meta.dir));
     if (!fs31.existsSync(meta.cwd)) meta.cwd = s.dir;
+    planned.own = { snapshot: { ...meta.snapshot }, cwd: meta.cwd };
     const note = `${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)`;
     if (!meta.warnings.some((w) => w.startsWith(note))) {
       meta.warnings.push(`${note}${left.length ? `; the secret-looking files (${left.slice(0, 3).join(", ")}${left.length > 3 ? ", \u2026" : ""}) and git-ignored files are not in it` : ""}`);
     }
-    return void 0;
+    return { before: s.created ? [] : void 0 };
   } catch (e) {
-    return `could not make a snapshot for ${backend.name} (${e.message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself`;
+    return { error: `could not make a snapshot for ${backend.name} (${e.message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself` };
   }
 }
 function changedIn(dir) {

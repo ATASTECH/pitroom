@@ -7,15 +7,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { getBackend, readsOwnSnapshot } from '../backends/index.js';
 import type { Backend, Failure, Mode, Target } from '../backends/types.js';
-import { applyPatch, canonical, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
+import { applyPatch, canonical, changedFiles, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
 import { resolveChain } from './chain.js';
 import { effective } from './config.js';
 import { DeletionRefused, UserError } from './errors.js';
 import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
-import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
-import { changedFiles } from '../vcs/git.js';
+import { READ_IN, type ReadIn, backToProject, readSnapshot, restoreSnapshot, wantSnapshot } from './snapshot.js';
 import { auditRate, auditTask, auditable, fixTask, focusedRate, pickAuditor, sampled, wantsFix } from './audit.js';
 import { workerRecord } from './history.js';
 import { withinBudget } from './budget.js';
@@ -159,7 +158,18 @@ export function prepareRun(o: RunOptions): RunMeta {
     warnings.push(`this read run is not in a snapshot${root ? '' : ' (not a git repository)'}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
   }
   if (parent?.snapshot?.dir && !fs.existsSync(parent.snapshot.dir)) {
-    throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
+    // a run's own snapshot (a worker that may write) is made again from its tree; a shared one is not the run's to remake
+    let restored = false;
+    if (parent.snapshot.private && root && parent.snapshot.tree) {
+      try {
+        restoreSnapshot(root, parent.snapshot.dir, parent.snapshot.tree);
+        restored = true;
+        warnings.push(`the snapshot run ${parent.id} read was cleaned up and has been made again from the same state (anything its worker wrote there is gone)`);
+      } catch {
+        // gone for good: say so below
+      }
+    }
+    if (!restored) throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
   }
   // Said once per run, on the report and when it starts in the background.
   if (!parent && !snap && !process.env.PITROOM_NO_SECRET_WARNING) {
@@ -276,6 +286,7 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
     prepareTree(meta);
     writeMeta(meta);
     const planned: Planned = { snapshot: meta.snapshot && { ...meta.snapshot }, cwd: meta.cwd };
+    let lastFailure: Failure | undefined;
 
     const chain: Target[] = [];
     for (const t of [meta.worker, ...meta.fallback]) if (!chain.some((c) => sameTarget(c, t))) chain.push(t);
@@ -289,28 +300,31 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
         writeMeta(meta);
         continue;
       }
-      const cannot = readPlace(meta, backend, planned, i + 1);
-      if (cannot) {
+      const place = readPlace(meta, backend, planned, i + 1);
+      if (place.error) {
         // like a failed attempt that did no work: the next worker runs, and the last one's reason is the run's error
         if (i === chain.length - 1) {
-          meta.error = cannot;
-          // no worker ran: not a run of this worker for its record (history.ts)
-          if (!meta.ran) meta.noAttempt = true;
+          // the run failed as the worker before it did (its rate limit stays one), or, when none ran, says nothing
+          // about any worker and stays out of their records (history.ts)
+          meta.error = lastFailure ? `${lastFailure.message}; then ${place.error}` : place.error;
+          if (lastFailure) meta.failureKind = lastFailure.kind;
+          else meta.noAttempt = true;
           break;
         }
-        (meta.attempts ??= []).push({ target: describeTarget(target), error: cannot });
+        (meta.attempts ??= []).push({ target: describeTarget(target), error: place.error });
         writeMeta(meta);
         continue;
       }
       meta.ran = target;
       writeMeta(meta);
       const own = meta.snapshot?.private && readsOwnSnapshot(backend);
-      const before = own ? changedIn(meta.snapshot!.dir) : [];
+      const before = own ? (place.before ?? changedIn(meta.snapshot!.dir)) : [];
       result = await attempt(meta, backend, target);
       if (own) strayWrites(meta, backend, before);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
+      lastFailure = why;
       if (why.kind === 'rate-limited') recordCooldown(cooldownKey(target, backend), describeTarget(target), why.message);
       if (!target.model && backend.defaultModel) {
         // The CLI's default just failed: don't retry the same model under its explicit name.
@@ -445,49 +459,60 @@ function prepareTree(meta: RunMeta): void {
   }
 }
 
-/** A worker whose CLI may write in a read run: it never reads the project, nor a snapshot another run shares. */
 /** Where a read run was meant to read before any worker that may write got a snapshot of its own. */
 interface Planned {
   snapshot?: RunMeta['snapshot'];
   cwd: string;
+  /** The last snapshot of the run's own, and where in it the worker reads. */
+  own?: { snapshot: NonNullable<RunMeta['snapshot']>; cwd: string };
 }
 
 /**
  * Where a read run's worker reads, settled just before each attempt: the clean snapshot planned for it (secret-looking
  * files, readIn), made on first use and shared; for a worker that may write, a snapshot of the run's own. A worker
- * after it goes back to the planned place, so it never reads what the other one wrote. Returns why the worker cannot
- * run, if it cannot.
+ * after it goes back to the planned place, so it never reads what the other one wrote. Says why the worker cannot
+ * run, if it cannot, and what was already changed in its own snapshot when that is known without looking.
  */
-function readPlace(meta: RunMeta, backend: Backend, planned: Planned, attemptNo: number): string | undefined {
+function readPlace(meta: RunMeta, backend: Backend, planned: Planned, attemptNo: number): { error?: string; before?: string[] } {
   const root = meta.repoRoot;
-  if (!root || meta.mode !== 'read') return undefined;
-  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, attemptNo);
+  if (!root || meta.mode !== 'read') return {};
+  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, planned, attemptNo);
   if (meta.snapshot?.private && !meta.parent) {
     meta.snapshot = planned.snapshot && { ...planned.snapshot };
     meta.cwd = planned.cwd;
   }
-  if (meta.snapshot && !meta.snapshot.dir) sharedSnapshot(meta, root);
-  return undefined;
+  if (meta.snapshot && !meta.snapshot.dir) {
+    sharedSnapshot(meta, root);
+    // made once: a later worker going back to the planned place finds it made
+    planned.snapshot = meta.snapshot && { ...meta.snapshot };
+    planned.cwd = meta.cwd;
+  }
+  return {};
 }
 
-function ownSnapshot(meta: RunMeta, root: string, backend: Backend, attemptNo: number): string | undefined {
+function ownSnapshot(meta: RunMeta, root: string, backend: Backend, planned: Planned, attemptNo: number): { error?: string; before?: string[] } {
   // a follow-up reads the snapshot its parent had; --in-place and reviews read the directory (prepareRun warned)
-  if (meta.parent || meta.inPlace || meta.reviewOf) return undefined;
+  if (meta.parent || meta.inPlace || meta.reviewOf) return {};
   // an earlier attempt's own snapshot is reused only while nothing was written in it
-  if (meta.snapshot?.private && !changedIn(meta.snapshot.dir).length) return undefined;
-  const left = meta.snapshot?.left ?? [];
+  if (planned.own && !changedIn(planned.own.snapshot.dir).length) {
+    meta.snapshot = { ...planned.own.snapshot };
+    meta.cwd = planned.own.cwd;
+    return { before: [] };
+  }
+  const left = planned.snapshot?.left ?? [];
   try {
-    const s = readSnapshot(root, meta.snapshot?.private ? `${meta.id}-${attemptNo}` : meta.id);
+    const s = readSnapshot(root, planned.own ? `${meta.id}-${attemptNo}` : meta.id);
     meta.snapshot = { dir: s.dir, tree: s.tree, left, private: true };
     meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
     if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
+    planned.own = { snapshot: { ...meta.snapshot }, cwd: meta.cwd };
     const note = `${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)`;
     if (!meta.warnings.some((w) => w.startsWith(note))) {
       meta.warnings.push(`${note}${left.length ? `; the secret-looking files (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', …' : ''}) and git-ignored files are not in it` : ''}`);
     }
-    return undefined;
+    return { before: s.created ? [] : undefined };
   } catch (e) {
-    return `could not make a snapshot for ${backend.name} (${(e as Error).message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself`;
+    return { error: `could not make a snapshot for ${backend.name} (${(e as Error).message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself` };
   }
 }
 

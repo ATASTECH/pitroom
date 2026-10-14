@@ -235,3 +235,34 @@ test('snapshot: runs\' own snapshots keep their own quota when pruning, so they 
   assert.ok(left.includes('a'.repeat(40)), 'an older shared snapshot stays');
   assert.equal(left.filter((n) => n.includes('-')).length, 6, 'the newest few own snapshots stay');
 });
+
+test('snapshot: Antigravity after another worker in between still gets a fresh snapshot; a pruned own snapshot is made again for a follow-up', () => {
+  const s = sandbox();
+  s.config({ worker: 'antigravity:model-a', fallback: ['opencode:mock/limited', 'antigravity:model-b'] });
+  const env = { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl', MOCK_RATE_LIMIT_MODELS: 'mock/limited' };
+  s.run(['run', 'where is sub?'], env);
+  const [a, b] = agyCalls(s).slice(-2);
+  assert.notEqual(real(a.cwd), real(b.cwd), 'model-b does not read what model-a wrote');
+  // a follow-up whose own snapshot was pruned gets it made again
+  const meta = JSON.parse(s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK }).stdout);
+  fs.chmodSync(meta.snapshot.dir, 0o755);
+  for (const f of fs.readdirSync(meta.snapshot.dir)) if (f !== '.git') fs.chmodSync(path.join(meta.snapshot.dir, f), 0o644);
+  fs.rmSync(meta.snapshot.dir, { recursive: true, force: true });
+  const r = s.run(['run', '--json', '--continue', meta.id, 'and sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  const follow = JSON.parse(r.stdout);
+  assert.equal(follow.state, 'done', r.stdout + r.stderr);
+  assert.ok(follow.warnings.some((w) => /was cleaned up and has been made again/.test(w)));
+  assert.ok(fs.existsSync(path.join(meta.snapshot.dir, 'app.txt')));
+});
+
+test('snapshot: when Antigravity cannot run after a rate-limited worker, the run is that worker\'s rate limit, not a new failure', () => {
+  const s = sandbox();
+  fs.mkdirSync(path.join(s.base, 'home'), { recursive: true });
+  fs.writeFileSync(path.join(s.base, 'home', 'snapshots'), 'not a folder\n');
+  s.config({ worker: 'opencode:mock/limited', fallback: ['antigravity'] });
+  const meta = JSON.parse(s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_RATE_LIMIT_MODELS: 'mock/limited' }).stdout);
+  assert.equal(meta.state, 'failed');
+  assert.equal(meta.failureKind, 'rate-limited');
+  assert.equal(meta.noAttempt, undefined);
+  assert.match(meta.error, /then could not make a snapshot for Antigravity CLI/);
+});

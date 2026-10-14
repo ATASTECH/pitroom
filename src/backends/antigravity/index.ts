@@ -38,17 +38,24 @@ const userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path.join(os.homed
 
 const TOKEN = 'antigravity-oauth-token';
 
-const words = (c: string) => escapeRegex(c).replace(/ /g, '\\s+');
+/** A forbidden command as a regex: any spacing, and git's global options (`--no-pager`, `-P`) before its subcommand. */
+const words = (c: string) => {
+  const spaced = (t: string) => escapeRegex(t).replace(/ /g, '\\s+');
+  return c.startsWith('git ') ? `git(\\s+-[^\\s;&|]+)*\\s+${spaced(c.slice(4))}` : spaced(c);
+};
 
 /**
- * Where a command starts in a command line: at its beginning or after a separator (`;`, `&&`, `||`, `|`, `&`, a
- * subshell or command substitution), behind any `VAR=value` assignments and wrappers that run the rest (`env`,
- * `command`, `exec`, `nohup`, `time`, `timeout`, `nice`, `xargs`, `stdbuf`, `setsid`), with their options and
- * numbers (`env -i`, `nice -n 5`, `timeout 60`, `xargs -0`). agy matches a rule against the whole command line with
- * a regex, so the rule itself has to find every command in it.
+ * Where a command starts in a command line: at its beginning, after a separator (`;`, `&&`, `||`, `|`, `&`, a
+ * subshell or command substitution) or after find's `-exec`/`-execdir`/`-ok`, behind any `VAR=value` assignments
+ * (quoted values too) and wrappers that run the rest (`env`, `command`, `exec`, `nohup`, `time`, `timeout`, `nice`,
+ * `xargs`, `stdbuf`, `setsid`) with their options, option values and numbers (`env -i`, `env -u FOO`, `nice -n 5`,
+ * `timeout 60`, `xargs -I {}`). agy matches a rule against the whole command line with a regex, so the rule itself
+ * has to find every command in it. It stays a pattern: the git guard is what holds for git whatever the spelling.
  */
-const WRAPPER = '(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*';
-const START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
+const ASSIGN = `\\w+=("[^"]*"|'[^']*'|\\S*)`;
+const OPTION = `(-\\S+(\\s+[^-\\s;&|]\\S*)?|\\d\\S*|${ASSIGN})`;
+const WRAPPER = `(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+${OPTION})*`;
+const START = `(^|[;&|(\`\\n]|\\$\\(|\\s-(exec|execdir|ok|okdir)\\s)\\s*((${ASSIGN}|${WRAPPER})\\s+)*`;
 const END = '(\\s|$|[;&|)`])';
 
 /** The command deny rules: Pitroom's forbidden commands, git by path or with options that point it elsewhere, and shells that would hide a command in a string. */
@@ -56,7 +63,7 @@ export function denyCommandRules(): string[] {
   return [
     `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join('|')})${END})`,
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
-    `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
+    `command(regex:${START}(\\S*[\\\\/])?git(\\s+-[^\\s;&|]+)*\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
     // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
     `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,

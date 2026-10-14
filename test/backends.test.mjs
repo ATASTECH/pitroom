@@ -438,9 +438,12 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
     // wrappers with options, and every spelling of a recursive delete
     'env -i rm -rf src', 'nice -n 5 claude -p x', 'find . | xargs -0 rm -rf', 'timeout 60 agy -p hi', 'stdbuf -oL gemini -p x',
     'rm -r -f src', 'rm -Rf src', 'rm --recursive --force src', 'rm src -rf', 'rm -r src',
+    // as an argument of find or xargs, behind option values or quoted assignments, git with global options
+    'find . -exec rm -rf {} +', 'find . -name x -execdir rm -r {} ;', 'xargs -I {} rm -rf {}', 'env -u FOO rm -rf x',
+    'FOO="a b" rm -rf x', "BAR='c' claude -p x", 'git --no-pager push', 'git -P commit -m x', 'git --no-pager -C . log',
   ];
   for (const c of forbidden) assert.ok(denied('command', c), c);
-  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini', 'rm notes-r.txt', 'rm a.txt; ls -R', 'timeout 60 npm test', 'env -i node x.js']) {
+  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini', 'rm notes-r.txt', 'rm a.txt; ls -R', 'timeout 60 npm test', 'env -i node x.js', 'git --no-pager diff', 'find . -exec grep -l x {} +', 'FOO="a b" npm test']) {
     assert.ok(!denied('command', c), c);
   }
   assert.ok(denied('mcp', 'linter/lint') && denied('read_url', 'https://example.com'));
@@ -465,6 +468,14 @@ test('antigravity: the parser keeps an answer after a retried error, and steps w
   assert.equal(noIndex.usage.toolCalls, 2);
   assert.equal(noIndex.timeline.filter((t) => t.kind === 'tool').length, 2);
   assert.equal(noIndex.finalText, 'SUMMARY: two reads');
+  // a repeated DONE update adds its tokens once; an error object without a message still names its code
+  const step = { type: 'step_update', step_update: { step_index: 3, state: 'DONE', step_type: 'agent_response', text_delta: '', usage: { input_tokens: 5000, total_tokens: 5000 } } };
+  assert.equal(b.parse(lines(step, step)).usage.total, 5000);
+  const coded = b.parse(lines({ type: 'result', status: 'ERROR', error: { code: 'RESOURCE_EXHAUSTED' } }));
+  assert.equal(b.failure(coded, '', 1)?.kind, 'rate-limited');
+  const refused = b.parse(lines({ type: 'step_update', step_update: { step_index: 1, state: 'DONE', step_type: 'tool', tool_info: { name: 'write_to_file', parameters: { TargetFile: '/p/a' }, error: { code: 'PERMISSION_DENIED' } } } }));
+  assert.equal(refused.edits.length, 0);
+  assert.equal(refused.usage.denied, 1);
 });
 
 test('deny list: one list for every worker; Gemini\'s rule file and OpenCode\'s profiles name every other agent too', () => {

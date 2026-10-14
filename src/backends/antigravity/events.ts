@@ -20,6 +20,7 @@ const OK = /^(success|succeeded|ok|done|completed?)$/i;
 export function parseEvents(jsonl: string): ParsedRun {
   const usage: Usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
   const stepUsage: unknown[] = [];
+  const usageSeen = new Set<string>();
   const tools: Record<string, number> = {};
   const edits: string[] = [];
   const timeline: Step[] = [];
@@ -117,7 +118,11 @@ export function parseEvents(jsonl: string): ParsedRun {
           if (ok && EDIT_TOOLS.has(name) && file) edits.push(String(file));
         }
       }
-      if (finished && s.usage && typeof s.usage === 'object') stepUsage.push(s.usage);
+      // a step's own usage, once per step however often its DONE update repeats
+      if (finished && s.usage && typeof s.usage === 'object' && !usageSeen.has(`${kind}:${key}`)) {
+        usageSeen.add(`${kind}:${key}`);
+        stepUsage.push(s.usage);
+      }
     } else if (type === 'result') {
       sessionId ??= id(e.conversation_id);
       model ??= id(e.model);
@@ -136,7 +141,7 @@ export function parseEvents(jsonl: string): ParsedRun {
           : `agy ended with status ${status}`);
       }
     } else if (type === 'error') {
-      streamError ??= errText(e) || errText(e.error) || 'Antigravity CLI error';
+      streamError ??= (typeof e.message === 'string' && e.message) || errText(e.error) || 'Antigravity CLI error';
     }
   }
   // An error the run never recovered from: no result came, or the result has no answer.
@@ -161,7 +166,13 @@ function add(u: Usage, r: any): void {
 
 const id = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
-/** An error's text: a string, or an object's `message`; an empty object is no error. */
-const errText = (v: any): string => (typeof v === 'string' ? v : typeof v?.message === 'string' ? v.message : '');
+/** An error's text: a string, an object's `message` (with its `code`), or the object itself; an empty object is no error. */
+function errText(v: any): string {
+  if (typeof v === 'string') return v;
+  if (!v || typeof v !== 'object' || !Object.keys(v).length) return '';
+  const code = typeof v.code === 'string' || typeof v.code === 'number' ? String(v.code) : '';
+  const message = typeof v.message === 'string' ? v.message : typeof v.reason === 'string' ? v.reason : '';
+  return [code, message].filter(Boolean).join(': ') || JSON.stringify(v);
+}
 
 const str = (v: unknown): string => (typeof v === 'string' ? v : v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));

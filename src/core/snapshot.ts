@@ -43,6 +43,23 @@ export function readSnapshot(root: string, owner?: string): { dir: string; tree:
     touch(dest);
     return { dir: dest, tree, created: false };
   }
+  materialize(root, tree, dest);
+  prune();
+  return { dir: dest, tree, created: true };
+}
+
+/**
+ * A run's own snapshot that was pruned, made again from the same tree, so its follow-up can go on (what the worker
+ * wrote there is gone). Throws when git no longer has the tree.
+ */
+export function restoreSnapshot(root: string, dir: string, tree: string): void {
+  const rel = path.relative(snapshotsDir(), dir);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`not a snapshot: ${dir}`);
+  if (!fs.existsSync(path.join(dir, '.git'))) materialize(root, tree, dir);
+}
+
+/** A checkout of `tree` at `dest`, files read-only, appearing there whole (made aside, then renamed). */
+function materialize(root: string, tree: string, dest: string): void {
   const tmp = path.join(snapshotsDir(), `.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`);
   try {
     createIsolatedCopy(root, tree, tmp);
@@ -62,8 +79,6 @@ export function readSnapshot(root: string, owner?: string): { dir: string; tree:
     }
     throw e;
   }
-  prune();
-  return { dir: dest, tree, created: true };
 }
 
 function touch(dir: string): void {
