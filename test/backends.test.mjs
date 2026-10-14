@@ -564,6 +564,11 @@ test('antigravity: what the task names outside the workspace is readable, minus 
   const dangling = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-dangling-'));
   fs.symlinkSync(path.join(dangling, 'missing'), path.join(dangling, 'later'));
   assert.ok(!settingsFor(`PROMPT-SENTINEL read ${dangling}`).s.permissions.allow.some((r) => r.includes('agy-dangling-')));
+  // macOS file names ignore case: ~/LIBRARY is ~/Library, and is compared as such
+  if (process.platform === 'darwin' && fs.existsSync(path.join(os.homedir(), 'Library', 'Preferences'))) {
+    const upper = settingsFor(`PROMPT-SENTINEL read ${path.join(os.homedir(), 'LIBRARY', 'Preferences')}`).s;
+    assert.ok(!upper.permissions.allow.some((r) => /library[\\/]preferences/i.test(r)), upper.permissions.allow.join('\n'));
+  }
   // in a snapshot or an isolated copy, the project's paths are the copy's; a longer name is another folder
   const { inv } = settingsFor('PROMPT-SENTINEL fix /work/proj/src/a.ts, not /work/proj-old/b.ts; see /work/proj.', { project: { root: '/work/proj', copy: '/state/copy' } });
   const prompt = inv.args[inv.args.indexOf('-p') + 1];

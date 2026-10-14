@@ -110,7 +110,7 @@ export function denyCommandRules(): string[] {
 export function workerSettings(workspace: string, workerHome: string, reads: OutsideRead[] = []) {
   const real = (p: string) => {
     try {
-      return fs.realpathSync(p);
+      return fs.realpathSync.native(p);
     } catch {
       return p;
     }
@@ -194,7 +194,7 @@ function pathsIn(prompt: string): { raw: string; at: number; abs: string }[] {
 
 const realOf = (p: string): string | undefined => {
   try {
-    return fs.realpathSync(p);
+    return fs.realpathSync.native(p);
   } catch {
     return undefined;
   }

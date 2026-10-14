@@ -561,7 +561,7 @@ function denyCommandRules() {
 function workerSettings(workspace, workerHome3, reads = []) {
   const real = (p) => {
     try {
-      return fs6.realpathSync(p);
+      return fs6.realpathSync.native(p);
     } catch {
       return p;
     }
@@ -626,7 +626,7 @@ function pathsIn(prompt) {
 }
 var realOf = (p) => {
   try {
-    return fs6.realpathSync(p);
+    return fs6.realpathSync.native(p);
   } catch {
     return void 0;
   }
