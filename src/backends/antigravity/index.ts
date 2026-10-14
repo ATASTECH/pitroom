@@ -246,6 +246,7 @@ export function classify(message: string): FailureKind {
 }
 
 const TIMED_OUT = /print timeout after/i;
+const BLOCKED = /^This request was blocked by \S+ filters\b/;
 
 function failure(run: ParsedRun, stderr: string, exitCode: number | null): Failure | undefined {
   const lines = stderr.trim().split('\n').map((l) => l.trim()).filter(Boolean);
@@ -253,6 +254,8 @@ function failure(run: ParsedRun, stderr: string, exitCode: number | null): Failu
   const envelope = lines.find((l) => l.startsWith('AGY_ERROR'));
   const detail = (envelope && fromEnvelope(envelope)) ?? lines.find((l) => /RESOURCE_EXHAUSTED|error|failed|quota|exhausted|denied|not found|\bsign.?in\b/i.test(l) && !TIMED_OUT.test(l));
   if (exitCode === 0 && !run.error) {
+    // a prompt the model's safety filter blocks comes back as a normal answer with status SUCCESS
+    if (BLOCKED.test(run.finalText)) return { kind: 'other', message: `the model's filter blocked the request: ${run.finalText.split('\n')[0]}` };
     if (run.finalText) return undefined;
     // agy ends with exit 0 and no answer for a used-up quota, its own timeout, a refused tool call (which discards
     // the whole turn) and, in some versions, a pipe it writes nothing to: none of them is an empty answer.

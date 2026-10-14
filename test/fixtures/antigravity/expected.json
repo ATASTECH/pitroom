@@ -58,6 +58,11 @@
       "exitCode": null,
       "kind": "other",
       "messageIncludes": "agy exited"
+    },
+    "filter-blocked": {
+      "exitCode": 0,
+      "kind": "other",
+      "messageIncludes": "the model's filter blocked the request"
     }
   }
 }

@@ -677,11 +677,13 @@ function classify(message) {
   return "other";
 }
 var TIMED_OUT = /print timeout after/i;
+var BLOCKED = /^This request was blocked by \S+ filters\b/;
 function failure(run2, stderr, exitCode) {
   const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
   const envelope = lines.find((l) => l.startsWith("AGY_ERROR"));
   const detail = (envelope && fromEnvelope(envelope)) ?? lines.find((l) => /RESOURCE_EXHAUSTED|error|failed|quota|exhausted|denied|not found|\bsign.?in\b/i.test(l) && !TIMED_OUT.test(l));
   if (exitCode === 0 && !run2.error) {
+    if (BLOCKED.test(run2.finalText)) return { kind: "other", message: `the model's filter blocked the request: ${run2.finalText.split("\n")[0]}` };
     if (run2.finalText) return void 0;
     if (detail) return { kind: classify(detail), message: detail };
     if (lines.some((l) => TIMED_OUT.test(l))) return { kind: "other", message: "agy stopped at its own --print-timeout before answering" };
