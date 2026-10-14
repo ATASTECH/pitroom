@@ -1,27 +1,29 @@
 // Antigravity CLI adapter: `agy -p … --output-format stream-json`, locked down with agy's own mechanisms where they
-// hold, and with Pitroom's where they do not:
-//   read-only                   agy has no read-only mode for -p runs (google-antigravity/antigravity-cli#45), and
-//                               --mode plan still writes in them (#1181). So `readOnly: 'snapshot'`: the core gives
-//                               every read run a read-only snapshot of its own, never the project or a shared one.
-//                               --mode plan is passed anyway; write and isolate use accept-edits.
-//   --sandbox                   shell commands run in agy's terminal sandbox (the project writable, no network)
-//   ANTIGRAVITY_APP_DATA_DIR    a private data folder for workers (<pitroom home>/antigravity-home) whose
-//                               settings.json holds Pitroom's deny rules (secret files, history-changing git and
-//                               the like, other agents, MCP, the web) and keeps file tools inside the workspace.
-//                               The user's sign-in file is linked into it (macOS and secret-service keep it in the
-//                               keychain instead). Conversations of workers stay there too.
-// Never --dangerously-skip-permissions. A refused tool call ends agy's whole turn with status SUCCESS and exit 0
-// (#1062), so a run without an answer is a failure here. Everything comes from agy's documentation and the reports of
-// projects that run it headless; it has not been checked against a real agy yet (docs/backends.md): experimental.
+// hold, and with Pitroom's where they do not (checked against agy 1.3.5, docs/backends.md):
+//   read-only    agy has no read-only mode for -p runs (google-antigravity/antigravity-cli#45), and --mode plan still
+//                writes in them (#1181). So `readOnly: 'snapshot'`: the core gives every read run a read-only snapshot
+//                of its own, never the project or a shared one. --mode plan is passed anyway (it answers a question
+//                directly); write and isolate use accept-edits.
+//   --sandbox    shell commands run in agy's terminal sandbox (the workspace writable, .git read-only, no network)
+//   HOME         agy reads its settings only from ~/.gemini/antigravity-cli/settings.json (no variable moves it), so
+//                a worker runs with a home of Pitroom's own, one per workspace (<pitroom home>/antigravity-home/<id>),
+//                whose settings.json holds Pitroom's rules: commands granted (a headless run refuses an ungranted
+//                one), and denied: the workspace's secret files by absolute path, history-changing git and the like,
+//                other agents, MCP and the web. The user's sign-in is linked in (the keychain folder on macOS, the
+//                token file elsewhere). Conversations of workers stay there too, so a follow-up finds its own.
+// Never --dangerously-skip-permissions. A refused tool call can end agy's turn with status SUCCESS, no answer and
+// exit 0, so a run without an answer is a failure here.
+import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { findSecretFiles } from '../../core/secrets.js';
 import { home } from '../../core/store.js';
 import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
 import { linkInto, writeIfChanged } from '../home.js';
-import { escapeRegex, splitModel } from '../text.js';
+import { splitModel } from '../text.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
@@ -33,77 +35,180 @@ function agy(args: string[], timeout = 30_000) {
   return { ok: r.status === 0, out: r.stdout ?? '', err: r.stderr ?? '', missing: !!r.error };
 }
 
-/** The user's own agy folder (settings, the sign-in file where there is no keychain). */
-const userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path.join(os.homedir(), '.gemini', 'antigravity-cli');
+/** agy's data folder under a home: settings.json, conversations, the sign-in file where there is no keychain. */
+const dataDir = (h: string) => path.join(h, '.gemini', 'antigravity-cli');
+
+/** The user's own agy folder. */
+const userDir = () => dataDir(os.homedir());
 
 const TOKEN = 'antigravity-oauth-token';
 
-/** A forbidden command as a regex: any spacing, and git's global options (`--no-pager`, `-P`) before its subcommand. */
-const words = (c: string) => {
-  const spaced = (t: string) => escapeRegex(t).replace(/ /g, '\\s+');
-  return c.startsWith('git ') ? `git(\\s+-[^\\s;&|]+)*\\s+${spaced(c.slice(4))}` : spaced(c);
-};
+/** Secrets outside any workspace that a worker never reads, as paths under the user's home. */
+const HOME_SECRETS = ['.ssh', '.aws', '.gnupg', '.netrc', '.docker', '.kube', '.config/gcloud', '.config/gh', '.gemini', 'Library/Keychains'];
 
 /**
- * Where a command starts in a command line: at its beginning, after a separator (`;`, `&&`, `||`, `|`, `&`, a
- * subshell or command substitution) or after find's `-exec`/`-execdir`/`-ok`, behind any `VAR=value` assignments
- * (quoted values too) and wrappers that run the rest (`env`, `command`, `exec`, `nohup`, `time`, `timeout`, `nice`,
- * `xargs`, `stdbuf`, `setsid`) with their options, option values and numbers (`env -i`, `env -u FOO`, `nice -n 5`,
- * `timeout 60`, `xargs -I {}`). agy matches a rule against the whole command line with a regex, so the rule itself
- * has to find every command in it. It stays a pattern: the git guard is what holds for git whatever the spelling.
+ * The command deny rules, in agy's matching: a rule is a command prefix compared word by word, after agy has split
+ * the command line at `;`, `&&`, `|` and the like and taken off wrappers such as `env -i`, `timeout 60` or `xargs`.
+ * `regex:` rules compare each word with one regex word (agy splits the pattern at spaces and drops backslashes, so
+ * the patterns have neither; `.*` stands for exactly one word). So each forbidden command is denied as it is, by
+ * path (`/usr/bin/git commit`), behind git's global options (`git --no-pager push`), and a recursive delete
+ * wherever its option stands. The git guard is what holds for git whatever the spelling; .git is read-only in the
+ * sandbox too.
  */
-const ASSIGN = `\\w+=("[^"]*"|'[^']*'|\\S*)`;
-const OPTION = `(-\\S+(\\s+[^-\\s;&|]\\S*)?|\\d\\S*|${ASSIGN})`;
-const WRAPPER = `(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+${OPTION})*`;
-const START = `(^|[;&|(\`\\n]|\\$\\(|\\s-(exec|execdir|ok|okdir)\\s)\\s*((${ASSIGN}|${WRAPPER})\\s+)*`;
-const END = '(\\s|$|[;&|)`])';
-
-/** The command deny rules: Pitroom's forbidden commands, git by path or with options that point it elsewhere, and shells that would hide a command in a string. */
 export function denyCommandRules(): string[] {
+  const subcommands = FORBIDDEN_COMMANDS.filter((c) => c.startsWith('git ')).map((c) => c.slice(4));
+  const anywhere = (cmd: string, option: string) => [0, 1, 2, 3, 4, 5].map((n) => `${cmd} ${'.* '.repeat(n)}${option}`);
   return [
-    `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join('|')})${END})`,
+    ...FORBIDDEN_COMMANDS.map((c) => `command(${c})`),
+    ...FORBIDDEN_COMMANDS.filter((c) => !c.startsWith('git ')).map((c) => `command(regex:.*/${c})`),
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
-    `command(regex:${START}(\\S*[\\\\/])?git(\\s+-[^\\s;&|]+)*\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
-    `command(regex:${START}\\S*[\\\\/]git${END})`,
-    // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
-    `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,
+    'command(regex:.*/git)',
+    'command(regex:git (-C|-c|--git-dir.*|--work-tree.*))',
+    `command(regex:git -.* (${subcommands.join('|')}))`,
+    `command(regex:git -.* -.* (${subcommands.join('|')}))`,
+    // a recursive delete however its options are spelled or placed (rm -Rf, rm -r -f, rm dir -rf, rm --recursive)
+    ...['rm', '.*/rm'].flatMap((rm) => [...anywhere(rm, '-[a-zA-Z]*[rR][a-zA-Z]*'), ...anywhere(rm, '--recursive')]).map((r) => `command(regex:${r})`),
+    // find runs what follows -exec itself, and agy does not take it apart; such a rule only holds when it spans the
+    // whole command (a prefix of it was seen not to match), so find with -exec, -ok or -delete is refused outright,
+    // up to six words before and after (grep -r does what find -exec grep did)
+    ...['find', '.*/find'].flatMap((find) => [0, 1, 2, 3, 4, 5, 6].flatMap((before) => [0, 1, 2, 3, 4, 5, 6].flatMap((after) => {
+      const words = (n: number) => ' .*'.repeat(n);
+      return [
+        ...(after ? [`${find}${words(before)} -(exec|execdir|ok|okdir)${words(after)}`] : []),
+        `${find}${words(before)} -delete${words(after)}`,
+      ];
+    }))).map((r) => `command(regex:${r})`),
+    // xargs runs its arguments as a command, and agy does not take it apart either; with a `{}` in it a rule has
+    // to span the whole command again, so the words after the command are spelled out too
+    ...['xargs', '.*/xargs'].flatMap((xargs) => [0, 1, 2, 3].flatMap((n) => [0, 1, 2, 3].flatMap((after) => [
+      `${xargs}${' .*'.repeat(n)} (.*/)?(${FORBIDDEN_COMMANDS.filter((c) => !c.includes(' ')).join('|')})${' .*'.repeat(after)}`,
+      `${xargs}${' .*'.repeat(n)} (.*/)?git (${subcommands.join('|')})${' .*'.repeat(after)}`,
+      `${xargs}${' .*'.repeat(n)} (.*/)?rm -[a-zA-Z]*[rR][a-zA-Z]*${' .*'.repeat(after)}`,
+    ]))).map((r) => `command(regex:${r})`),
+    // a command line with a `{}` in it is not split into commands: a rule is then matched against the whole line,
+    // so these find xargs and find wherever they stand in it
+    `command(regex:.*git (${subcommands.join('|')}).*)`,
+    'command(regex:.*rm -[a-zA-Z]*[rR].*)',
+    `command(regex:.*xargs .*rm -[a-zA-Z]*[rR].*)`,
+    `command(regex:.*xargs .*git .*(${subcommands.join('|')}).*)`,
+    'command(regex:.*find .*-(exec|execdir|ok|okdir) .*)',
+    'command(regex:.*find .*-delete.*)',
     // a command inside a string is not matched above
-    `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`,
+    'command(regex:(ba|z|da|k)?sh -[a-zA-Z]*c[a-zA-Z]*)',
+    'command(regex:.*/(ba|z|da|k)?sh -[a-zA-Z]*c[a-zA-Z]*)',
+    'command(eval)',
   ];
 }
 
 /**
- * Pitroom's settings for agy workers. One file for every mode, since a follow-up continues its conversation in the
- * same folder: what differs by mode is agy's own --mode. Deny beats allow in agy's rules.
+ * Pitroom's settings for agy workers in one workspace. One file for every mode, since a follow-up continues its
+ * conversation in the same home: what differs by mode is agy's own --mode. Deny beats allow in agy's rules.
+ * `read_file` rules take absolute paths only (a relative one breaks the sandbox), so the workspace's secret files are
+ * listed one by one. A denied read also denies the write.
  */
-export function workerSettings() {
+export function workerSettings(workspace: string, workerHome: string) {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync(p);
+    } catch {
+      return p;
+    }
+  };
+  const both = (p: string) => [...new Set([p, real(p)])];
+  const secrets = [
+    ...findSecretFiles(workspace).map((f) => path.join(workspace, f)),
+    ...HOME_SECRETS.map((f) => path.join(os.homedir(), f)).filter((p) => fs.existsSync(p)),
+    // the keychain link of the worker's own home
+    path.join(workerHome, 'Library'),
+  ];
   return {
-    // Shell commands run in agy's terminal sandbox without asking: a headless run cannot answer, and a command
-    // without a grant is refused (#1054), which ends the turn. Narrow command(…) grants are reported not to work in
-    // -p runs (#548), command(*) is; the deny rules below still win. Edits are approved by --mode accept-edits.
-    toolPermission: 'proceed-in-sandbox',
-    artifactReviewPolicy: 'always-proceed',
-    allowNonWorkspaceAccess: false,
+    ...baseSettings(),
     permissions: {
-      allow: ['command(*)'],
+      // plan mode writes its plan into agy's own data folder, which is outside the workspace; the user's toolchains
+      // under their home stay usable in the sandbox (read-only), which sees only what is granted besides the system
+      allow: [
+        'command(*)',
+        ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${p})`),
+        ...toolchains().flatMap(both).map((p) => `read_file(${p})`),
+      ],
       deny: [
-        // A denied read also denies the write of the same path.
-        'read_file(regex:(^|[\\\\/])\\.env($|\\.)|[^\\\\/]\\.env$|\\.(pem|p12|pfx|key)$|(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)|(^|[\\\\/])\\.netrc$)',
+        ...secrets.flatMap(both).map((p) => `read_file(${p})`),
         ...denyCommandRules(),
-        'mcp(regex:.*)',
-        // No web for agy workers: the rule is in the shared settings file, so --web cannot switch it on per run.
-        'read_url(regex:.*)',
+        'mcp(*)',
+        // No web for agy workers: the rule is in the settings file, so --web cannot switch it on per run.
+        'read_url(*)',
+        'execute_url(*)',
       ],
     },
   };
 }
 
-/** The private data folder of workers: its settings rewritten when they change, the user's sign-in linked in. */
-function workerDir(): string {
-  const dir = path.join(home(), 'antigravity-home');
-  writeIfChanged(path.join(dir, 'settings.json'), `${JSON.stringify(workerSettings(), null, 2)}\n`);
-  linkInto(dir, path.join(userDir(), TOKEN));
+/**
+ * The folders of PATH inside the user's home (an nvm or pyenv node/python, ~/.cargo/bin, ~/.local/bin). A `bin`
+ * inside a versioned install (…/versions/…, …/toolchains/…) brings its install along, as node needs its lib for npm;
+ * other folders only themselves, as their parent may hold credentials (~/.cargo/credentials.toml).
+ */
+function toolchains(): string[] {
+  const homeDir = os.homedir();
+  const inHome = (d: string) => {
+    const rel = path.relative(homeDir, d);
+    return !!rel && !rel.startsWith('..') && !path.isAbsolute(rel);
+  };
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter((d) => d && path.isAbsolute(d) && inHome(d) && fs.existsSync(d));
+  const install = (d: string) => (path.basename(d) === 'bin' && /[\\/](versions|toolchains)[\\/]/.test(d) ? path.dirname(d) : d);
+  return [...new Set(dirs.map(install))].filter((d) => !inHome(home()) || path.relative(home(), d).startsWith('..'));
+}
+
+/**
+ * Shell commands run in agy's terminal sandbox without asking: a headless run refuses an ungranted command, which
+ * can end the turn without an answer. command(*) grants them; the deny rules still win. Edits are approved by
+ * --mode accept-edits.
+ */
+function baseSettings() {
+  return {
+    enableTerminalSandbox: true,
+    toolPermission: 'proceed-in-sandbox',
+    artifactReviewPolicy: 'always-proceed',
+    allowNonWorkspaceAccess: false,
+  };
+}
+
+const HOMES_KEPT_DAYS = 14;
+
+/**
+ * The worker home for a workspace: its settings rewritten when they change, the user's sign-in linked in. Homes
+ * not used for two weeks are removed (their conversations with them: a follow-up then starts a new one).
+ */
+function workerHome(workspace: string): string {
+  const root = path.join(home(), 'antigravity-home');
+  const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
+  const dir = path.join(root, id);
+  fs.mkdirSync(dataDir(dir), { recursive: true });
+  writeIfChanged(path.join(dataDir(dir), 'settings.json'), `${JSON.stringify(workerSettings(workspace, dir), null, 2)}\n`);
+  // macOS finds the sign-in through the login keychain under $HOME/Library/Keychains; elsewhere it is a file
+  if (process.platform === 'darwin') {
+    fs.mkdirSync(path.join(dir, 'Library'), { recursive: true });
+    linkInto(path.join(dir, 'Library'), path.join(os.homedir(), 'Library', 'Keychains'));
+  } else {
+    linkInto(dataDir(dir), path.join(userDir(), TOKEN));
+  }
+  const now = new Date();
+  fs.utimesSync(dir, now, now);
+  pruneHomes(root, dir);
   return dir;
+}
+
+function pruneHomes(root: string, keep: string): void {
+  const cutoff = Date.now() - HOMES_KEPT_DAYS * 86_400_000;
+  try {
+    for (const name of fs.readdirSync(root)) {
+      const dir = path.join(root, name);
+      if (dir === keep || !/^[0-9a-f]{16}$/.test(name)) continue;
+      if (fs.statSync(dir).mtimeMs < cutoff) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    // best effort
+  }
 }
 
 function invocation(req: WorkerRequest) {
@@ -122,12 +227,16 @@ function invocation(req: WorkerRequest) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   const { command, prefix } = resolveCommand(binary());
-  return { command, args: [...prefix, ...args], env: { ANTIGRAVITY_APP_DATA_DIR: workerDir() } };
+  const workerDir = workerHome(req.cwd);
+  // The worker's commands see this home too: the user's own dotfiles stay out of their reach.
+  const env: Record<string, string> = { HOME: workerDir };
+  if (process.platform === 'win32') env.USERPROFILE = workerDir;
+  return { command, args: [...prefix, ...args], env };
 }
 
 export function classify(message: string): FailureKind {
   if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return 'rate-limited';
-  if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|unauthenticated|UNAUTHENTICATED|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
+  if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|authenticat|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
     return 'auth';
   }
   if (/model.{0,80}(not found|not available|no longer available|does not exist|unknown|unsupported|invalid)|unknown model|invalid model|NOT_FOUND|\b404\b/i.test(message)) {
@@ -157,10 +266,18 @@ function failure(run: ParsedRun, stderr: string, exitCode: number | null): Failu
   return { kind: classify(`${message} ${detail ?? ''}`), message };
 }
 
+/** agy continues an unknown conversation id as a new conversation, saying so only on stderr. */
+function warnings(_run: ParsedRun, stderr: string): string[] {
+  const lost = /conversation "([^"]+)" not found/i.exec(stderr);
+  return lost ? [`agy did not find the earlier conversation (${lost[1]}) and started a new one: this answer does not know the earlier turns`] : [];
+}
+
+/** `AGY_ERROR: {"short_error": "RESOURCE_EXHAUSTED (code 429): Individual quota reached…", "status": …}` */
 function fromEnvelope(line: string): string | undefined {
   try {
     const e = JSON.parse(line.slice(line.indexOf('{')));
-    const text = [e.code, e.message ?? e.error].filter(Boolean).join(': ');
+    if (typeof e.short_error === 'string' && e.short_error) return e.short_error;
+    const text = [e.status ?? e.code, e.message ?? e.error].filter((v) => typeof v === 'string' && v).join(': ');
     return text || undefined;
   } catch {
     return line.replace(/^AGY_ERROR:?\s*/, '') || undefined;
@@ -179,13 +296,14 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
     { level: 'ok', message: `Antigravity CLI ${version.out.trim().split('\n')[0]} at ${binary()}` },
     {
       level: 'warn',
-      message: 'the Antigravity worker is experimental: not yet checked against a real agy. agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes',
+      message: 'the Antigravity worker is in beta (checked against agy 1.3.5). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes',
     },
   ];
   if (process.platform === 'win32') {
     checks.push({ level: 'warn', message: "agy's permission rules and terminal sandbox are for macOS and Linux; on Windows run the Antigravity worker only with -i (an isolated copy)" });
   }
-  // On Linux without secret-service the sign-in is a file; macOS and secret-service keep it in the keychain.
+  // Workers run with a home of Pitroom's own: on macOS the sign-in is found through the linked keychain folder;
+  // elsewhere it is a file that is linked in.
   if (process.platform === 'linux' && !fs.existsSync(path.join(userDir(), TOKEN))) {
     checks.push({ level: 'warn', message: 'no Antigravity sign-in file found: if a run fails to sign in, run `agy` once and sign in with your Google account' });
   }
@@ -203,5 +321,6 @@ export const antigravity: Backend = {
   invocation,
   parse: parseEvents,
   failure,
+  warnings,
   doctor,
 };

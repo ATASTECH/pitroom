@@ -135,6 +135,8 @@ export interface Backend {
   parse(stdout: string): ParsedRun;
   /** Undefined when the run succeeded; otherwise the cause, classified for fallback. */
   failure(run: ParsedRun, stderr: string, exitCode: number | null): Failure | undefined;
+  /** What the CLI's output says the user should know about a finished run, shown with its warnings. */
+  warnings?(run: ParsedRun, stderr: string): string[];
   /** The model the CLI uses when none is given. */
   defaultModel?(): string | undefined;
   /** The model a finished session actually used. */

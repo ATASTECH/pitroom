@@ -407,8 +407,13 @@ test('antigravity: read is agy\'s plan mode, write and isolate accept edits; san
     assert.ok(inv.args.includes('--sandbox'), `${mode}: shell commands in agy's terminal sandbox`);
     assert.ok(after(inv, '--print-timeout'), 'agy\'s 5 minute default would cut long runs short');
     assert.ok(!inv.args.includes('-c') && !inv.args.includes('--continue'), 'the latest conversation is unsafe beside parallel workers');
-    assert.match(inv.env.ANTIGRAVITY_APP_DATA_DIR, /antigravity-home$/);
+    // agy reads its settings only from ~/.gemini/antigravity-cli: a home of Pitroom's own, one per workspace
+    assert.match(inv.env.HOME, /antigravity-home[\\/][0-9a-f]{16}$/);
+    assert.ok(!('ANTIGRAVITY_APP_DATA_DIR' in inv.env), 'agy ignores it');
   }
+  const a = b.invocation(request({ cwd: '/tmp/project-a' })).env.HOME;
+  assert.equal(b.invocation(request({ cwd: '/tmp/project-a', mode: 'write' })).env.HOME, a, 'a follow-up in another mode finds its conversation');
+  assert.notEqual(b.invocation(request({ cwd: '/tmp/project-b' })).env.HOME, a);
   const followUp = b.invocation(request({ model: 'gemini-3.8-flash#low', sessionId: 'SES-1' }));
   assert.equal(after(followUp, '--conversation'), 'SES-1');
   assert.equal(after(followUp, '--model'), 'gemini-3.8-flash');
@@ -417,36 +422,69 @@ test('antigravity: read is agy\'s plan mode, write and isolate accept edits; san
   assert.equal(after(b.invocation(request({ prompt: '-x looks like a flag' })), '-p'), ' -x looks like a flag');
 });
 
+/**
+ * agy's command matching as agy 1.3.5 was seen to do it: it splits the command line into simple commands and takes
+ * off wrappers such as `env -i` itself (checked against the real CLI, not here); a rule is then a prefix compared
+ * word by word, and a `regex:` rule compares each command word with one pattern word, the whole word.
+ */
+function agyDenies(rules, command) {
+  const words = command.trim().split(/\s+/);
+  return rules.some((rule) => {
+    const target = /^command\((.*)\)$/.exec(rule)?.[1];
+    if (target === undefined) return false;
+    const regex = target.startsWith('regex:');
+    const want = (regex ? target.slice(6) : target).split(' ');
+    return want.length <= words.length && want.every((w, i) => (regex ? new RegExp(`^(?:${w})$`).test(words[i]) : w === words[i]));
+  });
+}
+
 test('antigravity: the private settings deny secrets, history-changing git, other agents, MCP and the web, and keep file tools in the workspace', () => {
   const b = getBackend('antigravity');
-  const dir = b.invocation(request()).env.ANTIGRAVITY_APP_DATA_DIR;
-  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-workspace-'));
+  for (const f of ['.env', 'sub/.env.local', 'server.pem', 'README.md', 'src/env.ts']) {
+    fs.mkdirSync(path.dirname(path.join(workspace, f)), { recursive: true });
+    fs.writeFileSync(path.join(workspace, f), 'x');
+  }
+  const home = b.invocation(request({ cwd: workspace })).env.HOME;
+  const settings = JSON.parse(fs.readFileSync(path.join(home, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8'));
   assert.equal(settings.allowNonWorkspaceAccess, false);
   assert.equal(settings.toolPermission, 'proceed-in-sandbox', 'commands run sandboxed, never unsandboxed without asking');
-  assert.deepEqual(settings.permissions.allow, ['command(*)'], 'without a grant agy refuses a command and ends the turn; narrow grants do not work in -p runs');
+  assert.equal(settings.enableTerminalSandbox, true);
+  assert.equal(settings.permissions.allow[0], 'command(*)', 'without a grant a headless agy refuses every command');
+  const allow = settings.permissions.allow.slice(1);
+  assert.ok(allow.every((r) => /^write_file\(.*brain\)$/.test(r) || r.startsWith('read_file(')), 'only its own plan folder is writable outside the workspace');
+  assert.ok(allow.filter((r) => r.startsWith('read_file(')).every((r) => path.isAbsolute(r.slice(10, -1))), 'toolchains on PATH, read-only');
   assert.equal(b.capabilities.readOnly, 'snapshot', 'agy has no read-only mode for -p runs: read runs read a snapshot');
-  const rule = (action) => settings.permissions.deny.filter((r) => r.startsWith(`${action}(regex:`)).map((r) => new RegExp(r.slice(action.length + 7, -1)));
-  const denied = (action, target) => rule(action).some((re) => re.test(target));
-  for (const f of ['/p/.env', '/p/.env.local', '/p/prod.env', '/p/server.pem', '/home/u/.ssh/id_ed25519', 'C:\\p\\.env']) assert.ok(denied('read_file', f), f);
-  for (const f of ['/p/src/env.ts', '/p/README.md', '/p/environment.js']) assert.ok(!denied('read_file', f), f);
+  const deny = settings.permissions.deny;
+  // read_file rules are absolute paths (a relative one breaks agy's sandbox, a regex is not read)
+  const reads = deny.filter((r) => r.startsWith('read_file(')).map((r) => r.slice(10, -1));
+  assert.ok(reads.every((p) => path.isAbsolute(p)), reads.join('\n'));
+  for (const f of ['.env', 'sub/.env.local', 'server.pem']) assert.ok(reads.includes(path.join(workspace, f)), f);
+  for (const f of ['README.md', 'src/env.ts']) assert.ok(!reads.includes(path.join(workspace, f)), f);
+  // agy splits a pattern at spaces and drops backslashes
+  assert.ok(deny.every((r) => !r.includes('\\')), 'no backslash in a rule');
   const forbidden = [
-    'git commit -am x', 'git push', ' rm -rf /', 'sudo ls', 'agy -p hi', 'pitroom run x', '/usr/bin/git commit',
-    // chained, wrapped, prefixed or respelled: agy matches the whole command line, so the rule must find them
-    'npm test && rm -rf src', 'cd x; claude -p hi', 'ls | xargs kill', 'env sudo ls', 'FOO=1 git push', 'git  commit',
-    'echo $(git push)', '(git commit -m x)', 'nohup codex exec x &', 'git -C /other/repo status', 'git -c core.x=y commit',
-    'bash -c "git push"', 'sh -lc x', 'eval "$CMD"', 'true\ngit push',
-    // wrappers with options, and every spelling of a recursive delete
-    'env -i rm -rf src', 'nice -n 5 claude -p x', 'find . | xargs -0 rm -rf', 'timeout 60 agy -p hi', 'stdbuf -oL gemini -p x',
-    'rm -r -f src', 'rm -Rf src', 'rm --recursive --force src', 'rm src -rf', 'rm -r src',
-    // as an argument of find or xargs, behind option values or quoted assignments, git with global options
-    'find . -exec rm -rf {} +', 'find . -name x -execdir rm -r {} ;', 'xargs -I {} rm -rf {}', 'env -u FOO rm -rf x',
-    'FOO="a b" rm -rf x', "BAR='c' claude -p x", 'git --no-pager push', 'git -P commit -m x', 'git --no-pager -C . log',
+    'git commit -am x', 'git push', 'rm -rf /', 'sudo ls', 'agy -p hi', 'pitroom run x', 'claude -p x', 'npm publish',
+    // by path, with git's global options, and every spelling of a recursive delete
+    '/usr/bin/git commit', '/usr/bin/git status', '/usr/local/bin/claude -p x', '/bin/rm -rf x',
+    'git -C /other/repo status', 'git -c core.x=y commit', 'git --no-pager push', 'git -P commit -m x', 'git --no-pager -P push',
+    'rm -r -f src', 'rm -Rf src', 'rm --recursive --force src', 'rm src -rf', 'rm -r src', 'rm -f a b c src -r', 'rm a --recursive',
+    // a command hidden in a string, or run by find
+    'bash -c "git push"', 'sh -lc x', '/bin/sh -c x', 'eval "$CMD"',
+    'find . -name src -exec rm -rf {} +', 'find . -type d -name x -execdir /bin/rm -r {} ;', 'find . -exec git add {} +', 'find . -name "*.tmp" -delete', 'find . -exec sudo ls ;',
+    'xargs rm -rf', 'xargs -0 rm -rf', 'xargs -I {} rm -rf {}', 'xargs -I {} git add {}', 'xargs sudo ls', '/usr/bin/xargs -0 /bin/rm -r',
   ];
-  for (const c of forbidden) assert.ok(denied('command', c), c);
-  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini', 'rm notes-r.txt', 'rm a.txt; ls -R', 'timeout 60 npm test', 'env -i node x.js', 'git --no-pager diff', 'find . -exec grep -l x {} +', 'FOO="a b" npm test']) {
-    assert.ok(!denied('command', c), c);
+  // a line with `{}` in it is matched whole (agy does not split it): forbidden commands anywhere in it
+  const whole = deny.filter((r) => r.startsWith('command(regex:')).map((r) => new RegExp(`^(?:${r.slice(14, -1)})$`));
+  for (const c of ['echo src | xargs -I {} rm -rf {}', 'ls && find . -name src -exec rm -rf {} +', 'ls | xargs -I {} git add {}', 'echo {} && git commit -m x', 'echo {}; rm -rf src']) {
+    assert.ok(whole.some((re) => re.test(c)), c);
   }
-  assert.ok(denied('mcp', 'linter/lint') && denied('read_url', 'https://example.com'));
+  assert.ok(!whole.some((re) => re.test('echo app.txt | xargs -I {} cat {}')));
+  for (const c of forbidden) assert.ok(agyDenies(deny, c), c);
+  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'rm notes-r.txt', 'rm a.txt', 'ls -R', 'git --no-pager diff', 'find . -name x', 'bash script.sh', 'xargs -0 wc -l', 'xargs -I {} cat {}']) {
+    assert.ok(!agyDenies(deny, c), c);
+  }
+  for (const r of ['mcp(*)', 'read_url(*)', 'execute_url(*)']) assert.ok(deny.includes(r), r);
 });
 
 test('antigravity: the parser keeps an answer after a retried error, and steps without an index are counted once', () => {
@@ -476,6 +514,26 @@ test('antigravity: the parser keeps an answer after a retried error, and steps w
   const refused = b.parse(lines({ type: 'step_update', step_update: { step_index: 1, state: 'DONE', step_type: 'tool', tool_info: { name: 'write_to_file', parameters: { TargetFile: '/p/a' }, error: { code: 'PERMISSION_DENIED' } } } }));
   assert.equal(refused.edits.length, 0);
   assert.equal(refused.usage.denied, 1);
+});
+
+test('antigravity: agy 1.3.5\'s stream: a refused call ends in state ERROR, an unanswered turn is a failure, a cut-short run counts its steps\' tokens', () => {
+  const b = getBackend('antigravity');
+  const fixture = (f) => fs.readFileSync(path.join(FIXTURES, 'antigravity', f), 'utf8');
+  // a command refused by a deny rule: the step ends in ERROR, the edit is not counted, the answer says so
+  const denied = b.parse(fixture('events/denied-command.jsonl'));
+  assert.equal(denied.timeline.find((s) => s.kind === 'shell')?.ok, false);
+  assert.match(denied.finalText, /git commit/);
+  // a command refused for want of a grant ends the turn without an answer: agy says SUCCESS and exits 0
+  const discarded = b.parse(fixture('failures/turn-discarded.stdout.jsonl'));
+  assert.equal(discarded.finalText, '');
+  assert.equal(discarded.usage.denied, 1, 'result.denied_actions');
+  // killed before its result: the session and the finished steps' tokens are still known
+  const cut = b.parse(fixture('failures/cut-short.stdout.jsonl'));
+  assert.ok(cut.sessionId && cut.usage.total > 0, JSON.stringify(cut.usage));
+  assert.equal(cut.model, 'gemini-3.8-flash-medium', 'init.model');
+  // an unknown conversation id: agy starts a new one and says so only on stderr
+  assert.match(b.warnings(denied, 'warning: conversation "SES-1" not found\n').join(''), /did not find the earlier conversation \(SES-1\)/);
+  assert.deepEqual(b.warnings(denied, ''), []);
 });
 
 test('deny list: one list for every worker; Gemini\'s rule file and OpenCode\'s profiles name every other agent too', () => {

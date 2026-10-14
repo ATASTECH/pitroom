@@ -148,7 +148,8 @@ test('snapshot: a worker that may write in a read run (Antigravity) reads a snap
   assert.equal(meta.snapshot.private, true);
   assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')), 'the project itself is untouched');
   assert.equal(s.status(), before);
-  assert.ok(meta.warnings.some((w) => /^READ-ONLY VIOLATION: Antigravity CLI wrote in its read-only snapshot .*stray\.txt/.test(w)), meta.warnings.join('\n'));
+  // only what it wrote: the snapshot's other files, all "added" to a checkout without a commit, are not blamed
+  assert.ok(meta.warnings.some((w) => /^READ-ONLY VIOLATION: Antigravity CLI wrote in its read-only snapshot [^:]*: stray\.txt$/.test(w)), meta.warnings.join('\n'));
   // another worker reading a snapshot of the same state does not see the stray file
   s.run(['run', 'where is app.txt?'], { PITROOM_READ_IN: 'snapshot' });
   const shared = ranIn(s);
@@ -165,7 +166,7 @@ test('snapshot: a worker after Antigravity in the chain never reads what it wrot
   const s = sandbox();
   // agy writes, then fails (no answer): the next worker reads the project as planned, not agy's snapshot
   s.config({ worker: 'antigravity', fallback: ['opencode:mock/good-model'] });
-  const r = s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl' });
+  const r = s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl' });
   const meta = JSON.parse(r.stdout);
   assert.equal(meta.ran.backend, 'opencode', r.stdout);
   assert.equal(ranIn(s), real(s.repo), 'opencode reads the project, where it would have read without agy');
@@ -173,7 +174,7 @@ test('snapshot: a worker after Antigravity in the chain never reads what it wrot
   assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')));
   // two Antigravity targets: the second does not read the first one's writes
   s.config({ worker: 'antigravity:model-a', fallback: ['antigravity:model-b'] });
-  s.run(['run', 'where is sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl' });
+  s.run(['run', 'where is sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl' });
   const [first, second] = agyCalls(s).slice(-2);
   assert.notEqual(real(first.cwd), real(second.cwd));
 });
@@ -239,7 +240,7 @@ test('snapshot: runs\' own snapshots keep their own quota when pruning, so they 
 test('snapshot: Antigravity after another worker in between still gets a fresh snapshot; a pruned own snapshot is made again for a follow-up', () => {
   const s = sandbox();
   s.config({ worker: 'antigravity:model-a', fallback: ['opencode:mock/limited', 'antigravity:model-b'] });
-  const env = { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl', MOCK_RATE_LIMIT_MODELS: 'mock/limited' };
+  const env = { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl', MOCK_RATE_LIMIT_MODELS: 'mock/limited' };
   s.run(['run', 'where is sub?'], env);
   const [a, b] = agyCalls(s).slice(-2);
   assert.notEqual(real(a.cwd), real(b.cwd), 'model-b does not read what model-a wrote');

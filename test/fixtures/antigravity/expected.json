@@ -1,61 +1,63 @@
 {
-  "_note": "Constructed from the stream-json format in Antigravity's headless docs and the reports of projects that run agy headless; not yet recorded from a real agy (docs/backends.md#antigravity-cli-notes). Replace with recorded runs.",
   "events": {
     "read.jsonl": {
-      "sessionId": "c3f1a7d2-5b8e-4f0a-9c61-2e7d4b9a0f13",
-      "steps": 3,
-      "total": 16329,
+      "sessionId": "967746b3-e7f6-4c44-8b96-e9d1e3ae4891",
+      "steps": 8,
+      "total": 114342,
       "denied": 0,
       "edits": 0,
-      "finalTextStartsWith": "SUMMARY: `add` is defined in src/math.js:3"
+      "finalTextStartsWith": "SUMMARY:\nX is defined in src/consts.js at line 3"
+    },
+    "follow-up.jsonl": {
+      "sessionId": "967746b3-e7f6-4c44-8b96-e9d1e3ae4891",
+      "steps": 2,
+      "total": 121341,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY:\nY is defined in src/consts.js at line 4"
     },
     "isolate-edit.jsonl": {
-      "sessionId": "8e2b4c90-17d3-4a65-b0f8-6c1e9d3a5b27",
-      "steps": 6,
-      "total": 39627,
-      "denied": 1,
-      "edits": 2,
-      "finalTextStartsWith": "Added the exported `sub(a, b)` function"
-    },
-    "cut-short.jsonl": {
-      "sessionId": "5d0e9f3b-2c71-4b8a-a6e4-91f07c2d8e55",
-      "steps": 2,
-      "total": 6135,
+      "sessionId": "caacda53-8355-4853-af3d-66b9ee874af7",
+      "steps": 11,
+      "total": 127494,
       "denied": 0,
+      "edits": 1,
+      "finalTextStartsWith": "SUMMARY: Added `sub(a, b)` function to `math.js`"
+    },
+    "denied-command.jsonl": {
+      "sessionId": "5cf7003b-8939-4d42-8b99-2ce40d87ef67",
+      "steps": 2,
+      "total": 29345,
+      "denied": 1,
       "edits": 0,
-      "finalTextStartsWith": "The project has src/ and test/ folders."
+      "finalTextStartsWith": "SUMMARY:\nThe execution of `git commit --allow-empty -m test`"
     }
   },
   "failures": {
-    "quota-exit-zero": {
-      "exitCode": 0,
-      "kind": "rate-limited",
-      "messageIncludes": "Individual quota reached"
-    },
-    "quota-exit-three": {
+    "quota": {
       "exitCode": 3,
       "kind": "rate-limited",
-      "messageIncludes": "RESOURCE_EXHAUSTED"
-    },
-    "not-signed-in": {
-      "exitCode": 1,
-      "kind": "auth",
-      "messageIncludes": "Not signed in"
+      "messageIncludes": "Individual quota reached"
     },
     "model-not-found": {
       "exitCode": 1,
       "kind": "model-unavailable",
-      "messageIncludes": "not found"
+      "messageIncludes": "is not recognized as a known model"
     },
-    "silent-pipe": {
-      "exitCode": 0,
-      "kind": "other",
-      "messageIncludes": "printed nothing"
+    "not-signed-in": {
+      "exitCode": 1,
+      "kind": "auth",
+      "messageIncludes": "authentication failed"
     },
     "turn-discarded": {
       "exitCode": 0,
       "kind": "other",
-      "messageIncludes": "refused"
+      "messageIncludes": "auto-denied"
+    },
+    "cut-short": {
+      "exitCode": null,
+      "kind": "other",
+      "messageIncludes": "agy exited"
     }
   }
 }

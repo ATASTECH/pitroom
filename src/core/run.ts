@@ -602,6 +602,9 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
     meta.verdict = parseVerdict(run.finalText);
     if (meta.packageFile) fs.rmSync(meta.packageFile, { force: true });
   }
+  for (const w of backend.warnings?.(run, read(runFile(meta.id, 'stderr.log'))) ?? []) {
+    if (!meta.warnings.includes(w)) meta.warnings.push(w);
+  }
   if (!res.timedOut && !res.stopped && !meta.error) {
     const f = backend.failure(run, read(runFile(meta.id, 'stderr.log')), res.code);
     if (f) {

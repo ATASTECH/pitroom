@@ -130,6 +130,9 @@ export function changedFiles(dir: string): string[] {
   for (let i = 0; i < parts.length; i++) {
     const p = parts[i]!;
     if (p.length < 4) continue;
+    // A checkout made with read-tree has no commit, so git calls every file "added" (`A `): only the working
+    // tree's column says whether the file differs from its index.
+    if (p[0] === 'A' && p[1] === ' ') continue;
     paths.push(p.slice(3));
     if (p[0] === 'R' || p[0] === 'C') i++; // a rename's second path is its origin
   }

@@ -1,2 +1,0 @@
-{"type":"init","conversation_id":"0b9d6a21-8c3e-47f5-b2a1-e4c7f8d93a60"}
-{"type":"result","status":"ERROR","conversation_id":"0b9d6a21-8c3e-47f5-b2a1-e4c7f8d93a60","error":{"message":"RESOURCE_EXHAUSTED (code 429): Individual quota reached. Resets in 4h02m11s."}}

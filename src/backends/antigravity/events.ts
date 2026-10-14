@@ -1,13 +1,15 @@
-// Parses `agy -p … --output-format stream-json` into a ParsedRun. The events, as Antigravity's headless docs and the
-// integrations built on them describe them (not yet recorded from a real agy, so every field is read tolerantly):
-//   {type: init, conversation_id, model?, tools?}
-//   {type: step_update, step_update: {conversation_id, step_index, state: ACTIVE | DONE, step_type, text_delta?,
-//                                     tool_info?: {name, parameters, output, error?}, usage?}}
-//     step_type: user_input | agent_response | tool | checkpoint; text arrives in text_delta chunks
-//   {type: result, status, response, conversation_id, error?,
-//    usage: {input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens}}
+// Parses `agy -p … --output-format stream-json` into a ParsedRun. The events, as agy 1.3.5 writes them (and its
+// headless docs describe them):
+//   {event: init, conversation_id, init: {model?, cwd, tools, permission_mode}}
+//   {event: step_update, step_update: {conversation_id, step_index, state: ACTIVE | DONE | ERROR, step_type,
+//                                      tool_name?, text_delta?, tool_info?: {name, parameters, output?, error?}, usage?}}
+//     step_type: user_input | agent_response | tool | checkpoint | error_message; text arrives in text_delta chunks;
+//     a failed or refused tool call ends in state ERROR with error: {type, message}
+//   {event: result, result: {conversation_id, status, response, error?, num_turns, denied_actions?,
+//    usage: {input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens}}}
 // Tool names are agy's own (run_command, view_file, write_to_file, replace_file_content, …) with parameters such as
-// CommandLine, TargetFile and AbsolutePath. Lines that are not JSON are skipped.
+// CommandLine, TargetFile and AbsolutePath. Every field is read tolerantly (older spellings with `type` and the payload
+// at the top level too). Lines that are not JSON are skipped.
 import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
 import { clip, num, oneLine } from '../text.js';
 
@@ -59,15 +61,19 @@ export function parseEvents(jsonl: string): ParsedRun {
       continue; // torn last line while streaming, or a log line
     }
     if (!e || typeof e !== 'object') continue;
-    const type = String(e.type ?? '').toLowerCase();
+    const type = String(e.event ?? e.type ?? '').toLowerCase();
+    // the event's payload sits under its own name ({event: "result", result: {…}})
+    const body = (name: string) => (e[name] && typeof e[name] === 'object' ? e[name] : e);
     if (type === 'init') {
-      sessionId ??= id(e.conversation_id ?? e.session_id);
-      model ??= id(e.model);
+      sessionId ??= id(e.conversation_id ?? e.session_id ?? body('init').conversation_id);
+      model ??= id(body('init').model);
     } else if (type === 'step_update') {
-      const s = e.step_update && typeof e.step_update === 'object' ? e.step_update : e;
+      const s = body('step_update');
       sessionId ??= id(s.conversation_id);
       const kind = String(s.step_type ?? '').toLowerCase();
-      const finished = String(s.state ?? '').toUpperCase() === 'DONE';
+      const state = String(s.state ?? '').toUpperCase();
+      const failedStep = state === 'ERROR';
+      const finished = state === 'DONE' || failedStep;
       let key = s.step_index ?? s.step_id;
       if (key === undefined || key === null) {
         key = open.get(kind) ?? `${kind}#${unnamed++}`;
@@ -110,7 +116,7 @@ export function parseEvents(jsonl: string): ParsedRun {
           done.add(key);
           inTurn = false;
           const problem = `${errText(info.error)} ${str(info.status ?? s.status)}`.trim();
-          const ok = !problem || OK.test(problem) || !FAILED.test(problem);
+          const ok = !failedStep && (!problem || OK.test(problem) || !FAILED.test(problem));
           const step = stepOf.get(key);
           if (step) step.ok = ok;
           if (!ok && DENIED.test(`${problem} ${str(info.output)}`)) usage.denied++;
@@ -124,16 +130,19 @@ export function parseEvents(jsonl: string): ParsedRun {
         stepUsage.push(s.usage);
       }
     } else if (type === 'result') {
-      sessionId ??= id(e.conversation_id);
-      model ??= id(e.model);
-      if (typeof e.response === 'string') response = e.response.trim();
-      if (e.usage && typeof e.usage === 'object') {
-        add(usage, e.usage);
+      const r = body('result');
+      sessionId ??= id(r.conversation_id);
+      model ??= id(r.model);
+      if (typeof r.response === 'string') response = r.response.trim();
+      if (r.usage && typeof r.usage === 'object') {
+        add(usage, r.usage);
         haveResultUsage = true;
       }
+      // tool calls agy refused for want of a grant a headless run cannot ask for
+      if (Array.isArray(r.denied_actions)) usage.denied = Math.max(usage.denied, r.denied_actions.length);
       resultSeen = true;
-      const status = str(e.status);
-      const message = errText(e.error);
+      const status = str(r.status);
+      const message = errText(r.error);
       // A successful status wins over an error field beside it (an empty `{}`, or an earlier attempt's error).
       if (status ? !OK.test(status) : !!message) {
         error ??= message || (/^waiting$/i.test(status)
