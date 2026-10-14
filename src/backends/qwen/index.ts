@@ -42,7 +42,7 @@ export const DENY_SHELL = [
   'git rebase', 'git merge', 'git switch', 'git branch', 'git tag', 'git rm', 'git worktree', 'git update-ref',
   'git config', 'git remote', 'git cherry-pick', 'git revert', 'git am', 'git add',
   'rm -rf', 'rm -fr', 'sudo', 'chown', 'kill', 'pkill', 'killall', 'gh', 'npm publish',
-  'pitroom', 'opencode', 'claude', 'codex', 'gemini', 'qwen', 'kilo', 'kilocode',
+  'pitroom', 'opencode', 'claude', 'codex', 'gemini', 'qwen', 'kilo', 'kilocode', 'agy',
 ].map((c) => `run_shell_command(${c})`);
 
 function invocation(req: WorkerRequest) {

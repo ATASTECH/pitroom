@@ -1,0 +1,2 @@
+{"type":"init","conversation_id":"f4a2b7c1-9d3e-4e86-8b05-3c1d7e6f2a98"}
+{"type":"result","status":"ERROR","conversation_id":"f4a2b7c1-9d3e-4e86-8b05-3c1d7e6f2a98","error":{"message":"model \"gemini-9-ultra\" not found: run `agy models` for the models your account can use"}}

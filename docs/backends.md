@@ -61,6 +61,7 @@ CLI's **own** mechanism, and never with flags that switch safety off
 | **Gemini CLI** (`--prompt … --output-format stream-json`) | `--approval-mode plan` (the policy engine allows read tools only) | `auto_edit` + Pitroom's `--policy` rules (shell minus history-changing git) | by session id (`--resume <id>`) → `resume: 'by-id'` | tokens only |
 | **Qwen Code** (`<prompt> --safe-mode --output-format stream-json`) | `--approval-mode plan` (edits, shell and reads outside the working directory declined) | `--approval-mode default` + `--allowed-tools Edit(./**) write_file(./**) notebook_edit(./**) run_shell_command`, shell minus history-changing git via `--exclude-tools` | `--resume <id>` | tokens only |
 | **Kilo Code** (`kilo run --format json`) | OpenCode's read profile through `KILO_CONFIG_CONTENT` | OpenCode's write profile | `--session <id>` | reported |
+| **Antigravity CLI** (`agy -p … --output-format stream-json --sandbox`) | `--mode plan` + Pitroom's deny rules in a private settings file | `--mode accept-edits`, shell in agy's terminal sandbox, the same deny rules | `--conversation <id>` | tokens only |
 
 Whatever the CLI, the core still applies the git guard, closes stdin (Codex and
 Gemini otherwise read piped stdin into the prompt), sets `PWD` to the worker's
@@ -168,6 +169,29 @@ How a worker is started, and why:
 - **A private `XDG_STATE_HOME`** (`<pitroom home>/kilo-state`). `kilo run` has no `--standalone`: when the user's `kilo daemon` is up, it attaches to it (found through `~/.local/state/kilo/daemon.json`), and the daemon, started with its own environment, ignores the injected config, the git guard and `PITROOM_ACTIVE` (seen: "Agent not found: pitroom-read"; `--port` and `--pure` do not prevent it). With a state folder of its own the worker finds no daemon and starts a private server. Sign-in, config and sessions live in the data and config folders, which stay the user's.
 - **`--log-level ERROR`** in capitals: Kilo rejects `error` and prints its help instead of running.
 - Never `--auto` ("auto-approve permissions that are not explicitly denied"), never `--attach`.
+
+## Antigravity CLI notes
+
+Status: **experimental**. Unlike every other worker, the adapter has **not been run against a real `agy`**: it was written from Antigravity's headless and permissions documentation and from the reports of projects that run `agy` headless, without the CLI at hand. The fixtures in `test/fixtures/antigravity` are therefore *constructed* in the documented format (`expected.json` says so), not recorded. `pitroom doctor` says this too. Until someone records real runs, use it with `-i` (an isolated copy) first, and treat a read run's `READ-ONLY VIOLATION` warning as a bug report.
+
+Why it is here: Google refuses a Google account sign-in to Gemini CLI (`IneligibleTierError`, "migrate to the Antigravity suite"), so for someone without an AI Studio key, `agy` is the way to use their Google account's models (Gemini, and the Claude and GPT-OSS models Antigravity offers).
+
+How a worker is started, and why:
+
+- **`-p <prompt> --output-format stream-json`**: one prompt, a JSON event stream, exit. `-p` takes the prompt as its value; a prompt that starts with `-` gets a leading space.
+- **Read is `--mode plan`**, agy's own mode that blocks edits and other changes; write and isolate use `--mode accept-edits`. Never `--dangerously-skip-permissions` (the contract tests reject it). A request asks for a read-only mode for `-p` runs (issue 45 of google-antigravity/antigravity-cli); a later report (issue 548) suggests `--mode plan` blocks every change in them. That is the claim to check first.
+- **`--sandbox`** in every mode: shell commands run in agy's terminal sandbox (the project writable, no network). The sandbox and the permission rules are for macOS and Linux; on Windows agy still uses its previous permission system, and `doctor` says to use `-i` there.
+- **`ANTIGRAVITY_APP_DATA_DIR`** points at a private folder (`<pitroom home>/antigravity-home`) whose `settings.json` Pitroom writes: `toolPermission: proceed-in-sandbox` (commands run sandboxed without asking: a headless run cannot answer, and a request it cannot answer is soft-denied, or by some reports hangs until the timeout), `artifactReviewPolicy: always-proceed` (otherwise every code change waits for a review), `allowNonWorkspaceAccess: false`, and deny rules (deny beats allow): secret files (`.env`, keys; a denied read also denies the write), history-changing git, bulk deletes, `sudo`, other agents (git by path too), every MCP tool and every URL. The user's sign-in file (`antigravity-oauth-token`, used where there is no keychain) is linked into the folder; macOS and secret-service keep it in the keychain, which needs no link. The variable is named by one integration only; if `agy` ignores it, it uses the user's own settings instead, and only `--mode plan` and `--sandbox` stand.
+- **One settings file for every mode**, because a follow-up continues its conversation in the same folder and may run in another mode. So **`--web` does not apply** to Antigravity workers: the web stays denied.
+- **`--print-timeout 24h`**: agy's own limit (5 minutes by default) ends a longer run with partial output and exit 0; Pitroom's timeout governs instead.
+- **Model**: `-W antigravity:<model>` passes `--model` (`agy models` lists yours), and `#level` passes `--effort`. Without one, agy picks. Its quota is per Google account and can run out for hours: give it a fallback.
+- **`--continue`**: `--conversation <id>` with the id of the stream's `init` event, never `-c` (the latest conversation, which is unsafe beside parallel workers).
+
+The stream, as documented (`init`, `step_update`, `result`): `step_update.step_type` is `agent_response` (text in `text_delta` chunks), `tool` (`tool_info` with the tool's name, parameters and output) or `user_input`; `state` is `ACTIVE` or `DONE`. The answer is `result.response`; tokens are `result.usage` (`input_tokens` with `cache_read_tokens` inside it, `output_tokens`, `thinking_tokens`, `total_tokens`), or the sum of the finished steps' own usage when a run is cut short. Tools are agy's own names: `run_command` (`CommandLine`) is the shell, `write_to_file`, `replace_file_content` and `multi_replace_file_content` (`TargetFile`) are edits. Every field is read tolerantly.
+
+Failures, from reports rather than runs: a used-up quota (`RESOURCE_EXHAUSTED (code 429): Individual quota reached`) can end with exit 0 and no answer, or exit 3; both are `rate-limited` when there is no answer. agy 1.2.6+ prints a structured `AGY_ERROR {…}` line on stderr, which is read first. Some versions print nothing to a pipe and exit 0; that is a failure, not an empty answer.
+
+What would make it a beta like the others: record a read, an edit and a follow-up from a real `agy` (with Pitroom's command line) and replace the constructed fixtures; check that `--mode plan` refuses `write_to_file` and `run_command` in a `-p` run, that the deny rules apply in `-p` runs (issue 548 of google-antigravity/antigravity-cli reports that `-p` ignores `permissions.allow`; nothing is reported about `deny`), and that `ANTIGRAVITY_APP_DATA_DIR` moves the settings.
 
 ## Hermes Agent: not supported yet
 

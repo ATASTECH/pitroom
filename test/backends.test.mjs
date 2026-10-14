@@ -395,3 +395,39 @@ test('kilo: OpenCode\'s profiles through KILO_CONFIG_CONTENT, a private state fo
   }
   assert.equal(JSON.parse(b.invocation(request({ web: true })).env.KILO_CONFIG_CONTENT).agent['pitroom-read'].permission.webfetch, 'allow');
 });
+
+test('antigravity: read is agy\'s plan mode, write and isolate accept edits; sandbox in every mode; never --continue or skip-permissions', () => {
+  const b = getBackend('antigravity');
+  const after = (inv, flag) => inv.args[inv.args.indexOf(flag) + 1];
+  for (const mode of ['read', 'write', 'isolate']) {
+    const inv = b.invocation(request({ mode }));
+    assert.equal(after(inv, '-p'), 'PROMPT-SENTINEL');
+    assert.equal(after(inv, '--output-format'), 'stream-json');
+    assert.equal(after(inv, '--mode'), mode === 'read' ? 'plan' : 'accept-edits');
+    assert.ok(inv.args.includes('--sandbox'), `${mode}: shell commands in agy's terminal sandbox`);
+    assert.ok(after(inv, '--print-timeout'), 'agy\'s 5 minute default would cut long runs short');
+    assert.ok(!inv.args.includes('-c') && !inv.args.includes('--continue'), 'the latest conversation is unsafe beside parallel workers');
+    assert.match(inv.env.ANTIGRAVITY_APP_DATA_DIR, /antigravity-home$/);
+  }
+  const followUp = b.invocation(request({ model: 'gemini-3.8-flash#low', sessionId: 'SES-1' }));
+  assert.equal(after(followUp, '--conversation'), 'SES-1');
+  assert.equal(after(followUp, '--model'), 'gemini-3.8-flash');
+  assert.equal(after(followUp, '--effort'), 'low');
+  assert.ok(!b.invocation(request()).args.includes('--effort'));
+  assert.equal(after(b.invocation(request({ prompt: '-x looks like a flag' })), '-p'), ' -x looks like a flag');
+});
+
+test('antigravity: the private settings deny secrets, history-changing git, other agents, MCP and the web, and keep file tools in the workspace', () => {
+  const b = getBackend('antigravity');
+  const dir = b.invocation(request()).env.ANTIGRAVITY_APP_DATA_DIR;
+  const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
+  assert.equal(settings.allowNonWorkspaceAccess, false);
+  assert.equal(settings.toolPermission, 'proceed-in-sandbox', 'commands run sandboxed, never unsandboxed without asking');
+  const rule = (action) => settings.permissions.deny.filter((r) => r.startsWith(`${action}(regex:`)).map((r) => new RegExp(r.slice(action.length + 7, -1)));
+  const denied = (action, target) => rule(action).some((re) => re.test(target));
+  for (const f of ['/p/.env', '/p/.env.local', '/p/prod.env', '/p/server.pem', '/home/u/.ssh/id_ed25519', 'C:\\p\\.env']) assert.ok(denied('read_file', f), f);
+  for (const f of ['/p/src/env.ts', '/p/README.md', '/p/environment.js']) assert.ok(!denied('read_file', f), f);
+  for (const c of ['git commit -am x', 'git push', ' rm -rf /', 'sudo ls', 'agy -p hi', 'pitroom run x', '/usr/bin/git commit']) assert.ok(denied('command', c), c);
+  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk']) assert.ok(!denied('command', c), c);
+  assert.ok(denied('mcp', 'linter/lint') && denied('read_url', 'https://example.com'));
+});

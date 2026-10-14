@@ -1,0 +1,3 @@
+{"type":"init","conversation_id":"5d0e9f3b-2c71-4b8a-a6e4-91f07c2d8e55"}
+{"type":"step_update","step_update":{"conversation_id":"5d0e9f3b-2c71-4b8a-a6e4-91f07c2d8e55","step_index":1,"state":"DONE","step_type":"tool","tool_info":{"name":"list_dir","parameters":{"path":"/tmp/project"},"output":"src/\ntest/"},"usage":{"input_tokens":3000,"output_tokens":20,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":3020}}}
+{"type":"step_update","step_update":{"conversation_id":"5d0e9f3b-2c71-4b8a-a6e4-91f07c2d8e55","step_index":2,"state":"DONE","step_type":"agent_response","text_delta":"The project has src/ and test/ folders.","usage":{"input_tokens":3100,"output_tokens":15,"thinking_tokens":0,"cache_read_tokens":2048,"total_tokens":3115}}}

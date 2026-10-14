@@ -1,0 +1,56 @@
+{
+  "_note": "Constructed from the stream-json format in Antigravity's headless docs and the reports of projects that run agy headless; not yet recorded from a real agy (docs/backends.md#antigravity-cli-notes). Replace with recorded runs.",
+  "events": {
+    "read.jsonl": {
+      "sessionId": "c3f1a7d2-5b8e-4f0a-9c61-2e7d4b9a0f13",
+      "steps": 3,
+      "total": 16329,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "SUMMARY: `add` is defined in src/math.js:3"
+    },
+    "isolate-edit.jsonl": {
+      "sessionId": "8e2b4c90-17d3-4a65-b0f8-6c1e9d3a5b27",
+      "steps": 6,
+      "total": 39627,
+      "denied": 1,
+      "edits": 2,
+      "finalTextStartsWith": "Added the exported `sub(a, b)` function"
+    },
+    "cut-short.jsonl": {
+      "sessionId": "5d0e9f3b-2c71-4b8a-a6e4-91f07c2d8e55",
+      "steps": 2,
+      "total": 6135,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "The project has src/ and test/ folders."
+    }
+  },
+  "failures": {
+    "quota-exit-zero": {
+      "exitCode": 0,
+      "kind": "rate-limited",
+      "messageIncludes": "Individual quota reached"
+    },
+    "quota-exit-three": {
+      "exitCode": 3,
+      "kind": "rate-limited",
+      "messageIncludes": "RESOURCE_EXHAUSTED"
+    },
+    "not-signed-in": {
+      "exitCode": 1,
+      "kind": "auth",
+      "messageIncludes": "Not signed in"
+    },
+    "model-not-found": {
+      "exitCode": 1,
+      "kind": "model-unavailable",
+      "messageIncludes": "not found"
+    },
+    "silent-pipe": {
+      "exitCode": 0,
+      "kind": "other",
+      "messageIncludes": "printed nothing"
+    }
+  }
+}

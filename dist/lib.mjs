@@ -6,42 +6,160 @@ var UserError = class extends Error {
   }
 };
 
-// src/backends/claude/index.ts
+// src/backends/antigravity/index.ts
 import { spawnSync } from "node:child_process";
-import fs2 from "node:fs";
-import os2 from "node:os";
-import path2 from "node:path";
+import fs4 from "node:fs";
+import os3 from "node:os";
+import path3 from "node:path";
 
-// src/backends/exec.ts
-import fs from "node:fs";
+// src/core/store.ts
+import fs2 from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import crypto from "node:crypto";
+
+// src/core/fs-atomic.ts
+import fs from "node:fs";
+var BUSY = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
+function renameOver(tmp, file) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      if (process.platform !== "win32" || !BUSY.has(e.code ?? "") || attempt >= 40) throw e;
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
+}
+
+// src/core/store.ts
+var TERMINAL = ["done", "failed", "timeout", "stopped"];
+var isActive = (s) => !TERMINAL.includes(s);
+function home() {
+  if (process.env.PITROOM_HOME) return path.resolve(process.env.PITROOM_HOME);
+  if (process.platform === "win32") {
+    return path.join(process.env.LOCALAPPDATA ?? path.join(os.homedir(), "AppData", "Local"), "pitroom");
+  }
+  return path.join(process.env.XDG_STATE_HOME ?? path.join(os.homedir(), ".local", "state"), "pitroom");
+}
+var runsDir = () => path.join(home(), "runs");
+var ledgerFile = () => path.join(home(), "ledger.jsonl");
+var runDir = (id2) => path.join(runsDir(), id2);
+var runFile = (id2, name) => path.join(runDir(id2), name);
+function newRunId(now = /* @__PURE__ */ new Date()) {
+  const p = (n) => String(n).padStart(2, "0");
+  const stamp2 = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `${stamp2}-${crypto.randomBytes(2).toString("hex")}`;
+}
+var onFinished;
+var archive;
+function writeMeta(meta) {
+  fs2.mkdirSync(runDir(meta.id), { recursive: true });
+  const file = runFile(meta.id, "meta.json");
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs2.writeFileSync(tmp, JSON.stringify(meta, null, 2));
+  renameOver(tmp, file);
+  if (TERMINAL.includes(meta.state)) {
+    try {
+      onFinished?.(meta);
+    } catch {
+    }
+  }
+}
+function readMeta(id2) {
+  const file = runFile(id2, "meta.json");
+  if (!fs2.existsSync(file)) {
+    const kept = archive?.meta(id2);
+    if (kept) return upgrade(kept);
+  }
+  return upgrade(JSON.parse(fs2.readFileSync(file, "utf8")));
+}
+function upgrade(raw) {
+  if (!raw.worker) raw.worker = raw.model ? { backend: "opencode", model: raw.model } : { backend: "opencode" };
+  if (!Array.isArray(raw.fallback)) {
+    raw.fallback = (raw.fallbackModels ?? []).map((m) => ({ backend: "opencode", model: m }));
+  }
+  raw.warnings ??= [];
+  raw.files ??= [];
+  raw.link ??= [];
+  return raw;
+}
+function listRunIds() {
+  if (!fs2.existsSync(runsDir())) return [];
+  return fs2.readdirSync(runsDir()).filter((d) => fs2.existsSync(runFile(d, "meta.json"))).sort();
+}
+function resolveRun(ref) {
+  const ids = listRunIds();
+  if (!ref || ref === "latest" || ref === "last") {
+    if (!ids.length) throw new UserError("no runs yet");
+    return ids[ids.length - 1];
+  }
+  if (ids.includes(ref)) return ref;
+  const hits = ids.filter((id2) => id2.startsWith(ref) || id2.endsWith(ref));
+  if (hits.length === 1) return hits[0];
+  if (!hits.length) {
+    const kept = archive?.id(ref);
+    if (kept) return kept;
+  }
+  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(", ")}` : ids.length ? `unknown run "${ref}"` : "no runs yet");
+}
+function isAlive(pid) {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return e.code === "EPERM";
+  }
+}
+var STOP_FILE = "stop-requested";
+var requestStop = (id2) => fs2.writeFileSync(runFile(id2, STOP_FILE), "");
+function freshMeta(id2) {
+  const meta = readMeta(id2);
+  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
+    const latest = readMeta(id2);
+    if (TERMINAL.includes(latest.state)) return latest;
+    const stopped = latest.stopRequested || fs2.existsSync(runFile(id2, STOP_FILE));
+    latest.state = stopped ? "stopped" : "failed";
+    if (!stopped) latest.error ??= "worker process exited unexpectedly";
+    latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
+    writeMeta(latest);
+    return latest;
+  }
+  return meta;
+}
+
+// src/backends/exec.ts
+import fs3 from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
 function findBinary(name, envVar, known = []) {
   const override = process.env[envVar];
   if (override) return override;
   const exts = process.platform === "win32" ? [".exe", ".cmd", ""] : [""];
-  for (const dir of (process.env.PATH ?? "").split(path.delimiter).filter(Boolean)) {
+  for (const dir of (process.env.PATH ?? "").split(path2.delimiter).filter(Boolean)) {
     for (const ext of exts) {
-      const p = path.join(dir, `${name}${ext}`);
+      const p = path2.join(dir, `${name}${ext}`);
       if (isFile(p)) return p;
     }
   }
-  return known.map((k) => k.replace(/^~/, os.homedir())).find(isFile) ?? name;
+  return known.map((k) => k.replace(/^~/, os2.homedir())).find(isFile) ?? name;
 }
 function isFile(p) {
   try {
-    return fs.statSync(p).isFile();
+    return fs3.statSync(p).isFile();
   } catch {
     return false;
   }
 }
 function resolveCommand(bin) {
   try {
-    const real = fs.realpathSync(bin);
-    const fd = fs.openSync(real, "r");
+    const real = fs3.realpathSync(bin);
+    const fd = fs3.openSync(real, "r");
     const head = Buffer.alloc(128);
-    const n = fs.readSync(fd, head, 0, 128, 0);
-    fs.closeSync(fd);
+    const n = fs3.readSync(fd, head, 0, 128, 0);
+    fs3.closeSync(fd);
     const firstLine = head.subarray(0, n).toString("utf8").split("\n")[0] ?? "";
     if (/^#!.*\bnode\b/.test(firstLine)) return { command: process.execPath, prefix: [real] };
   } catch {
@@ -52,10 +170,338 @@ function resolveCommand(bin) {
 // src/backends/types.ts
 var MAX_STEPS = 400;
 
-// src/backends/claude/events.ts
-var EDIT_TOOLS = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
-var DENIED = /permission|not allowed|denied|blocked|disallowed/i;
+// src/backends/antigravity/events.ts
+var EDIT_TOOLS = /* @__PURE__ */ new Set(["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file"]);
+var SHELL = "run_command";
+var DENIED = /soft-denied|permission|denied|not allowed|blocked|refus|requires approval/i;
+var FAILED = /error|fail|denied|cancel|reject/i;
+var OK = /^(success|succeeded|ok|done|completed?)$/i;
 function parseEvents(jsonl) {
+  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
+  const stepUsage = [];
+  const tools = {};
+  const edits = [];
+  const timeline = [];
+  const said = /* @__PURE__ */ new Map();
+  const stepOf = /* @__PURE__ */ new Map();
+  const toolSeen = /* @__PURE__ */ new Set();
+  const done = /* @__PURE__ */ new Set();
+  let sessionId;
+  let model;
+  let lastText = "";
+  let response;
+  let lastActivity;
+  let error;
+  let haveResultUsage = false;
+  let turns = 0;
+  let inTurn = false;
+  const startTurn = () => {
+    if (!inTurn) turns++;
+    inTurn = true;
+  };
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!e || typeof e !== "object") continue;
+    const type = String(e.type ?? "").toLowerCase();
+    if (type === "init") {
+      sessionId ??= id(e.conversation_id ?? e.session_id);
+      model ??= id(e.model);
+    } else if (type === "step_update") {
+      const s = e.step_update && typeof e.step_update === "object" ? e.step_update : e;
+      sessionId ??= id(s.conversation_id);
+      const kind2 = String(s.step_type ?? "").toLowerCase();
+      const key = String(s.step_index ?? s.step_id ?? `${kind2}-${timeline.length}`);
+      const finished = String(s.state ?? "").toUpperCase() === "DONE";
+      if (kind2 === "agent_response") {
+        startTurn();
+        const text = (said.get(key) ?? "") + str(s.text_delta);
+        said.set(key, text);
+        if (finished && !done.has(key)) {
+          done.add(key);
+          const t = text.trim();
+          if (t) {
+            lastText = t;
+            lastActivity = `says: ${oneLine(t)}`;
+            if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(t, 600) });
+          }
+        }
+      } else if (kind2 === "tool") {
+        const info = s.tool_info && typeof s.tool_info === "object" ? s.tool_info : {};
+        const name = String(info.name ?? info.tool_name ?? s.tool_name ?? "tool");
+        const p = info.parameters ?? info.args ?? info.arguments ?? s.parameters ?? {};
+        if (!toolSeen.has(key)) {
+          toolSeen.add(key);
+          startTurn();
+          lastText = "";
+          usage.toolCalls++;
+          tools[name] = (tools[name] ?? 0) + 1;
+          const target = p.CommandLine ?? p.command ?? p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path ?? p.SearchPath ?? p.Query ?? p.query ?? p.Url ?? p.url;
+          lastActivity = `${name} ${target ? oneLine(String(target), 60) : ""}`.trim();
+          if (timeline.length < MAX_STEPS) {
+            const step = { kind: EDIT_TOOLS.has(name) ? "edit" : name === SHELL ? "shell" : "tool", name, text: clip(String(target ?? ""), 240) };
+            timeline.push(step);
+            stepOf.set(key, step);
+          }
+        }
+        if (finished && !done.has(key)) {
+          done.add(key);
+          inTurn = false;
+          const problem = `${str(info.error?.message ?? info.error)} ${str(info.status ?? s.status)}`.trim();
+          const ok = !problem || OK.test(problem) || !FAILED.test(problem);
+          const step = stepOf.get(key);
+          if (step) step.ok = ok;
+          if (!ok && DENIED.test(`${problem} ${str(info.output)}`)) usage.denied++;
+          const file = p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path;
+          if (ok && EDIT_TOOLS.has(name) && file) edits.push(String(file));
+        }
+      }
+      if (finished && s.usage && typeof s.usage === "object") stepUsage.push(s.usage);
+    } else if (type === "result") {
+      sessionId ??= id(e.conversation_id);
+      model ??= id(e.model);
+      if (typeof e.response === "string") response = e.response.trim();
+      if (e.usage && typeof e.usage === "object") {
+        add(usage, e.usage);
+        haveResultUsage = true;
+      }
+      const status = str(e.status);
+      const message = str(e.error?.message ?? e.error);
+      if (message || status && !OK.test(status)) {
+        error ??= message || (/^waiting$/i.test(status) ? "agy stopped waiting for an approval a headless run cannot give" : `agy ended with status ${status}`);
+      }
+    } else if (type === "error") {
+      error ??= str(e.message ?? e.error?.message ?? e.error) || "Antigravity CLI error";
+    }
+  }
+  if (!haveResultUsage) for (const u of stepUsage) add(usage, u);
+  usage.steps = turns;
+  const finalText = error ? "" : response || lastText;
+  return { sessionId, model, finalText, usage, tools, edits, lastActivity, timeline, error };
+}
+function add(u, r) {
+  const cached3 = num(r.cache_read_tokens ?? r.cached_tokens);
+  const input = num(r.input_tokens);
+  u.cacheRead += cached3;
+  u.input += Math.max(0, input - cached3);
+  u.output += num(r.output_tokens);
+  u.reasoning += num(r.thinking_tokens ?? r.reasoning_tokens);
+  u.total += num(r.total_tokens) || input + num(r.output_tokens) + num(r.thinking_tokens ?? r.reasoning_tokens);
+}
+var id = (v) => typeof v === "string" && v ? v : void 0;
+var str = (v) => typeof v === "string" ? v : v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function oneLine(s, max = 80) {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
+}
+
+// src/backends/antigravity/index.ts
+var binary = () => findBinary("agy", "PITROOM_ANTIGRAVITY_BIN", ["~/.local/bin/agy", "~/.antigravity/bin/agy"]);
+function agy(args, timeout = 3e4) {
+  const { command, prefix } = resolveCommand(binary());
+  const r = spawnSync(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"] });
+  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
+}
+var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path3.join(os3.homedir(), ".gemini", "antigravity-cli");
+var TOKEN = "antigravity-oauth-token";
+var DENY_COMMANDS = [
+  "git commit",
+  "git push",
+  "git pull",
+  "git reset",
+  "git checkout",
+  "git restore",
+  "git clean",
+  "git stash",
+  "git rebase",
+  "git merge",
+  "git switch",
+  "git branch",
+  "git tag",
+  "git rm",
+  "git worktree",
+  "git update-ref",
+  "git config",
+  "git remote",
+  "git cherry-pick",
+  "git revert",
+  "git am",
+  "git add",
+  "rm -rf",
+  "rm -fr",
+  "sudo",
+  "chown",
+  "kill",
+  "pkill",
+  "killall",
+  "gh",
+  "npm publish",
+  "pitroom",
+  "opencode",
+  "claude",
+  "codex",
+  "gemini",
+  "qwen",
+  "kilo",
+  "kilocode",
+  "agy"
+];
+var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function workerSettings() {
+  return {
+    // Shell commands run in agy's terminal sandbox without asking (a headless run cannot answer); edits are
+    // approved by --mode accept-edits in write runs and blocked by --mode plan in read runs.
+    toolPermission: "proceed-in-sandbox",
+    artifactReviewPolicy: "always-proceed",
+    allowNonWorkspaceAccess: false,
+    permissions: {
+      allow: [],
+      deny: [
+        // A denied read also denies the write of the same path.
+        "read_file(regex:(^|[\\\\/])\\.env($|\\.)|[^\\\\/]\\.env$|\\.(pem|p12|pfx|key)$|(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)|(^|[\\\\/])\\.netrc$)",
+        `command(regex:^\\s*(${DENY_COMMANDS.map(escape).join("|")})(\\s|$))`,
+        // git by path would bypass the git guard's PATH shim
+        "command(regex:^\\s*\\S*[\\\\/]git(\\s|$))",
+        "mcp(regex:.*)",
+        // No web for agy workers: the rule is in the shared settings file, so --web cannot switch it on per run.
+        "read_url(regex:.*)"
+      ]
+    }
+  };
+}
+function workerDir() {
+  const dir = path3.join(home(), "antigravity-home");
+  const file = path3.join(dir, "settings.json");
+  const body = `${JSON.stringify(workerSettings(), null, 2)}
+`;
+  let same = false;
+  try {
+    same = fs4.readFileSync(file, "utf8") === body;
+  } catch {
+  }
+  if (!same) {
+    fs4.mkdirSync(dir, { recursive: true });
+    fs4.writeFileSync(file, body);
+  }
+  const from = path3.join(userDir(), TOKEN);
+  const to = path3.join(dir, TOKEN);
+  try {
+    if (fs4.existsSync(from) && !fs4.existsSync(to)) fs4.symlinkSync(from, to);
+  } catch {
+  }
+  return dir;
+}
+function invocation(req) {
+  const args = [
+    // -p takes the prompt as its value; one that starts with "-" would be read as an option: a leading space keeps it a value.
+    "-p",
+    req.prompt.startsWith("-") ? ` ${req.prompt}` : req.prompt,
+    "--output-format",
+    "stream-json",
+    "--mode",
+    req.mode === "read" ? "plan" : "accept-edits",
+    "--sandbox",
+    // agy's own limit (5m by default) would end a long run with partial output and exit 0; Pitroom's timeout governs.
+    "--print-timeout",
+    "24h"
+  ];
+  if (req.sessionId) args.push("--conversation", req.sessionId);
+  const [model, effort] = (req.model ?? "").split("#");
+  if (model) args.push("--model", model);
+  if (effort) args.push("--effort", effort);
+  const { command, prefix } = resolveCommand(binary());
+  return { command, args: [...prefix, ...args], env: { ANTIGRAVITY_APP_DATA_DIR: workerDir() } };
+}
+function classify(message) {
+  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return "rate-limited";
+  if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|unauthenticated|UNAUTHENTICATED|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
+    return "auth";
+  }
+  if (/model.{0,80}(not found|not available|no longer available|does not exist|unknown|unsupported|invalid)|unknown model|invalid model|NOT_FOUND|\b404\b/i.test(message)) {
+    return "model-unavailable";
+  }
+  return "other";
+}
+var TIMED_OUT = /print timeout after/i;
+function failure(run, stderr, exitCode) {
+  const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
+  const envelope = lines.find((l) => l.startsWith("AGY_ERROR"));
+  const detail = (envelope && fromEnvelope(envelope)) ?? lines.find((l) => /RESOURCE_EXHAUSTED|error|failed|quota|exhausted|denied|not found|\bsign.?in\b/i.test(l) && !TIMED_OUT.test(l));
+  const quiet = !run.finalText && !run.sessionId && run.usage.steps === 0;
+  if (exitCode === 0 && !run.error) {
+    if (!run.finalText && detail) return { kind: classify(detail), message: detail };
+    if (lines.some((l) => TIMED_OUT.test(l)) && !run.finalText) return { kind: "other", message: "agy stopped at its own --print-timeout before answering" };
+    if (quiet && !stderr.trim()) return { kind: "other", message: "agy printed nothing (some agy versions write no output to a pipe); update agy" };
+    return void 0;
+  }
+  const message = run.error ?? detail ?? lines.at(-1) ?? `agy exited with code ${exitCode}`;
+  return { kind: classify(`${message} ${detail ?? ""}`), message };
+}
+function fromEnvelope(line) {
+  try {
+    const e = JSON.parse(line.slice(line.indexOf("{")));
+    const text = [e.code, e.message ?? e.error].filter(Boolean).join(": ");
+    return text || void 0;
+  } catch {
+    return line.replace(/^AGY_ERROR:?\s*/, "") || void 0;
+  }
+}
+function doctor({ models, hasFallback }) {
+  const version = agy(["--version"]);
+  if (version.missing || !version.ok) {
+    return [{
+      level: "fail",
+      message: `agy not runnable (${binary()}). Install the Antigravity CLI (curl -fsSL https://antigravity.google/cli/install.sh | bash), or set PITROOM_ANTIGRAVITY_BIN`
+    }];
+  }
+  const checks = [
+    { level: "ok", message: `Antigravity CLI ${version.out.trim().split("\n")[0]} at ${binary()}` },
+    {
+      level: "warn",
+      message: "the Antigravity worker is experimental: its read-only mode (--mode plan), sandbox and deny rules have not been checked against a real agy yet; try it with -i first and look for READ-ONLY VIOLATION in read runs"
+    }
+  ];
+  if (process.platform === "win32") {
+    checks.push({ level: "warn", message: "agy's permission rules and terminal sandbox are for macOS and Linux; on Windows run the Antigravity worker only with -i (an isolated copy)" });
+  }
+  if (process.platform === "linux" && !fs4.existsSync(path3.join(userDir(), TOKEN))) {
+    checks.push({ level: "warn", message: "no Antigravity sign-in file found: if a run fails to sign in, run `agy` once and sign in with your Google account" });
+  }
+  for (const m of models) checks.push({ level: "ok", message: m ? `Antigravity model: ${m}` : "Antigravity model: agy's own choice (`agy models` lists yours)" });
+  checks.push({ level: "ok", message: "Antigravity workers have no web access (--web does not apply to them)" });
+  if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Antigravity runs (its quota is per account and can run out for hours)" });
+  return checks;
+}
+var antigravity = {
+  id: "antigravity",
+  name: "Antigravity CLI",
+  capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
+  binary,
+  invocation,
+  parse: parseEvents,
+  failure,
+  doctor
+};
+
+// src/backends/claude/index.ts
+import { spawnSync as spawnSync2 } from "node:child_process";
+import fs5 from "node:fs";
+import os4 from "node:os";
+import path4 from "node:path";
+
+// src/backends/claude/events.ts
+var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
+var DENIED2 = /permission|not allowed|denied|blocked|disallowed/i;
+function parseEvents2(jsonl) {
   const usage = {
     input: 0,
     output: 0,
@@ -101,16 +547,16 @@ function parseEvents(jsonl) {
       for (const c of content) {
         if (c.type === "text" && String(c.text ?? "").trim()) {
           lastText = String(c.text).trim();
-          lastActivity = `says: ${oneLine(lastText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(lastText, 600) });
+          lastActivity = `says: ${oneLine2(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip2(lastText, 600) });
         } else if (c.type === "tool_use") {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
-          lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ""}`.trim();
-          if (EDIT_TOOLS.has(c.name) && c.input?.file_path) pendingEdits.set(c.id, String(c.input.file_path));
+          lastActivity = `${c.name} ${target ? oneLine2(String(target), 60) : ""}`.trim();
+          if (EDIT_TOOLS2.has(c.name) && c.input?.file_path) pendingEdits.set(c.id, String(c.input.file_path));
           if (timeline.length < MAX_STEPS) {
-            const step = { kind: EDIT_TOOLS.has(c.name) ? "edit" : c.name === "Bash" ? "shell" : "tool", name: c.name, text: clip(String(target ?? ""), 240) };
+            const step = { kind: EDIT_TOOLS2.has(c.name) ? "edit" : c.name === "Bash" ? "shell" : "tool", name: c.name, text: clip2(String(target ?? ""), 240) };
             timeline.push(step);
             stepOf.set(String(c.id), step);
           }
@@ -123,20 +569,20 @@ function parseEvents(jsonl) {
         const step = stepOf.get(String(c.tool_use_id));
         if (step) step.ok = !c.is_error;
         if (c.is_error) {
-          if (DENIED.test(text)) usage.denied++;
+          if (DENIED2.test(text)) usage.denied++;
         } else if (pendingEdits.has(c.tool_use_id)) {
           edits.push(pendingEdits.get(c.tool_use_id));
         }
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += num(u.input_tokens);
-      usage.cacheRead += num(u.cache_read_input_tokens);
-      usage.cacheWrite += num(u.cache_creation_input_tokens);
-      usage.reasoning += num(u.output_tokens_details?.thinking_tokens);
-      usage.output += Math.max(0, num(u.output_tokens) - num(u.output_tokens_details?.thinking_tokens));
-      usage.total += num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens) + num(u.output_tokens);
-      usage.cost = (usage.cost ?? 0) + num(e.total_cost_usd);
+      usage.input += num2(u.input_tokens);
+      usage.cacheRead += num2(u.cache_read_input_tokens);
+      usage.cacheWrite += num2(u.cache_creation_input_tokens);
+      usage.reasoning += num2(u.output_tokens_details?.thinking_tokens);
+      usage.output += Math.max(0, num2(u.output_tokens) - num2(u.output_tokens_details?.thinking_tokens));
+      usage.total += num2(u.input_tokens) + num2(u.cache_read_input_tokens) + num2(u.cache_creation_input_tokens) + num2(u.output_tokens);
+      usage.cost = (usage.cost ?? 0) + num2(e.total_cost_usd);
       usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         const tags = [e.terminal_reason, e.api_error_status && `HTTP ${e.api_error_status}`].filter(Boolean);
@@ -149,20 +595,20 @@ function parseEvents(jsonl) {
   usage.steps = steps.size;
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
-var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-function num(v) {
+var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+function num2(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
-function oneLine(s, max = 80) {
+function oneLine2(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 
 // src/backends/claude/index.ts
-var binary = () => findBinary("claude", "PITROOM_CLAUDE_BIN", ["~/.local/bin/claude", "~/.claude/local/claude"]);
+var binary2 = () => findBinary("claude", "PITROOM_CLAUDE_BIN", ["~/.local/bin/claude", "~/.claude/local/claude"]);
 function cl(args, timeout = 6e4) {
-  const { command, prefix } = resolveCommand(binary());
-  const r = spawnSync(command, [...prefix, ...args], {
+  const { command, prefix } = resolveCommand(binary2());
+  const r = spawnSync2(command, [...prefix, ...args], {
     encoding: "utf8",
     timeout,
     stdio: ["ignore", "pipe", "pipe"],
@@ -212,13 +658,14 @@ var DENY_BASH = [
   "gemini",
   "qwen",
   "kilo",
-  "kilocode"
+  "kilocode",
+  "agy"
 ].map((c) => `Bash(${c}:*)`);
 var SECRETS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*"].map((p) => `Read(${p})`);
 function toolsFor(mode, web2) {
   return [...mode === "read" ? READ_TOOLS : WRITE_TOOLS, ...web2 ? WEB_TOOLS : []];
 }
-function invocation(req) {
+function invocation2(req) {
   const tools = toolsFor(req.mode, req.web).join(",");
   const args = [
     "-p",
@@ -246,10 +693,10 @@ function invocation(req) {
   if (effort) args.push("--effort", effort);
   if (req.sessionId) args.push("--resume", req.sessionId);
   args.push("--", req.prompt);
-  const { command, prefix } = resolveCommand(binary());
+  const { command, prefix } = resolveCommand(binary2());
   return { command, args: [...prefix, ...args], env: { DISABLE_AUTOUPDATER: "1" } };
 }
-function classify(message) {
+function classify2(message) {
   if (/authentication_failed|failed to authenticate|oauth|not logged in|\/login|invalid api key|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
@@ -257,26 +704,26 @@ function classify(message) {
   if (/model[^.]*(not found|does not exist|invalid|not available)|invalid model|not_found_error/i.test(message)) return "model-unavailable";
   return "other";
 }
-function failure(run, stderr, exitCode) {
+function failure2(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.trim().split("\n").filter(Boolean).pop();
   const message = run.error ?? detail ?? `claude exited with code ${exitCode}`;
-  return { kind: classify(message), message };
+  return { kind: classify2(message), message };
 }
 function defaultModel() {
   try {
-    const settings2 = JSON.parse(fs2.readFileSync(path2.join(os2.homedir(), ".claude", "settings.json"), "utf8"));
+    const settings2 = JSON.parse(fs5.readFileSync(path4.join(os4.homedir(), ".claude", "settings.json"), "utf8"));
     return typeof settings2.model === "string" ? settings2.model : void 0;
   } catch {
     return void 0;
   }
 }
-function doctor({ models, hasFallback }) {
+function doctor2({ models, hasFallback }) {
   const version = cl(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `claude not runnable (${binary()}). Install Claude Code, or set PITROOM_CLAUDE_BIN` }];
+    return [{ level: "fail", message: `claude not runnable (${binary2()}). Install Claude Code, or set PITROOM_CLAUDE_BIN` }];
   }
-  const checks = [{ level: "ok", message: `Claude Code ${version.out.trim()} at ${binary()}` }];
+  const checks = [{ level: "ok", message: `Claude Code ${version.out.trim()} at ${binary2()}` }];
   let loggedIn = false;
   try {
     loggedIn = JSON.parse(cl(["auth", "status"]).out).loggedIn === true;
@@ -299,7 +746,7 @@ function doctor({ models, hasFallback }) {
 var CLAUDE_EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 function catalog() {
   const def = defaultModel();
-  const models = ["haiku", "sonnet", "opus"].map((id) => ({ id, efforts: CLAUDE_EFFORTS }));
+  const models = ["haiku", "sonnet", "opus"].map((id2) => ({ id: id2, efforts: CLAUDE_EFFORTS }));
   if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });
   return { models, source: "Claude Code aliases (latest of each size) and --effort levels from `claude --help`" };
 }
@@ -307,25 +754,25 @@ var claude = {
   id: "claude",
   name: "Claude Code",
   capabilities: { readOnly: "tool-allowlist", resume: "by-id", reportsCost: true, attachFiles: false },
-  binary,
+  binary: binary2,
   catalog,
-  invocation,
-  parse: parseEvents,
-  failure,
+  invocation: invocation2,
+  parse: parseEvents2,
+  failure: failure2,
   defaultModel,
-  doctor
+  doctor: doctor2
 };
 
 // src/backends/codex/index.ts
-import { spawnSync as spawnSync2 } from "node:child_process";
-import fs3 from "node:fs";
-import os3 from "node:os";
-import path3 from "node:path";
+import { spawnSync as spawnSync3 } from "node:child_process";
+import fs6 from "node:fs";
+import os5 from "node:os";
+import path5 from "node:path";
 
 // src/backends/codex/events.ts
 var WORK = /* @__PURE__ */ new Set(["agent_message", "reasoning", "command_execution", "file_change", "mcp_tool_call", "web_search", "todo_list"]);
 var TOOLS = /* @__PURE__ */ new Set(["command_execution", "file_change", "mcp_tool_call", "web_search"]);
-function parseEvents2(jsonl) {
+function parseEvents3(jsonl) {
   const usage = {
     input: 0,
     output: 0,
@@ -366,31 +813,31 @@ function parseEvents2(jsonl) {
         }
         if (it.type === "agent_message" && String(it.text ?? "").trim()) {
           finalText = String(it.text).trim();
-          lastActivity = `says: ${oneLine2(finalText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip2(finalText, 600) });
+          lastActivity = `says: ${oneLine3(finalText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(finalText, 600) });
         } else if (it.type === "command_execution") {
           if (it.status === "declined" || /operation not permitted|sandbox/i.test(String(it.aggregated_output ?? ""))) usage.denied++;
-          lastActivity = `shell ${oneLine2(String(it.command ?? ""), 60)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "shell", name: "shell", text: clip2(String(it.command ?? "").replace(/^\/bin\/\w+ -lc /, ""), 240), ok: it.exit_code === 0 });
+          lastActivity = `shell ${oneLine3(String(it.command ?? ""), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "shell", name: "shell", text: clip3(String(it.command ?? "").replace(/^\/bin\/\w+ -lc /, ""), 240), ok: it.exit_code === 0 });
         } else if (it.type === "file_change") {
           const paths = (it.changes ?? []).map((c) => String(c.path));
           if (it.status !== "failed" && it.status !== "declined") edits.push(...paths);
           else usage.denied++;
-          lastActivity = `edit ${oneLine2(paths.join(", "), 60)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "edit", name: "edit", text: clip2(paths.join(", "), 240), ok: it.status !== "failed" && it.status !== "declined" });
+          lastActivity = `edit ${oneLine3(paths.join(", "), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "edit", name: "edit", text: clip3(paths.join(", "), 240), ok: it.status !== "failed" && it.status !== "declined" });
         }
         break;
       }
       case "turn.completed": {
         const u = e.usage ?? {};
-        const cached3 = num2(u.cached_input_tokens);
-        const reasoning = num2(u.reasoning_output_tokens);
-        usage.input += Math.max(0, num2(u.input_tokens) - cached3);
+        const cached3 = num3(u.cached_input_tokens);
+        const reasoning = num3(u.reasoning_output_tokens);
+        usage.input += Math.max(0, num3(u.input_tokens) - cached3);
         usage.cacheRead += cached3;
-        usage.cacheWrite += num2(u.cache_write_input_tokens);
-        usage.output += Math.max(0, num2(u.output_tokens) - reasoning);
+        usage.cacheWrite += num3(u.cache_write_input_tokens);
+        usage.output += Math.max(0, num3(u.output_tokens) - reasoning);
         usage.reasoning += reasoning;
-        usage.total += num2(u.input_tokens) + num2(u.output_tokens);
+        usage.total += num3(u.input_tokens) + num3(u.output_tokens);
         break;
       }
       case "error":
@@ -414,21 +861,21 @@ function describe(raw) {
     return s;
   }
 }
-function num2(v) {
+function num3(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
-function oneLine2(s, max = 80) {
+function oneLine3(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
-var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 
 // src/backends/codex/index.ts
-var binary2 = () => findBinary("codex", "PITROOM_CODEX_BIN");
-var codexHome = () => process.env.CODEX_HOME ?? path3.join(os3.homedir(), ".codex");
+var binary3 = () => findBinary("codex", "PITROOM_CODEX_BIN");
+var codexHome = () => process.env.CODEX_HOME ?? path5.join(os5.homedir(), ".codex");
 function cx(args, timeout = 6e4) {
-  const { command, prefix } = resolveCommand(binary2());
-  const r = spawnSync2(command, [...prefix, ...args], {
+  const { command, prefix } = resolveCommand(binary3());
+  const r = spawnSync3(command, [...prefix, ...args], {
     encoding: "utf8",
     timeout,
     stdio: ["ignore", "pipe", "pipe"],
@@ -443,7 +890,7 @@ function splitModel(model) {
   const [m, effort] = model.split("#");
   return { model: m || void 0, effort: effort || void 0 };
 }
-function invocation2(req) {
+function invocation3(req) {
   const { model, effort } = splitModel(req.model);
   const args = ["exec"];
   if (req.sessionId) args.push("resume", req.sessionId);
@@ -460,10 +907,10 @@ function invocation2(req) {
   if (model) args.push("--model", model);
   if (effort) args.push("-c", `model_reasoning_effort=${toml(effort)}`);
   args.push(req.prompt);
-  const { command, prefix } = resolveCommand(binary2());
+  const { command, prefix } = resolveCommand(binary3());
   return { command, args: [...prefix, ...args], env: {} };
 }
-function classify2(message) {
+function classify3(message) {
   if (/not supported|model[^.]*(not found|does not exist|unknown|unavailable)|unsupported model|no such model/i.test(message)) {
     return "model-unavailable";
   }
@@ -471,37 +918,37 @@ function classify2(message) {
   if (/unauthori[sz]ed|\b40[13]\b|not logged in|log ?in|api.?key|credits?\b|billing|subscription/i.test(message)) return "auth";
   return "other";
 }
-function failure2(run, stderr, exitCode) {
+function failure3(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.split("\n").find((l) => /^Error[: ]|ERROR/.test(l) && !/rmcp|models cache/.test(l));
   let message = run.error ?? (detail ? detail.trim() : `codex exited with code ${exitCode}`);
   if (/not supported when using Codex/i.test(message)) message += " (an outdated Codex CLI says this too: npm i -g @openai/codex@latest)";
-  return { kind: classify2(message), message };
+  return { kind: classify3(message), message };
 }
 function resolveModel(sessionId) {
-  const root = path3.join(codexHome(), "sessions");
-  const day = (d) => path3.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0"));
+  const root = path5.join(codexHome(), "sessions");
+  const day = (d) => path5.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0"));
   const now = /* @__PURE__ */ new Date();
   for (const dir of [day(now), day(new Date(now.getTime() - 864e5))]) {
     let files = [];
     try {
-      files = fs3.readdirSync(dir).filter((f) => f.includes(sessionId));
+      files = fs6.readdirSync(dir).filter((f) => f.includes(sessionId));
     } catch {
       continue;
     }
     for (const f of files) {
-      const m = /"model":"([^"]+)"/.exec(fs3.readFileSync(path3.join(dir, f), "utf8"));
+      const m = /"model":"([^"]+)"/.exec(fs6.readFileSync(path5.join(dir, f), "utf8"));
       if (m) return m[1];
     }
   }
   return void 0;
 }
-function doctor2({ models, hasFallback }) {
+function doctor3({ models, hasFallback }) {
   const version = cx(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `codex not runnable (${binary2()}). Install: npm i -g @openai/codex, or set PITROOM_CODEX_BIN` }];
+    return [{ level: "fail", message: `codex not runnable (${binary3()}). Install: npm i -g @openai/codex, or set PITROOM_CODEX_BIN` }];
   }
-  const checks = [{ level: "ok", message: `${version.out.trim()} at ${binary2()}` }];
+  const checks = [{ level: "ok", message: `${version.out.trim()} at ${binary3()}` }];
   const login = cx(["login", "status"]);
   checks.push(
     login.ok && /logged in/i.test(login.out) ? { level: "ok", message: `Codex: ${login.out.trim().split("\n")[0]}` } : { level: "fail", message: "Codex is not logged in: run `codex login`" }
@@ -517,9 +964,9 @@ function doctor2({ models, hasFallback }) {
   return checks;
 }
 function catalog2() {
-  const file = path3.join(codexHome(), "models_cache.json");
+  const file = path5.join(codexHome(), "models_cache.json");
   try {
-    const raw = JSON.parse(fs3.readFileSync(file, "utf8"));
+    const raw = JSON.parse(fs6.readFileSync(file, "utf8"));
     const models = (raw.models ?? []).filter((m) => m.visibility !== "hide" && typeof m.slug === "string").map((m) => ({
       id: m.slug,
       efforts: (m.supported_reasoning_levels ?? []).map(
@@ -537,143 +984,25 @@ var codex = {
   name: "Codex",
   catalog: catalog2,
   capabilities: { readOnly: "os-sandbox", resume: "by-id", reportsCost: false, attachFiles: false },
-  binary: binary2,
-  invocation: invocation2,
-  parse: parseEvents2,
-  failure: failure2,
+  binary: binary3,
+  invocation: invocation3,
+  parse: parseEvents3,
+  failure: failure3,
   resolveModel,
-  doctor: doctor2
+  doctor: doctor3
 };
 
 // src/backends/gemini/index.ts
-import { spawnSync as spawnSync3 } from "node:child_process";
-import fs6 from "node:fs";
-import os5 from "node:os";
-import path5 from "node:path";
+import { spawnSync as spawnSync4 } from "node:child_process";
+import fs7 from "node:fs";
+import os6 from "node:os";
+import path6 from "node:path";
 import { fileURLToPath } from "node:url";
 
-// src/core/store.ts
-import fs5 from "node:fs";
-import os4 from "node:os";
-import path4 from "node:path";
-import crypto from "node:crypto";
-
-// src/core/fs-atomic.ts
-import fs4 from "node:fs";
-var BUSY = /* @__PURE__ */ new Set(["EPERM", "EBUSY", "EACCES"]);
-function renameOver(tmp, file) {
-  for (let attempt = 0; ; attempt++) {
-    try {
-      fs4.renameSync(tmp, file);
-      return;
-    } catch (e) {
-      if (process.platform !== "win32" || !BUSY.has(e.code ?? "") || attempt >= 40) throw e;
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
-    }
-  }
-}
-
-// src/core/store.ts
-var TERMINAL = ["done", "failed", "timeout", "stopped"];
-var isActive = (s) => !TERMINAL.includes(s);
-function home() {
-  if (process.env.PITROOM_HOME) return path4.resolve(process.env.PITROOM_HOME);
-  if (process.platform === "win32") {
-    return path4.join(process.env.LOCALAPPDATA ?? path4.join(os4.homedir(), "AppData", "Local"), "pitroom");
-  }
-  return path4.join(process.env.XDG_STATE_HOME ?? path4.join(os4.homedir(), ".local", "state"), "pitroom");
-}
-var runsDir = () => path4.join(home(), "runs");
-var ledgerFile = () => path4.join(home(), "ledger.jsonl");
-var runDir = (id) => path4.join(runsDir(), id);
-var runFile = (id, name) => path4.join(runDir(id), name);
-function newRunId(now = /* @__PURE__ */ new Date()) {
-  const p = (n) => String(n).padStart(2, "0");
-  const stamp2 = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-  return `${stamp2}-${crypto.randomBytes(2).toString("hex")}`;
-}
-var onFinished;
-var archive;
-function writeMeta(meta) {
-  fs5.mkdirSync(runDir(meta.id), { recursive: true });
-  const file = runFile(meta.id, "meta.json");
-  const tmp = `${file}.${process.pid}.tmp`;
-  fs5.writeFileSync(tmp, JSON.stringify(meta, null, 2));
-  renameOver(tmp, file);
-  if (TERMINAL.includes(meta.state)) {
-    try {
-      onFinished?.(meta);
-    } catch {
-    }
-  }
-}
-function readMeta(id) {
-  const file = runFile(id, "meta.json");
-  if (!fs5.existsSync(file)) {
-    const kept = archive?.meta(id);
-    if (kept) return upgrade(kept);
-  }
-  return upgrade(JSON.parse(fs5.readFileSync(file, "utf8")));
-}
-function upgrade(raw) {
-  if (!raw.worker) raw.worker = raw.model ? { backend: "opencode", model: raw.model } : { backend: "opencode" };
-  if (!Array.isArray(raw.fallback)) {
-    raw.fallback = (raw.fallbackModels ?? []).map((m) => ({ backend: "opencode", model: m }));
-  }
-  raw.warnings ??= [];
-  raw.files ??= [];
-  raw.link ??= [];
-  return raw;
-}
-function listRunIds() {
-  if (!fs5.existsSync(runsDir())) return [];
-  return fs5.readdirSync(runsDir()).filter((d) => fs5.existsSync(runFile(d, "meta.json"))).sort();
-}
-function resolveRun(ref) {
-  const ids = listRunIds();
-  if (!ref || ref === "latest" || ref === "last") {
-    if (!ids.length) throw new UserError("no runs yet");
-    return ids[ids.length - 1];
-  }
-  if (ids.includes(ref)) return ref;
-  const hits = ids.filter((id) => id.startsWith(ref) || id.endsWith(ref));
-  if (hits.length === 1) return hits[0];
-  if (!hits.length) {
-    const kept = archive?.id(ref);
-    if (kept) return kept;
-  }
-  throw new UserError(hits.length ? `ambiguous run "${ref}": ${hits.join(", ")}` : ids.length ? `unknown run "${ref}"` : "no runs yet");
-}
-function isAlive(pid) {
-  if (!pid) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (e) {
-    return e.code === "EPERM";
-  }
-}
-var STOP_FILE = "stop-requested";
-var requestStop = (id) => fs5.writeFileSync(runFile(id, STOP_FILE), "");
-function freshMeta(id) {
-  const meta = readMeta(id);
-  if (!TERMINAL.includes(meta.state) && meta.pid && !isAlive(meta.pid)) {
-    const latest = readMeta(id);
-    if (TERMINAL.includes(latest.state)) return latest;
-    const stopped = latest.stopRequested || fs5.existsSync(runFile(id, STOP_FILE));
-    latest.state = stopped ? "stopped" : "failed";
-    if (!stopped) latest.error ??= "worker process exited unexpectedly";
-    latest.endedAt ??= (/* @__PURE__ */ new Date()).toISOString();
-    writeMeta(latest);
-    return latest;
-  }
-  return meta;
-}
-
 // src/backends/gemini/events.ts
-var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
-var DENIED2 = /policy|permission|not allowed|denied|blocked|disallowed|refus/i;
-function parseEvents3(jsonl) {
+var EDIT_TOOLS3 = /* @__PURE__ */ new Set(["replace", "write_file", "edit"]);
+var DENIED3 = /policy|permission|not allowed|denied|blocked|disallowed|refus/i;
+function parseEvents4(jsonl) {
   const usage = {
     input: 0,
     output: 0,
@@ -703,8 +1032,8 @@ function parseEvents3(jsonl) {
     text = "";
     if (!said) return;
     lastText = said;
-    lastActivity = `says: ${oneLine3(said)}`;
-    if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(said, 600) });
+    lastActivity = `says: ${oneLine4(said)}`;
+    if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip4(said, 600) });
   };
   const startTurn = () => {
     if (!inTurn) turns++;
@@ -736,11 +1065,11 @@ function parseEvents3(jsonl) {
       usage.toolCalls++;
       tools[name] = (tools[name] ?? 0) + 1;
       const target = p.file_path ?? p.absolute_path ?? p.path ?? p.dir_path ?? p.pattern ?? p.command ?? p.query ?? p.url ?? p.prompt;
-      lastActivity = `${name} ${target ? oneLine3(String(target), 60) : ""}`.trim();
+      lastActivity = `${name} ${target ? oneLine4(String(target), 60) : ""}`.trim();
       const file = p.file_path ?? p.absolute_path ?? p.path;
-      if (EDIT_TOOLS2.has(name) && file) pendingEdits.set(String(e.tool_id), String(file));
+      if (EDIT_TOOLS3.has(name) && file) pendingEdits.set(String(e.tool_id), String(file));
       if (timeline.length < MAX_STEPS) {
-        const step = { kind: EDIT_TOOLS2.has(name) ? "edit" : name === "run_shell_command" ? "shell" : "tool", name, text: clip3(String(target ?? ""), 240) };
+        const step = { kind: EDIT_TOOLS3.has(name) ? "edit" : name === "run_shell_command" ? "shell" : "tool", name, text: clip4(String(target ?? ""), 240) };
         timeline.push(step);
         stepOf.set(String(e.tool_id), step);
       }
@@ -749,18 +1078,18 @@ function parseEvents3(jsonl) {
       const ok = e.status === "success";
       const step = stepOf.get(String(e.tool_id));
       if (step) step.ok = ok;
-      if (!ok && DENIED2.test(`${e.error?.type ?? ""} ${e.error?.message ?? ""}`)) usage.denied++;
+      if (!ok && DENIED3.test(`${e.error?.type ?? ""} ${e.error?.message ?? ""}`)) usage.denied++;
       if (ok && pendingEdits.has(String(e.tool_id))) edits.push(pendingEdits.get(String(e.tool_id)));
     } else if (e.type === "error") {
       if (e.severity === "error") error ??= String(e.message ?? "Gemini CLI error");
     } else if (e.type === "result") {
       const s = e.stats ?? {};
-      const cached3 = num3(s.cached);
+      const cached3 = num4(s.cached);
       usage.cacheRead += cached3;
-      usage.input += s.input !== void 0 ? num3(s.input) : Math.max(0, num3(s.input_tokens) - cached3);
-      usage.output += num3(s.output_tokens);
-      usage.total += num3(s.total_tokens) || num3(s.input_tokens) + num3(s.output_tokens);
-      usage.toolCalls = Math.max(usage.toolCalls, num3(s.tool_calls));
+      usage.input += s.input !== void 0 ? num4(s.input) : Math.max(0, num4(s.input_tokens) - cached3);
+      usage.output += num4(s.output_tokens);
+      usage.total += num4(s.total_tokens) || num4(s.input_tokens) + num4(s.output_tokens);
+      usage.toolCalls = Math.max(usage.toolCalls, num4(s.tool_calls));
       model ??= Object.keys(s.models ?? {})[0];
       if (e.status === "error") error ??= String(e.error?.message ?? e.error?.type ?? "Gemini CLI error");
     }
@@ -769,20 +1098,20 @@ function parseEvents3(jsonl) {
   usage.steps = turns;
   return { sessionId, model, finalText: error ? "" : lastText, usage, tools, edits, lastActivity, timeline, error };
 }
-var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-function num3(v) {
+var clip4 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+function num4(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
-function oneLine3(s, max = 80) {
+function oneLine4(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 
 // src/backends/gemini/index.ts
-var binary3 = () => findBinary("gemini", "PITROOM_GEMINI_BIN", ["~/.local/bin/gemini"]);
+var binary4 = () => findBinary("gemini", "PITROOM_GEMINI_BIN", ["~/.local/bin/gemini"]);
 function gem(args, timeout = 6e4) {
-  const { command, prefix } = resolveCommand(binary3());
-  const r = spawnSync3(command, [...prefix, ...args], {
+  const { command, prefix } = resolveCommand(binary4());
+  const r = spawnSync4(command, [...prefix, ...args], {
     encoding: "utf8",
     timeout,
     stdio: ["ignore", "pipe", "pipe"],
@@ -790,32 +1119,32 @@ function gem(args, timeout = 6e4) {
   });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var policyDir = () => path5.resolve(path5.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+var policyDir = () => path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
 function workerHome() {
-  const root = path5.join(home(), "gemini-home");
-  const dir = path5.join(root, ".gemini");
-  const base = JSON.parse(fs6.readFileSync(path5.join(policyDir(), "worker-settings.json"), "utf8"));
+  const root = path6.join(home(), "gemini-home");
+  const dir = path6.join(root, ".gemini");
+  const base = JSON.parse(fs7.readFileSync(path6.join(policyDir(), "worker-settings.json"), "utf8"));
   const auth = settings().security?.auth;
   const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}
 `;
-  const file = path5.join(dir, "settings.json");
+  const file = path6.join(dir, "settings.json");
   try {
-    if (fs6.readFileSync(file, "utf8") === body) return root;
+    if (fs7.readFileSync(file, "utf8") === body) return root;
   } catch {
   }
-  fs6.mkdirSync(dir, { recursive: true });
-  fs6.writeFileSync(file, body);
+  fs7.mkdirSync(dir, { recursive: true });
+  fs7.writeFileSync(file, body);
   for (const name of ["oauth_creds.json", "google_accounts.json"]) {
-    const from = path5.join(geminiHome(), name);
-    const to = path5.join(dir, name);
+    const from = path6.join(geminiHome(), name);
+    const to = path6.join(dir, name);
     try {
-      if (fs6.existsSync(from) && !fs6.existsSync(to)) fs6.symlinkSync(from, to);
+      if (fs7.existsSync(from) && !fs7.existsSync(to)) fs7.symlinkSync(from, to);
     } catch {
     }
   }
   return root;
 }
-function invocation3(req) {
+function invocation4(req) {
   const dir = policyDir();
   const policies = ["base.toml", ...req.web ? [] : ["no-web.toml"], ...req.mode === "read" ? [] : ["shell.toml"]];
   const args = [
@@ -829,18 +1158,18 @@ function invocation3(req) {
     "-e",
     "none"
   ];
-  for (const p of policies) args.push("--policy", path5.join(dir, p));
+  for (const p of policies) args.push("--policy", path6.join(dir, p));
   if (req.sessionId) args.push("--resume", req.sessionId);
   if (process.env.PITROOM_GEMINI_TRUST === "1") args.push("--skip-trust");
   const [model] = (req.model ?? "").split("#");
   if (model) args.push("--model", model);
-  const { command, prefix } = resolveCommand(binary3());
+  const { command, prefix } = resolveCommand(binary4());
   const env = { GEMINI_CLI_HOME: workerHome() };
-  const trusted = path5.join(geminiHome(), "trustedFolders.json");
-  if (fs6.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  const trusted = path6.join(geminiHome(), "trustedFolders.json");
+  if (fs7.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
   return { command, args: [...prefix, ...args], env };
 }
-function classify3(message) {
+function classify4(message) {
   if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
@@ -849,20 +1178,20 @@ function classify3(message) {
   return "other";
 }
 var UNTRUSTED = "Gemini CLI does not trust this folder: open `gemini` in it once and trust it, or set PITROOM_GEMINI_TRUST=1 (the folder's own Gemini settings, hooks included, then load)";
-function failure3(run, stderr, exitCode) {
+function failure4(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
   const detail = lines.find((l) => /error|failed|exceeded|quota|exhausted|unsupported/i.test(l) && !/^at /.test(l)) ?? lines.at(-1);
   const raw = run.error ?? detail ?? `gemini exited with code ${exitCode}`;
   const message = /not running in a trusted directory/i.test(`${stderr} ${raw}`) ? UNTRUSTED : raw;
-  return { kind: classify3(message), message };
+  return { kind: classify4(message), message };
 }
 function geminiHome() {
-  return path5.join(process.env.GEMINI_CLI_HOME ?? os5.homedir(), ".gemini");
+  return path6.join(process.env.GEMINI_CLI_HOME ?? os6.homedir(), ".gemini");
 }
 function settings() {
   try {
-    return JSON.parse(fs6.readFileSync(path5.join(geminiHome(), "settings.json"), "utf8"));
+    return JSON.parse(fs7.readFileSync(path6.join(geminiHome(), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -873,15 +1202,15 @@ function defaultModel2() {
   const name = typeof m === "string" ? m : m?.name;
   return typeof name === "string" ? name : void 0;
 }
-function doctor3({ models, hasFallback }) {
+function doctor4({ models, hasFallback }) {
   const version = gem(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `gemini not runnable (${binary3()}). Install Gemini CLI (npm i -g @google/gemini-cli), or set PITROOM_GEMINI_BIN` }];
+    return [{ level: "fail", message: `gemini not runnable (${binary4()}). Install Gemini CLI (npm i -g @google/gemini-cli), or set PITROOM_GEMINI_BIN` }];
   }
-  const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary3()}` }];
+  const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary4()}` }];
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
-  const signedIn = fs6.existsSync(path5.join(geminiHome(), "oauth_creds.json"));
+  const signedIn = fs7.existsSync(path6.join(geminiHome(), "oauth_creds.json"));
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
@@ -910,7 +1239,7 @@ function doctor3({ models, hasFallback }) {
 }
 function catalog3() {
   const def = defaultModel2();
-  const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview"].map((id) => ({ id }));
+  const models = ["gemini-3.8-flash", "gemini-3.5-flash", "gemini-3.5-flash-lite", "gemini-3.1-pro-preview", "gemini-3-flash-preview"].map((id2) => ({ id: id2 }));
   if (def && !models.some((m) => m.id === def)) models.push({ id: def });
   return { models, source: "Gemini CLI's built-in model names (it cannot list models); the effort suffix is not used" };
 }
@@ -918,26 +1247,26 @@ var gemini = {
   id: "gemini",
   name: "Gemini CLI",
   capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
-  binary: binary3,
+  binary: binary4,
   catalog: catalog3,
-  invocation: invocation3,
-  parse: parseEvents3,
-  failure: failure3,
+  invocation: invocation4,
+  parse: parseEvents4,
+  failure: failure4,
   defaultModel: defaultModel2,
-  doctor: doctor3
+  doctor: doctor4
 };
 
 // src/backends/kilo/index.ts
-import { spawnSync as spawnSync5 } from "node:child_process";
-import path7 from "node:path";
+import { spawnSync as spawnSync6 } from "node:child_process";
+import path8 from "node:path";
 
 // src/backends/opencode/index.ts
-import { spawnSync as spawnSync4 } from "node:child_process";
+import { spawnSync as spawnSync5 } from "node:child_process";
 
 // src/backends/opencode/events.ts
-var EDIT_TOOLS3 = /* @__PURE__ */ new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
-var DENIED3 = /rule which prevents you|permission denied|permission\.rejected/i;
-function parseEvents4(ndjson) {
+var EDIT_TOOLS4 = /* @__PURE__ */ new Set(["edit", "write", "patch", "multiedit", "apply_patch"]);
+var DENIED4 = /rule which prevents you|permission denied|permission\.rejected/i;
+function parseEvents5(ndjson) {
   const usage = {
     input: 0,
     output: 0,
@@ -974,8 +1303,8 @@ function parseEvents4(ndjson) {
         const key = String(p.messageID ?? "");
         if (!textByMessage.has(key)) textByMessage.set(key, []);
         textByMessage.get(key).push(text);
-        lastActivity = `says: ${oneLine4(text)}`;
-        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip4(text.trim(), 600), at: stamp(e.timestamp) });
+        lastActivity = `says: ${oneLine5(text)}`;
+        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip5(text.trim(), 600), at: stamp(e.timestamp) });
         break;
       }
       case "tool_use": {
@@ -983,28 +1312,28 @@ function parseEvents4(ndjson) {
         const st = p.state ?? {};
         usage.toolCalls++;
         tools[name] = (tools[name] ?? 0) + 1;
-        if (st.status === "error" && DENIED3.test(String(st.error ?? ""))) usage.denied++;
-        if (st.status === "completed" && EDIT_TOOLS3.has(name)) {
+        if (st.status === "error" && DENIED4.test(String(st.error ?? ""))) usage.denied++;
+        if (st.status === "completed" && EDIT_TOOLS4.has(name)) {
           edits.push(String(st.input?.filePath ?? st.input?.path ?? name));
         }
         lastActivity = `${name} ${describe2(st.input)}`.trim();
         if (timeline.length < MAX_STEPS) {
-          const kind2 = EDIT_TOOLS3.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
+          const kind2 = EDIT_TOOLS4.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
           const text = kind2 === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
-          timeline.push({ kind: kind2, name, text: clip4(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
+          timeline.push({ kind: kind2, name, text: clip5(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
         }
         break;
       }
       case "step_finish": {
         const t = p.tokens ?? {};
         usage.steps++;
-        usage.input += num4(t.input);
-        usage.output += num4(t.output);
-        usage.reasoning += num4(t.reasoning);
-        usage.cacheRead += num4(t.cache?.read);
-        usage.cacheWrite += num4(t.cache?.write);
-        usage.total += num4(t.total) || num4(t.input) + num4(t.output) + num4(t.reasoning) + num4(t.cache?.read);
-        usage.cost = (usage.cost ?? 0) + num4(p.cost);
+        usage.input += num5(t.input);
+        usage.output += num5(t.output);
+        usage.reasoning += num5(t.reasoning);
+        usage.cacheRead += num5(t.cache?.read);
+        usage.cacheWrite += num5(t.cache?.write);
+        usage.total += num5(t.total) || num5(t.input) + num5(t.output) + num5(t.reasoning) + num5(t.cache?.read);
+        usage.cost = (usage.cost ?? 0) + num5(p.cost);
         break;
       }
       case "error": {
@@ -1028,25 +1357,25 @@ function describeError(err) {
   const tags = [err.type, inner, err.status && `HTTP ${err.status}`].filter(Boolean);
   return tags.length ? `${message} [${tags.join(", ")}]` : message;
 }
-var clip4 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var clip5 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 var stamp = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
-function num4(v) {
+function num5(v) {
   return typeof v === "number" && Number.isFinite(v) ? v : 0;
 }
-function oneLine4(s, max = 80) {
+function oneLine5(s, max = 80) {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 function describe2(input) {
   if (!input || typeof input !== "object") return "";
   const v = input.filePath ?? input.path ?? input.pattern ?? input.command ?? input.url ?? input.query;
-  return v ? oneLine4(String(v), 60) : "";
+  return v ? oneLine5(String(v), 60) : "";
 }
 
 // src/backends/opencode/profiles.ts
-import fs7 from "node:fs";
-import os6 from "node:os";
-import path6 from "node:path";
+import fs8 from "node:fs";
+import os7 from "node:os";
+import path7 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
 var READ_FILES = {
   "*": "allow",
@@ -1142,22 +1471,23 @@ var FORBIDDEN_BASH = [
   "opencode*",
   "kilo *",
   "kilocode*",
+  "agy *",
   "pitroom *",
   "*pitroom*"
 ];
 function scratchDirs(app) {
-  const data = process.env.XDG_DATA_HOME ?? path6.join(os6.homedir(), ".local", "share");
+  const data = process.env.XDG_DATA_HOME ?? path7.join(os7.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path6.join(data, app, "tool-output", "*")]: "allow",
-    [path6.join(data, app, "shell", "*", "*")]: "allow"
+    [path7.join(data, app, "tool-output", "*")]: "allow",
+    [path7.join(data, app, "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os6.tmpdir(), realpath(os6.tmpdir())])) rules[path6.join(tmp, app, "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os7.tmpdir(), realpath(os7.tmpdir())])) rules[path7.join(tmp, app, "*")] = "allow";
   return rules;
 }
 function realpath(p) {
   try {
-    return fs7.realpathSync(p);
+    return fs8.realpathSync(p);
   } catch {
     return p;
   }
@@ -1246,10 +1576,10 @@ function isObject(v) {
 }
 
 // src/backends/opencode/index.ts
-var binary4 = () => findBinary("opencode", "PITROOM_OPENCODE_BIN", ["~/.opencode/bin/opencode"]);
+var binary5 = () => findBinary("opencode", "PITROOM_OPENCODE_BIN", ["~/.opencode/bin/opencode"]);
 function oc(args, opts = {}) {
-  const { command, prefix } = resolveCommand(binary4());
-  const r = spawnSync4(command, [...prefix, ...args], {
+  const { command, prefix } = resolveCommand(binary5());
+  const r = spawnSync5(command, [...prefix, ...args], {
     encoding: "utf8",
     timeout: opts.timeout ?? 6e4,
     env: opts.env ?? process.env,
@@ -1259,7 +1589,7 @@ function oc(args, opts = {}) {
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
 var jsonIn = (s) => JSON.parse(s.slice(s.indexOf("{")));
-function invocation4(req) {
+function invocation5(req) {
   const args = [
     "run",
     "--standalone",
@@ -1278,7 +1608,7 @@ function invocation4(req) {
   if (req.sessionId) args.push("--session", req.sessionId);
   for (const f of req.files) args.push("--file", f);
   args.push(req.prompt);
-  const { command, prefix } = resolveCommand(binary4());
+  const { command, prefix } = resolveCommand(binary5());
   return {
     command,
     args: [...prefix, ...args],
@@ -1293,7 +1623,7 @@ function majorVersion(output) {
   const m = /(\d+)\.\d+\.\d+/.exec(output);
   return m ? Number(m[1]) : void 0;
 }
-function classify4(message) {
+function classify5(message) {
   if (/model not found|ModelNotFound|unknown model|no such model|deprecated/i.test(message)) return "model-unavailable";
   if (/rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
   if (/provider\.auth|FreeTierError|free tier|unauthori[sz]ed|\b40[13]\b|api.?key|insufficient|credits?\b|billing|payment/i.test(message)) {
@@ -1301,17 +1631,17 @@ function classify4(message) {
   }
   return "other";
 }
-function failure4(run, stderr, exitCode) {
+function failure5(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.match(/error="([^"]+)"/g)?.pop()?.slice(7, -1);
   const raw = run.error ?? `opencode exited with code ${exitCode}`;
   const message = detail && !raw.includes(detail) ? `${raw}: ${detail}` : raw;
-  return { kind: classify4(message), message };
+  return { kind: classify5(message), message };
 }
 function modelId(m) {
   if (typeof m === "string") return m;
-  const id = m?.model ?? m?.id;
-  return m?.providerID && id ? `${m.providerID}/${id}` : void 0;
+  const id2 = m?.model ?? m?.id;
+  return m?.providerID && id2 ? `${m.providerID}/${id2}` : void 0;
 }
 function defaultModel3() {
   try {
@@ -1341,25 +1671,25 @@ function resolveModel2(sessionId) {
 function catalog4() {
   const ids = listModels();
   return {
-    models: (ids.length ? ids : listModels()).map((id) => ({ id })),
+    models: (ids.length ? ids : listModels()).map((id2) => ({ id: id2 })),
     source: "`opencode models` (reasoning variants are provider-specific: provider/model#variant)"
   };
 }
 function listModels() {
   return oc(["models"]).out.split("\n").map((s) => s.trim()).filter(Boolean);
 }
-function doctor4({ models, hasFallback }) {
+function doctor5({ models, hasFallback }) {
   const checks = [];
   const version = oc(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `opencode not runnable (${binary4()}). Install: https://opencode.ai or set PITROOM_OPENCODE_BIN` }];
+    return [{ level: "fail", message: `opencode not runnable (${binary5()}). Install: https://opencode.ai or set PITROOM_OPENCODE_BIN` }];
   }
   const v = version.out.trim().replace(/^opencode\s+/i, "");
   const major = majorVersion(v);
   if (major !== void 0 && major < 2) {
     return [{ level: "fail", message: `OpenCode ${v} is too old: Pitroom needs OpenCode v2 or newer (run \`opencode upgrade\`)` }];
   }
-  checks.push({ level: "ok", message: `opencode ${v} at ${binary4()} (private --standalone server per run)` });
+  checks.push({ level: "ok", message: `opencode ${v} at ${binary5()} (private --standalone server per run)` });
   const known = new Set(listModels());
   const def = defaultModel3();
   for (const m of models) {
@@ -1387,25 +1717,25 @@ var opencode = {
   id: "opencode",
   name: "OpenCode",
   capabilities: { readOnly: "permission-rules", resume: "by-id", reportsCost: true, attachFiles: true },
-  binary: binary4,
-  invocation: invocation4,
-  parse: parseEvents4,
-  failure: failure4,
+  binary: binary5,
+  invocation: invocation5,
+  parse: parseEvents5,
+  failure: failure5,
   defaultModel: defaultModel3,
   resolveModel: resolveModel2,
   listModels,
   catalog: catalog4,
-  doctor: doctor4
+  doctor: doctor5
 };
 
 // src/backends/kilo/index.ts
-var binary5 = () => findBinary("kilo", "PITROOM_KILO_BIN", ["~/.kilo/bin/kilo"]);
+var binary6 = () => findBinary("kilo", "PITROOM_KILO_BIN", ["~/.kilo/bin/kilo"]);
 function kilo(args, timeout = 6e4) {
-  const { command, prefix } = resolveCommand(binary5());
-  const r = spawnSync5(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
+  const { command, prefix } = resolveCommand(binary6());
+  const r = spawnSync6(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 64 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-function invocation5(req) {
+function invocation6(req) {
   const args = [
     "run",
     "--agent",
@@ -1423,7 +1753,7 @@ function invocation5(req) {
   if (req.sessionId) args.push("--session", req.sessionId);
   for (const f of req.files) args.push("--file", f);
   args.push(req.prompt);
-  const { command, prefix } = resolveCommand(binary5());
+  const { command, prefix } = resolveCommand(binary6());
   return {
     command,
     args: [...prefix, ...args],
@@ -1431,16 +1761,16 @@ function invocation5(req) {
       // A worker run must not upgrade Kilo underneath the user.
       KILO_CONFIG_CONTENT: configContent(process.env.KILO_CONFIG_CONTENT, req.web, "kilo", { autoupdate: false }),
       // No daemon to attach to: a private server per run (see above).
-      XDG_STATE_HOME: path7.join(home(), "kilo-state")
+      XDG_STATE_HOME: path8.join(home(), "kilo-state")
     }
   };
 }
-function failure5(run, stderr, exitCode) {
+function failure6(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.match(/error="([^"]+)"/g)?.pop()?.slice(7, -1);
   const raw = run.error ?? `kilo exited with code ${exitCode}`;
   const message = detail && !raw.includes(detail) ? `${raw}: ${detail}` : raw;
-  return { kind: classify4(message), message };
+  return { kind: classify5(message), message };
 }
 function listModels2() {
   return kilo(["models"]).out.split("\n").map((s) => s.trim()).filter((s) => /^[\w.-]+\/\S+$/.test(s));
@@ -1455,14 +1785,14 @@ function defaultModel4() {
   }
 }
 function catalog5() {
-  return { models: listModels2().map((id) => ({ id })), source: "`kilo models` (reasoning variants are provider-specific: provider/model#variant)" };
+  return { models: listModels2().map((id2) => ({ id: id2 })), source: "`kilo models` (reasoning variants are provider-specific: provider/model#variant)" };
 }
-function doctor5({ models, hasFallback }) {
+function doctor6({ models, hasFallback }) {
   const version = kilo(["--version"]);
   if (version.missing || !version.ok) {
-    return [{ level: "fail", message: `kilo not runnable (${binary5()}). Install Kilo Code's CLI (npm i -g @kilocode/cli), or set PITROOM_KILO_BIN` }];
+    return [{ level: "fail", message: `kilo not runnable (${binary6()}). Install Kilo Code's CLI (npm i -g @kilocode/cli), or set PITROOM_KILO_BIN` }];
   }
-  const checks = [{ level: "ok", message: `Kilo Code ${version.out.trim().split("\n").pop()} at ${binary5()} (beta worker: checked against 7.8)` }];
+  const checks = [{ level: "ok", message: `Kilo Code ${version.out.trim().split("\n").pop()} at ${binary6()} (beta worker: checked against 7.8)` }];
   const def = defaultModel4();
   for (const m of models) {
     const model = m ?? def;
@@ -1476,29 +1806,29 @@ var kiloBackend = {
   id: "kilo",
   name: "Kilo Code",
   capabilities: { readOnly: "permission-rules", resume: "by-id", reportsCost: true, attachFiles: true },
-  binary: binary5,
-  invocation: invocation5,
-  parse: parseEvents4,
-  failure: failure5,
+  binary: binary6,
+  invocation: invocation6,
+  parse: parseEvents5,
+  failure: failure6,
   defaultModel: defaultModel4,
   listModels: listModels2,
   catalog: catalog5,
-  doctor: doctor5
+  doctor: doctor6
 };
 
 // src/backends/qwen/index.ts
-import { spawnSync as spawnSync6 } from "node:child_process";
-import fs8 from "node:fs";
-import os7 from "node:os";
-import path8 from "node:path";
+import { spawnSync as spawnSync7 } from "node:child_process";
+import fs9 from "node:fs";
+import os8 from "node:os";
+import path9 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/backends/qwen/events.ts
-var EDIT_TOOLS4 = /* @__PURE__ */ new Set(["write_file", "edit", "notebook_edit"]);
-var SHELL = "run_shell_command";
-var DENIED4 = /permission was declined|denied by permission rules|requires permission|not allowed/i;
+var EDIT_TOOLS5 = /* @__PURE__ */ new Set(["write_file", "edit", "notebook_edit"]);
+var SHELL2 = "run_shell_command";
+var DENIED5 = /permission was declined|denied by permission rules|requires permission|not allowed/i;
 var API_ERROR = /^\[API Error: /;
-function parseEvents5(jsonl) {
+function parseEvents6(jsonl) {
   const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
   const tools = {};
   const edits = [];
@@ -1535,16 +1865,16 @@ function parseEvents5(jsonl) {
       for (const c of content) {
         if (c.type === "text" && String(c.text ?? "").trim()) {
           lastText = String(c.text).trim();
-          lastActivity = `says: ${oneLine5(lastText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip5(lastText, 600) });
+          lastActivity = `says: ${oneLine6(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip6(lastText, 600) });
         } else if (c.type === "tool_use") {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
-          lastActivity = `${c.name} ${target ? oneLine5(String(target), 60) : ""}`.trim();
-          if (EDIT_TOOLS4.has(c.name) && c.input?.file_path) pendingEdits.set(String(c.id), String(c.input.file_path));
+          lastActivity = `${c.name} ${target ? oneLine6(String(target), 60) : ""}`.trim();
+          if (EDIT_TOOLS5.has(c.name) && c.input?.file_path) pendingEdits.set(String(c.id), String(c.input.file_path));
           if (timeline.length < MAX_STEPS) {
-            const step = { kind: EDIT_TOOLS4.has(c.name) ? "edit" : c.name === SHELL ? "shell" : "tool", name: c.name, text: clip5(String(target ?? ""), 240) };
+            const step = { kind: EDIT_TOOLS5.has(c.name) ? "edit" : c.name === SHELL2 ? "shell" : "tool", name: c.name, text: clip6(String(target ?? ""), 240) };
             timeline.push(step);
             stepOf.set(String(c.id), step);
           }
@@ -1557,17 +1887,17 @@ function parseEvents5(jsonl) {
         const step = stepOf.get(String(c.tool_use_id));
         if (step) step.ok = !c.is_error;
         if (c.is_error) {
-          if (DENIED4.test(text)) usage.denied++;
+          if (DENIED5.test(text)) usage.denied++;
         } else if (pendingEdits.has(String(c.tool_use_id))) {
           edits.push(pendingEdits.get(String(c.tool_use_id)));
         }
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += Math.max(0, num5(u.input_tokens) - num5(u.cache_read_input_tokens));
-      usage.cacheRead += num5(u.cache_read_input_tokens);
-      usage.output += num5(u.output_tokens);
-      usage.total += num5(u.total_tokens) || num5(u.input_tokens) + num5(u.output_tokens);
+      usage.input += Math.max(0, num6(u.input_tokens) - num6(u.cache_read_input_tokens));
+      usage.cacheRead += num6(u.cache_read_input_tokens);
+      usage.output += num6(u.output_tokens);
+      usage.total += num6(u.total_tokens) || num6(u.input_tokens) + num6(u.output_tokens);
       usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         error ??= apiError(String(e.error?.message ?? e.result ?? e.subtype ?? "Qwen Code error"));
@@ -1579,16 +1909,16 @@ function parseEvents5(jsonl) {
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
 var apiError = (text) => text.replace(API_ERROR, "").replace(/\](?=\s*(\n|$))/, "").replace(/\s+/g, " ").trim() || text;
-var clip5 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-var num5 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-var oneLine5 = (s, max = 80) => {
+var clip6 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+var num6 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
+var oneLine6 = (s, max = 80) => {
   const t = s.replace(/\s+/g, " ").trim();
   return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 };
 
 // src/backends/qwen/index.ts
-var binary6 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
-var policyDir2 = () => path8.resolve(path8.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
+var binary7 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
+var policyDir2 = () => path9.resolve(path9.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
 var EXCLUDED = [
   "agent",
   "send_message",
@@ -1652,9 +1982,10 @@ var DENY_SHELL = [
   "gemini",
   "qwen",
   "kilo",
-  "kilocode"
+  "kilocode",
+  "agy"
 ].map((c) => `run_shell_command(${c})`);
-function invocation6(req) {
+function invocation7(req) {
   const read = req.mode === "read";
   const exclude = [...EXCLUDED, ...req.web ? [] : WEB, ...read ? [] : DENY_SHELL];
   const args = [
@@ -1673,32 +2004,32 @@ function invocation6(req) {
   const model = (req.model ?? "").split("#")[0];
   if (model) args.push("--model", model);
   if (req.sessionId) args.push("--resume", req.sessionId);
-  const { command, prefix } = resolveCommand(binary6());
+  const { command, prefix } = resolveCommand(binary7());
   return {
     command,
     args: [...prefix, ...args],
     env: {
-      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path8.join(policyDir2(), "worker-defaults.json"),
+      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path9.join(policyDir2(), "worker-defaults.json"),
       QWEN_CODE_DISABLE_CRON: "1",
       QWEN_DISABLE_AUTO_TITLE: "1"
     }
   };
 }
-function classify5(message) {
+function classify6(message) {
   if (/\b40[13]\b|incorrect api key|invalid api key|unauthori[sz]ed|authenticat|not logged in|no auth/i.test(message)) return "auth";
   if (/\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
   if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return "model-unavailable";
   return "other";
 }
-function failure6(run, stderr, exitCode) {
+function failure7(run, stderr, exitCode) {
   if (exitCode === 0 && !run.error) return void 0;
   const detail = stderr.trim().split("\n").filter((l) => l.trim() && !/SAFE MODE/.test(l)).pop();
   const message = run.error ?? detail ?? `qwen exited with code ${exitCode}`;
-  return { kind: classify5(message), message };
+  return { kind: classify6(message), message };
 }
 function userSettings() {
   try {
-    return JSON.parse(fs8.readFileSync(path8.join(process.env.QWEN_HOME ?? path8.join(os7.homedir(), ".qwen"), "settings.json"), "utf8"));
+    return JSON.parse(fs9.readFileSync(path9.join(process.env.QWEN_HOME ?? path9.join(os8.homedir(), ".qwen"), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -1707,11 +2038,11 @@ function defaultModel5() {
   const name = userSettings().model?.name;
   return typeof name === "string" && name ? name : void 0;
 }
-function doctor6({ models, hasFallback }) {
-  const { command, prefix } = resolveCommand(binary6());
-  const r = spawnSync6(command, [...prefix, "--version"], { encoding: "utf8", timeout: 6e4, stdio: ["ignore", "pipe", "pipe"] });
-  if (r.error || r.status !== 0) return [{ level: "fail", message: `qwen not runnable (${binary6()}). Install Qwen Code (npm i -g @qwen-code/qwen-code), or set PITROOM_QWEN_BIN` }];
-  const checks = [{ level: "ok", message: `Qwen Code ${r.stdout.trim()} at ${binary6()} (beta worker: checked against Qwen Code 0.25)` }];
+function doctor7({ models, hasFallback }) {
+  const { command, prefix } = resolveCommand(binary7());
+  const r = spawnSync7(command, [...prefix, "--version"], { encoding: "utf8", timeout: 6e4, stdio: ["ignore", "pipe", "pipe"] });
+  if (r.error || r.status !== 0) return [{ level: "fail", message: `qwen not runnable (${binary7()}). Install Qwen Code (npm i -g @qwen-code/qwen-code), or set PITROOM_QWEN_BIN` }];
+  const checks = [{ level: "ok", message: `Qwen Code ${r.stdout.trim()} at ${binary7()} (beta worker: checked against Qwen Code 0.25)` }];
   const auth = userSettings().security?.auth?.selectedType;
   const key = process.env.OPENAI_API_KEY || process.env.DASHSCOPE_API_KEY || process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY;
   checks.push(
@@ -1728,27 +2059,27 @@ var qwen = {
   id: "qwen",
   name: "Qwen Code",
   capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
-  binary: binary6,
-  invocation: invocation6,
-  parse: parseEvents5,
-  failure: failure6,
+  binary: binary7,
+  invocation: invocation7,
+  parse: parseEvents6,
+  failure: failure7,
   defaultModel: defaultModel5,
-  doctor: doctor6
+  doctor: doctor7
 };
 
 // src/backends/index.ts
-var REGISTRY = new Map([opencode, codex, claude, gemini, qwen, kiloBackend].map((b) => [b.id, b]));
+var REGISTRY = new Map([opencode, codex, claude, gemini, qwen, kiloBackend, antigravity].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
 var PLANNED = ["hermes"];
 var backendIds = () => [...REGISTRY.keys()];
 var allBackends = () => [...REGISTRY.values()];
-var isBackendId = (id) => REGISTRY.has(id) || PLANNED.includes(id);
-function getBackend(id) {
-  const backend = REGISTRY.get(id);
+var isBackendId = (id2) => REGISTRY.has(id2) || PLANNED.includes(id2);
+function getBackend(id2) {
+  const backend = REGISTRY.get(id2);
   if (backend) return backend;
   const available = backendIds().join(", ");
   throw new UserError(
-    PLANNED.includes(id) ? `the "${id}" worker is not supported yet (available: ${available})` : `unknown worker "${id}" (available: ${available})`,
+    PLANNED.includes(id2) ? `the "${id2}" worker is not supported yet (available: ${available})` : `unknown worker "${id2}" (available: ${available})`,
     3
   );
 }
@@ -1769,8 +2100,8 @@ var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
 var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
 
 // src/core/refs.ts
-import fs9 from "node:fs";
-import path9 from "node:path";
+import fs10 from "node:fs";
+import path10 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -1821,13 +2152,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path9.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path10.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs9.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs9.readFileSync(file, "utf8").split("\n");
+      const size = fs10.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs10.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -1838,9 +2169,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path9.isAbsolute(ref.file)) return [];
+    if (path10.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path9.basename(wanted)) ?? []).filter((f) => f.split(path9.sep).join("/").endsWith(`/${wanted}`) || path9.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path10.basename(wanted)) ?? []).filter((f) => f.split(path10.sep).join("/").endsWith(`/${wanted}`) || path10.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -1855,7 +2186,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path9.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path10.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -1866,17 +2197,17 @@ function verifyRefs(refs, dirs) {
 }
 function mentions(lines, ref) {
   const near = lines.slice(Math.max(0, ref.start - 1 - WINDOW), ref.end + WINDOW).join("\n");
-  return new RegExp(`(^|[^\\w$])${escape(ref.symbol)}([^\\w$]|$)`).test(near);
+  return new RegExp(`(^|[^\\w$])${escape2(ref.symbol)}([^\\w$]|$)`).test(near);
 }
 function enclosedBy(lines, ref) {
-  const name = escape(ref.symbol);
+  const name = escape2(ref.symbol);
   const def = new RegExp(
     `\\b(function|def|fn|func|class|interface|struct|impl|type|const|let|var)\\s+\\*?${name}\\b|^\\s*(export\\s+)?(default\\s+)?(async\\s+)?(static\\s+)?${name}\\s*[(:=]`
   );
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path9.basename(name);
+  const base = path10.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -1885,19 +2216,19 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs9.readdirSync(dir, { withFileTypes: true });
+      entries = fs10.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path9.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path10.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path9.join(dir, e.name));
-        else index.set(e.name, [path9.join(dir, e.name)]);
+        if (list2) list2.push(path10.join(dir, e.name));
+        else index.set(e.name, [path10.join(dir, e.name)]);
       }
     }
   };
@@ -1905,10 +2236,10 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path9.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path9.join(r, ref));
+  const candidates = path10.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path10.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs9.statSync(c).isFile() && inside(c, roots);
+      return fs10.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -1916,21 +2247,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path9.relative(r, path9.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path9.isAbsolute(rel);
+    const rel = path10.relative(r, path10.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path10.isAbsolute(rel);
   });
 }
-var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
-import fs10 from "node:fs";
-import path11 from "node:path";
+import fs11 from "node:fs";
+import path12 from "node:path";
 
 // src/core/install.ts
-import path10 from "node:path";
+import path11 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function packageRoot() {
-  return path10.resolve(path10.dirname(fileURLToPath3(import.meta.url)), "..");
+  return path11.resolve(path11.dirname(fileURLToPath3(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -1941,9 +2272,9 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path11.join(root, "skills", FILES[name]);
-  if (!fs10.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
-  return fs10.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  const file = path12.join(root, "skills", FILES[name]);
+  if (!fs11.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs11.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -2000,9 +2331,9 @@ function parseAudit(text) {
 }
 
 // src/core/config.ts
-import fs11 from "node:fs";
-import os8 from "node:os";
-import path12 from "node:path";
+import fs12 from "node:fs";
+import os9 from "node:os";
+import path13 from "node:path";
 var SCHEMA = {
   worker: "string",
   fallback: "string[]",
@@ -2033,9 +2364,9 @@ var SCHEMA = {
   rankWorkers: "boolean"
 };
 function configPath() {
-  if (process.env.PITROOM_CONFIG) return path12.resolve(process.env.PITROOM_CONFIG);
-  const base = process.platform === "win32" ? process.env.APPDATA ?? path12.join(os8.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path12.join(os8.homedir(), ".config");
-  return path12.join(base, "pitroom", "config.json");
+  if (process.env.PITROOM_CONFIG) return path13.resolve(process.env.PITROOM_CONFIG);
+  const base = process.platform === "win32" ? process.env.APPDATA ?? path13.join(os9.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path13.join(os9.homedir(), ".config");
+  return path13.join(base, "pitroom", "config.json");
 }
 var cached;
 function loadConfig() {
@@ -2043,10 +2374,10 @@ function loadConfig() {
   const file = configPath();
   const config = {};
   const warnings = [];
-  if (fs11.existsSync(file)) {
+  if (fs12.existsSync(file)) {
     let raw;
     try {
-      raw = JSON.parse(fs11.readFileSync(file, "utf8"));
+      raw = JSON.parse(fs12.readFileSync(file, "utf8"));
     } catch (e) {
       warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
     }
@@ -2199,22 +2530,22 @@ function rankChain(chain, recordOf) {
 }
 
 // src/core/receipt.ts
-import fs13 from "node:fs";
+import fs14 from "node:fs";
 
 // src/core/prices.ts
-import fs12 from "node:fs";
-import path13 from "node:path";
+import fs13 from "node:fs";
+import path14 from "node:path";
 var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
-var catalogFile = () => path13.join(home(), "prices.json");
+var catalogFile = () => path14.join(home(), "prices.json");
 function trim(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
   for (const [provider, p] of Object.entries(raw)) {
-    for (const [id, m] of Object.entries(p?.models ?? {})) {
+    for (const [id2, m] of Object.entries(p?.models ?? {})) {
       const c = m?.cost;
       const ok = (n) => typeof n === "number" && Number.isFinite(n) && n >= 0;
       if (!c || !ok(c.input) || !ok(c.output)) continue;
-      out[`${provider}/${id}`] = [c.input, c.output, ok(c.cache_read) ? c.cache_read : c.input / 10];
+      out[`${provider}/${id2}`] = [c.input, c.output, ok(c.cache_read) ? c.cache_read : c.input / 10];
     }
   }
   return out;
@@ -2223,9 +2554,9 @@ var cached2;
 function readCatalog() {
   const file = catalogFile();
   try {
-    const { mtimeMs } = fs12.statSync(file);
+    const { mtimeMs } = fs13.statSync(file);
     if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
-    const parsed = JSON.parse(fs12.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs13.readFileSync(file, "utf8"));
     const catalog6 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
     cached2 = { file, mtimeMs, catalog: catalog6 };
     return catalog6;
@@ -2238,10 +2569,10 @@ function catalogPrice(backend, ...models) {
   const catalog6 = readCatalog();
   if (!catalog6) return void 0;
   for (const raw of models) {
-    const id = raw?.split("#")[0];
-    if (!id) continue;
-    const keys = [id, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id}`)];
-    const any = keys.find((k) => catalog6.models[k]) ?? Object.keys(catalog6.models).filter((k) => k.endsWith(`/${id}`)).sort()[0];
+    const id2 = raw?.split("#")[0];
+    if (!id2) continue;
+    const keys = [id2, ...[...OWN[backend] ?? [], "anthropic", "openai", "google"].map((p) => `${p}/${id2}`)];
+    const any = keys.find((k) => catalog6.models[k]) ?? Object.keys(catalog6.models).filter((k) => k.endsWith(`/${id2}`)).sort()[0];
     const triple = any ? catalog6.models[any] : void 0;
     if (any && triple && triple.length === 3 && triple.every((n) => Number.isFinite(n) && n >= 0)) {
       const [input, output, cachedInput] = triple;
@@ -2283,8 +2614,8 @@ function savedUsd(usage, returnedTokens, price = primaryPrice()) {
   return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
 function readLedger(sinceMs) {
-  if (!fs13.existsSync(ledgerFile())) return [];
-  return fs13.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+  if (!fs14.existsSync(ledgerFile())) return [];
+  return fs14.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
       return [JSON.parse(l)];
     } catch {
@@ -2362,8 +2693,8 @@ ${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.rou
 var WEEK_MS = 7 * 24 * 3600 * 1e3;
 
 // src/core/plan.ts
-import fs14 from "node:fs";
-import path14 from "node:path";
+import fs15 from "node:fs";
+import path15 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -2410,9 +2741,9 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path14.resolve(file);
-  if (!fs14.existsSync(abs) || !fs14.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
-  const plan = parsePlan(fs14.readFileSync(abs, "utf8"), fs14.realpathSync(abs));
+  const abs = path15.resolve(file);
+  if (!fs15.existsSync(abs) || !fs15.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs15.readFileSync(abs, "utf8"), fs15.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
   return plan;
 }
@@ -2431,7 +2762,7 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path14.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path15.basename(file).replace(/\.md$/i, "");
 
 // src/core/style.ts
 var enabled = () => {
@@ -2463,13 +2794,13 @@ function retryCommands(metas, shell = retryShell()) {
 }
 
 // src/core/eval.ts
-import { spawnSync as spawnSync7 } from "node:child_process";
-import fs15 from "node:fs";
+import { spawnSync as spawnSync8 } from "node:child_process";
+import fs16 from "node:fs";
 var KINDS = ["definition", "count", "set"];
 function loadEval(file) {
   let raw;
   try {
-    raw = JSON.parse(fs15.readFileSync(file, "utf8"));
+    raw = JSON.parse(fs16.readFileSync(file, "utf8"));
   } catch (e) {
     throw new UserError(`cannot read ${file}: ${e.message}`);
   }
@@ -2479,24 +2810,24 @@ function loadEval(file) {
   return list2.map((q, i) => {
     const where = `${file}: question ${i + 1}`;
     if (!q || typeof q !== "object") throw new UserError(`${where} is not an object`);
-    const id = typeof q.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`;
-    if (ids.has(id)) throw new UserError(`${where}: the id "${id}" is used twice`);
-    ids.add(id);
-    if (typeof q.task !== "string" || !q.task.trim()) throw new UserError(`${where} (${id}) has no task`);
-    if (!KINDS.includes(q.kind)) throw new UserError(`${where} (${id}): kind must be one of ${KINDS.join(", ")}`);
+    const id2 = typeof q.id === "string" && q.id.trim() ? q.id.trim() : `q${i + 1}`;
+    if (ids.has(id2)) throw new UserError(`${where}: the id "${id2}" is used twice`);
+    ids.add(id2);
+    if (typeof q.task !== "string" || !q.task.trim()) throw new UserError(`${where} (${id2}) has no task`);
+    if (!KINDS.includes(q.kind)) throw new UserError(`${where} (${id2}): kind must be one of ${KINDS.join(", ")}`);
     const t = q.truth;
     const grep = t && typeof t === "object" && !Array.isArray(t) && typeof t.grep === "string" && t.grep;
     const literal = q.kind === "definition" && typeof t === "string" && /:\d+$/.test(t) || q.kind === "count" && typeof t === "number" && Number.isInteger(t) && t >= 0 || q.kind === "set" && Array.isArray(t) && t.every((s) => typeof s === "string");
     if (!grep && !literal) {
       const want = { definition: '"path:line"', count: "a whole number", set: "a list of paths" }[q.kind];
-      throw new UserError(`${where} (${id}): truth must be ${want} or {"grep": "pattern", \u2026}`);
+      throw new UserError(`${where} (${id2}): truth must be ${want} or {"grep": "pattern", \u2026}`);
     }
-    return { id, task: q.task.trim(), kind: q.kind, truth: t };
+    return { id: id2, task: q.task.trim(), kind: q.kind, truth: t };
   });
 }
 var clean = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
 function gitGrep(root, flags, t) {
-  const r = spawnSync7("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
+  const r = spawnSync8("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
     encoding: "utf8",
     maxBuffer: 64 * 1024 * 1024
   });
@@ -2542,7 +2873,7 @@ function scoreAnswer(q, truth, answer, root) {
   if (!summary && !details) return { score: 0, got: "(no answer)" };
   if ("line" in truth) {
     const flat = summary.replace(/\s+/g, " ");
-    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape2(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
+    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape3(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
     const named = pathsIn(flat).includes(truth.path);
     return { score: named ? 0.5 : 0, got: flat.slice(0, 120) };
   }
@@ -2559,7 +2890,7 @@ function scoreAnswer(q, truth, answer, root) {
   const f1 = precision + recall ? 2 * precision * recall / (precision + recall) : 0;
   return { score: !truth.files.length && !got.length ? 1 : f1, got: `${hit}/${truth.files.length} found, ${got.length - hit} extra` };
 }
-var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape3 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 var median = (a) => {
   const s = a.filter((x) => x !== void 0).sort((x, y) => x - y);
@@ -2580,8 +2911,8 @@ function summarize(rows) {
 }
 
 // src/vcs/guard.ts
-import fs16 from "node:fs";
-import path15 from "node:path";
+import fs17 from "node:fs";
+import path16 from "node:path";
 var VERSION = 2;
 var WINDOWS = process.platform === "win32";
 var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
@@ -2658,29 +2989,29 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path15.join(home(), "shim", `v${VERSION}`);
+  return path16.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const dir of (process.env.PATH ?? "").split(path15.delimiter).filter(Boolean)) {
-    if (same(path15.resolve(dir), skip)) continue;
-    const p = path15.join(dir, WINDOWS ? "git.exe" : "git");
+  for (const dir of (process.env.PATH ?? "").split(path16.delimiter).filter(Boolean)) {
+    if (same(path16.resolve(dir), skip)) continue;
+    const p = path16.join(dir, WINDOWS ? "git.exe" : "git");
     try {
-      fs16.accessSync(p, fs16.constants.X_OK);
-      if (fs16.statSync(p).isFile()) return p;
+      fs17.accessSync(p, fs17.constants.X_OK);
+      if (fs17.statSync(p).isFile()) return p;
     } catch {
     }
   }
   return void 0;
 }
 function findGitSh(realGit) {
-  let dir = path15.dirname(realGit);
+  let dir = path16.dirname(realGit);
   for (let i = 0; i < 4; i++) {
     for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
-      const p = path15.join(dir, rel);
-      if (fs16.existsSync(p)) return p;
+      const p = path16.join(dir, rel);
+      if (fs17.existsSync(p)) return p;
     }
-    const up = path15.dirname(dir);
+    const up = path16.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
@@ -2698,12 +3029,12 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path15.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path16.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged(file, content) {
-  if (fs16.existsSync(file) && fs16.readFileSync(file, "utf8") === content) return;
-  fs16.mkdirSync(path15.dirname(file), { recursive: true });
+  if (fs17.existsSync(file) && fs17.readFileSync(file, "utf8") === content) return;
+  fs17.mkdirSync(path16.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs16.writeFileSync(tmp, content, { mode: 493 });
+  fs17.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
 }
 function pathKey(env) {
@@ -2735,7 +3066,7 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  writeIfChanged(path15.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged(path16.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -2747,11 +3078,11 @@ function guardEnv(env) {
   if (WINDOWS) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
-    writeIfChanged(path15.join(dir, "git.cmd"), cmdShim(sh));
+    writeIfChanged(path16.join(dir, "git.cmd"), cmdShim(sh));
   }
-  writeIfChanged(path15.join(dir, "git"), SHIM);
+  writeIfChanged(path16.join(dir, "git"), SHIM);
   const key = pathKey(env);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path15.delimiter}${env[key] ?? ""}` };
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path16.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
@@ -2760,10 +3091,10 @@ function shimReady() {
 
 // src/core/slots.ts
 import crypto2 from "node:crypto";
-import fs17 from "node:fs";
-import path16 from "node:path";
-var slotsDir = () => path16.join(home(), "slots");
-var locksDir = () => path16.join(home(), "locks");
+import fs18 from "node:fs";
+import path17 from "node:path";
+var slotsDir = () => path17.join(home(), "slots");
+var locksDir = () => path17.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -2777,23 +3108,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs17.mkdirSync(path16.dirname(file), { recursive: true });
+  fs18.mkdirSync(path17.dirname(file), { recursive: true });
   try {
-    fs17.writeFileSync(file, runId, { flag: "wx" });
+    fs18.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs17.readFileSync(file, "utf8").trim();
+    owner = fs18.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs17.rmSync(file, { force: true });
+  fs18.rmSync(file, { force: true });
   try {
-    fs17.writeFileSync(file, runId, { flag: "wx" });
+    fs18.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -2802,35 +3133,35 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs17.readFileSync(file, "utf8").trim() === runId) fs17.rmSync(file, { force: true });
+    if (fs18.readFileSync(file, "utf8").trim() === runId) fs18.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path16.join(slotsDir(), `slot-${n}`);
+    const file = path17.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
 function slotHolders() {
-  if (!fs17.existsSync(slotsDir())) return [];
-  return fs17.readdirSync(slotsDir()).map((f) => {
+  if (!fs18.existsSync(slotsDir())) return [];
+  return fs18.readdirSync(slotsDir()).map((f) => {
     try {
-      return fs17.readFileSync(path16.join(slotsDir(), f), "utf8").trim();
+      return fs18.readFileSync(path17.join(slotsDir(), f), "utf8").trim();
     } catch {
       return "";
     }
-  }).filter((id) => holderActive(id, ""));
+  }).filter((id2) => holderActive(id2, ""));
 }
-var lockFile = (repoRoot) => path16.join(locksDir(), `write-${crypto2.createHash("sha1").update(path16.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path17.join(locksDir(), `write-${crypto2.createHash("sha1").update(path17.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs17.readFileSync(file, "utf8").trim();
+    owner = fs18.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -2839,8 +3170,8 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 
 // src/core/secrets.ts
 import { execFileSync } from "node:child_process";
-import fs18 from "node:fs";
-import path17 from "node:path";
+import fs19 from "node:fs";
+import path18 from "node:path";
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_VISITED = 2e4;
 var MAX_DEPTH = 4;
@@ -2858,16 +3189,16 @@ function findSecretFiles(dir) {
     if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
     let entries;
     try {
-      entries = fs18.readdirSync(d, { withFileTypes: true });
+      entries = fs19.readdirSync(d, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       visited++;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path17.join(d, e.name), depth + 1);
+        if (!SKIP_DIRS2.has(e.name)) walk(path18.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(slash(path17.relative(dir, path17.join(d, e.name))));
+        found.push(slash(path18.relative(dir, path18.join(d, e.name))));
       }
     }
   };
@@ -2877,7 +3208,7 @@ function findSecretFiles(dir) {
 function findSecretFilesInTree(root, dir) {
   try {
     const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path17.basename(f)) && !path17.relative(dir, path17.join(root, f)).startsWith("..")).map((f) => slash(path17.relative(dir, path17.join(root, f)))).sort();
+    return out.split("\0").filter((f) => f && looksSecret(path18.basename(f)) && !path18.relative(dir, path18.join(root, f)).startsWith("..")).map((f) => slash(path18.relative(dir, path18.join(root, f)))).sort();
   } catch {
     return [];
   }
@@ -2889,14 +3220,14 @@ function secretWarning(files, mode) {
   const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
-var slash = (p) => p.split(path17.sep).join("/");
+var slash = (p) => p.split(path18.sep).join("/");
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs19 from "node:fs";
+import fs20 from "node:fs";
 async function spawnWorker(inv, opts) {
-  const out = fs19.openSync(opts.stdoutFile, "w");
-  const err = fs19.openSync(opts.stderrFile, "w");
+  const out = fs20.openSync(opts.stdoutFile, "w");
+  const err = fs20.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -2919,7 +3250,7 @@ async function spawnWorker(inv, opts) {
   }, opts.timeoutSec * 1e3);
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
-      res.spawnError = e.code === "ENOENT" ? fs19.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      res.spawnError = e.code === "ENOENT" ? fs20.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
       resolve2(127);
     });
     child.on("close", (c) => resolve2(c));
@@ -2928,8 +3259,8 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs19.closeSync(out);
-  fs19.closeSync(err);
+  fs20.closeSync(out);
+  fs20.closeSync(err);
   return res;
 }
 export {

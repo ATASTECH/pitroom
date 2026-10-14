@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Workers
+- **Antigravity CLI worker (experimental)**: `-W antigravity[:model]`, Google's `agy`, with the user's Google account sign-in (which Gemini CLI now refuses). Read runs use agy's `--mode plan`, write and isolate runs `--mode accept-edits`; shell commands run in agy's terminal sandbox (`--sandbox`). A private data folder (`ANTIGRAVITY_APP_DATA_DIR`) holds Pitroom's settings: commands proceed only sandboxed, file tools stay in the workspace, and deny rules cover secret files, history-changing git, bulk deletes, other agents, MCP tools and the web (`--web` does not apply to these workers). `--continue` resumes by conversation id. A used-up quota that ends with exit 0 and no answer, a run cut short by agy's own timeout, and a run that printed nothing are failures. **Not yet run against a real `agy`**: written from its documentation and other projects' reports, with constructed fixtures; `pitroom doctor` says so, and docs/backends.md lists what to check. `agy` is added to the "other agents" every worker is denied.
+
 ## 0.23.0
 
 ### Answers
