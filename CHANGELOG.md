@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.24.0
 
 ### Workers
 - **Antigravity CLI worker (beta)**: `-W antigravity[:model]`, Google's `agy`, with the user's Google account sign-in (which Gemini CLI now refuses). Checked against agy 1.3.5 on macOS: a read, a follow-up, an isolated edit and the deny rules were run against the real CLI, and the fixtures are its recorded output. agy has no read-only mode for headless runs (`--mode plan` is reported to still write), so **its read runs read a read-only snapshot of their own**, made right before its attempt: never the project, and never the snapshot other read runs share, where a stray file would outlive the run (a new `readOnly: 'snapshot'` capability). What git sees newly changed there afterwards is a `READ-ONLY VIOLATION`, and the worker after it in the chain reads where it was meant to, never that snapshot; as a fallback it costs nothing until it runs, pruning keeps these snapshots apart from the shared one, and a follow-up whose snapshot was pruned gets it made again; if the snapshot cannot be made it is skipped, never run in the project; `--in-place`, reviews and folders outside git warn instead, and `doctor --probe` runs it in an empty folder. Its answers are cached under where they were read. Write and isolate runs use `--mode accept-edits`; shell commands run in agy's terminal sandbox (`--sandbox`: the workspace writable, `.git` read-only, no network).
