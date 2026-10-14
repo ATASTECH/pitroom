@@ -19,6 +19,9 @@ export const DEFAULT_BACKEND = opencode.id;
 const PLANNED: string[] = ['hermes'];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
+
+/** A worker whose CLI may write in a read run (`readOnly: 'snapshot'`): it reads a snapshot of its own, never the project or a shared one. */
+export const readsOwnSnapshot = (b: Backend): boolean => b.capabilities.readOnly === 'snapshot';
 export const allBackends = (): Backend[] => [...REGISTRY.values()];
 export const isBackendId = (id: string): boolean => REGISTRY.has(id) || PLANNED.includes(id);
 

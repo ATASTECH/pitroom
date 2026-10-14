@@ -172,6 +172,9 @@ var FORBIDDEN_COMMANDS = [
   "git add",
   "rm -rf",
   "rm -fr",
+  "rm -r",
+  "rm -R",
+  "rm --recursive",
   "sudo",
   "chown",
   "kill",
@@ -239,11 +242,21 @@ function writeIfChanged(file2, body) {
   fs4.mkdirSync(path3.dirname(file2), { recursive: true });
   const tmp = `${file2}.${process.pid}-${crypto2.randomBytes(3).toString("hex")}.tmp`;
   fs4.writeFileSync(tmp, body);
-  try {
-    fs4.renameSync(tmp, file2);
-  } catch (e) {
-    fs4.rmSync(tmp, { force: true });
-    throw e;
+  for (let tries = 0; ; tries++) {
+    try {
+      fs4.renameSync(tmp, file2);
+      return;
+    } catch (e) {
+      const busy = ["EPERM", "EBUSY", "EACCES"].includes(e.code ?? "");
+      if (busy && tries < 10) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        continue;
+      }
+      fs4.rmSync(tmp, { force: true });
+      if (!busy) throw e;
+      fs4.writeFileSync(file2, body);
+      return;
+    }
   }
 }
 function linkInto(dir, from) {
@@ -264,9 +277,6 @@ function linkInto(dir, from) {
   }
 }
 
-// src/backends/types.ts
-var MAX_STEPS = 400;
-
 // src/backends/text.ts
 var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 function num(v) {
@@ -275,6 +285,15 @@ function num(v) {
 function oneLine(s, max = 80) {
   return clip(s.replace(/\s+/g, " ").trim(), max);
 }
+var escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function splitModel(model) {
+  if (!model) return {};
+  const [m, effort] = model.split("#");
+  return { model: m || void 0, effort: effort || void 0 };
+}
+
+// src/backends/types.ts
+var MAX_STEPS = 400;
 
 // src/backends/antigravity/events.ts
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file"]);
@@ -424,9 +443,9 @@ function agy(args, timeout = 3e4) {
 }
 var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path4.join(os3.homedir(), ".gemini", "antigravity-cli");
 var TOKEN = "antigravity-oauth-token";
-var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var words = (c) => escape(c).replace(/ /g, "\\s+");
-var START = "(^|[;&|(`\\n]|\\$\\()\\s*((\\w+=\\S*|env|command|exec|nohup|time|nice|xargs)\\s+)*";
+var words = (c) => escapeRegex(c).replace(/ /g, "\\s+");
+var WRAPPER = "(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*";
+var START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
 var END = "(\\s|$|[;&|)`])";
 function denyCommandRules() {
   return [
@@ -434,6 +453,8 @@ function denyCommandRules() {
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
     `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
+    // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
+    `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,
     // a command inside a string is not matched above
     `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`
   ];
@@ -481,7 +502,7 @@ function invocation(req) {
     "24h"
   ];
   if (req.sessionId) args.push("--conversation", req.sessionId);
-  const [model, effort] = (req.model ?? "").split("#");
+  const { model, effort } = splitModel(req.model);
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   const { command, prefix } = resolveCommand(binary());
@@ -895,11 +916,6 @@ function cx(args, timeout = 6e4) {
 }
 var SANDBOX = { read: "read-only", write: "workspace-write", isolate: "workspace-write" };
 var toml = (s) => JSON.stringify(s);
-function splitModel(model) {
-  if (!model) return {};
-  const [m, effort] = model.split("#");
-  return { model: m || void 0, effort: effort || void 0 };
-}
 function invocation3(req) {
   const { model, effort } = splitModel(req.model);
   const args = ["exec"];
@@ -1875,10 +1891,10 @@ function parseEvents6(jsonl) {
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage2.input += Math.max(0, num2(u.input_tokens) - num2(u.cache_read_input_tokens));
-      usage2.cacheRead += num2(u.cache_read_input_tokens);
-      usage2.output += num2(u.output_tokens);
-      usage2.total += num2(u.total_tokens) || num2(u.input_tokens) + num2(u.output_tokens);
+      usage2.input += Math.max(0, num(u.input_tokens) - num(u.cache_read_input_tokens));
+      usage2.cacheRead += num(u.cache_read_input_tokens);
+      usage2.output += num(u.output_tokens);
+      usage2.total += num(u.total_tokens) || num(u.input_tokens) + num(u.output_tokens);
       usage2.denied = Math.max(usage2.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         error ??= apiError(String(e.error?.message ?? e.result ?? e.subtype ?? "Qwen Code error"));
@@ -1890,7 +1906,6 @@ function parseEvents6(jsonl) {
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage: usage2, tools, edits, lastActivity, timeline, error };
 }
 var apiError = (text) => text.replace(API_ERROR, "").replace(/\](?=\s*(\n|$))/, "").replace(/\s+/g, " ").trim() || text;
-var num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
 
 // src/backends/qwen/index.ts
 var binary7 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
@@ -2007,6 +2022,7 @@ var REGISTRY = new Map([opencode, codex, claude, gemini, qwen, kiloBackend, anti
 var DEFAULT_BACKEND = opencode.id;
 var PLANNED = ["hermes"];
 var backendIds = () => [...REGISTRY.keys()];
+var readsOwnSnapshot = (b) => b.capabilities.readOnly === "snapshot";
 var allBackends = () => [...REGISTRY.values()];
 var isBackendId = (id2) => REGISTRY.has(id2) || PLANNED.includes(id2);
 function getBackend(id2) {
@@ -3031,12 +3047,12 @@ function prune(now = Date.now(), maxAgeMs = PRUNE_AGE_MS, keepNewest = KEEP_NEWE
     }
   }).filter((e) => !!e).sort((x, y) => x.age - y.age);
   let removed = 0;
-  let rank = 0;
+  const rank = { shared: 0, own: 0 };
   for (const e of entries) {
     if (inUse.has(path16.resolve(e.dir))) continue;
     const half = e.n.startsWith(".tmp-");
     const old = e.age >= (half ? KEEP_MS : maxAgeMs);
-    const surplus = !half && ++rank > keepNewest && e.age >= JUST_USED_MS;
+    const surplus = !half && ++rank[e.n.includes("-") ? "own" : "shared"] > keepNewest && e.age >= JUST_USED_MS;
     if (!old && !surplus) continue;
     try {
       makeWritable(e.dir);
@@ -3886,7 +3902,7 @@ function workerRecord(backend, model, sinceMs2) {
   const fits = (m) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
   const rec = { runs: 0, ok: 0, audited: 0, agreed: 0 };
   try {
-    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} GROUP BY model`).all(backend, since2)) {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY model`).all(backend, since2)) {
       if (!fits(r.model)) continue;
       rec.runs += r.runs ?? 0;
       rec.ok += r.ok ?? 0;
@@ -3944,6 +3960,7 @@ function workerRows(rows, ledger, audited) {
   }
   return out;
 }
+var ATTEMPTED = `json_extract(meta_json,'$.noAttempt') IS NULL`;
 var LIMITED = `(state='failed' AND (json_extract(meta_json,'$.failureKind')='rate-limited' OR error LIKE '%the model is rate-limited or overloaded%'))`;
 function historyStats(sinceMs2) {
   const counted = effective().countRateLimits.value === true;
@@ -4860,10 +4877,10 @@ function verifyRefs(refs, dirs) {
 }
 function mentions(lines, ref) {
   const near = lines.slice(Math.max(0, ref.start - 1 - WINDOW), ref.end + WINDOW).join("\n");
-  return new RegExp(`(^|[^\\w$])${escape2(ref.symbol)}([^\\w$]|$)`).test(near);
+  return new RegExp(`(^|[^\\w$])${escape(ref.symbol)}([^\\w$]|$)`).test(near);
 }
 function enclosedBy(lines, ref) {
-  const name = escape2(ref.symbol);
+  const name = escape(ref.symbol);
   const def = new RegExp(
     `\\b(function|def|fn|func|class|interface|struct|impl|type|const|let|var)\\s+\\*?${name}\\b|^\\s*(export\\s+)?(default\\s+)?(async\\s+)?(static\\s+)?${name}\\s*[(:=]`
   );
@@ -4914,7 +4931,7 @@ function inside(file2, roots) {
     return rel !== "" && !rel.startsWith("..") && !path26.isAbsolute(rel);
   });
 }
-var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/run.ts
 var VERSION2 = true ? "0.23.0" : "0.0.0-dev";
@@ -4987,7 +5004,7 @@ function prepareRun(o) {
   const files = o.files.map((f) => path27.resolve(f));
   for (const f of files) if (!fs31.existsSync(f)) throw new UserError(`file not found: ${f}`);
   const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
-  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find(mayWrite);
+  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find(readsOwnSnapshot);
   const snap = mode === "read" && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn2, root, dir) : void 0;
   if (untrusted && mode === "read" && !parent && (o.review || o.inPlace || !root)) {
     warnings.push(`this read run is not in a snapshot${root ? "" : " (not a git repository)"}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
@@ -5100,6 +5117,7 @@ async function execute(meta) {
   try {
     prepareTree(meta);
     writeMeta(meta);
+    const planned = { snapshot: meta.snapshot && { ...meta.snapshot }, cwd: meta.cwd };
     const chain = [];
     for (const t of [meta.worker, ...meta.fallback]) if (!chain.some((c) => sameTarget(c, t))) chain.push(t);
     for (let i = 0; i < chain.length; i++) {
@@ -5111,10 +5129,11 @@ async function execute(meta) {
         writeMeta(meta);
         continue;
       }
-      const cannot = readPlace(meta, backend);
+      const cannot = readPlace(meta, backend, planned, i + 1);
       if (cannot) {
         if (i === chain.length - 1) {
           meta.error = cannot;
+          if (!meta.ran) meta.noAttempt = true;
           break;
         }
         (meta.attempts ??= []).push({ target: describeTarget(target), error: cannot });
@@ -5123,8 +5142,10 @@ async function execute(meta) {
       }
       meta.ran = target;
       writeMeta(meta);
+      const own = meta.snapshot?.private && readsOwnSnapshot(backend);
+      const before = own ? changedIn(meta.snapshot.dir) : [];
       result = await attempt(meta, backend, target);
-      if (meta.snapshot?.private && mayWrite(backend)) strayWrites(meta, backend);
+      if (own) strayWrites(meta, backend, before);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
@@ -5242,36 +5263,48 @@ function prepareTree(meta) {
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(", ")}`);
   }
 }
-var mayWrite = (b) => b.capabilities.readOnly === "snapshot";
-function readPlace(meta, backend) {
+function readPlace(meta, backend, planned, attemptNo) {
   const root = meta.repoRoot;
   if (!root || meta.mode !== "read") return void 0;
-  if (mayWrite(backend)) return ownSnapshot(meta, root, backend);
+  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, attemptNo);
+  if (meta.snapshot?.private && !meta.parent) {
+    meta.snapshot = planned.snapshot && { ...planned.snapshot };
+    meta.cwd = planned.cwd;
+  }
   if (meta.snapshot && !meta.snapshot.dir) sharedSnapshot(meta, root);
   return void 0;
 }
-function ownSnapshot(meta, root, backend) {
-  if (meta.snapshot?.private || meta.parent || meta.inPlace || meta.reviewOf) return void 0;
+function ownSnapshot(meta, root, backend, attemptNo) {
+  if (meta.parent || meta.inPlace || meta.reviewOf) return void 0;
+  if (meta.snapshot?.private && !changedIn(meta.snapshot.dir).length) return void 0;
   const left = meta.snapshot?.left ?? [];
   try {
-    const s = readSnapshot(root, meta.id);
+    const s = readSnapshot(root, meta.snapshot?.private ? `${meta.id}-${attemptNo}` : meta.id);
     meta.snapshot = { dir: s.dir, tree: s.tree, left, private: true };
     meta.cwd = path27.join(s.dir, path27.relative(root, meta.dir));
     if (!fs31.existsSync(meta.cwd)) meta.cwd = s.dir;
-    meta.warnings.push(`${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)${left.length ? `; the secret-looking files (${left.slice(0, 3).join(", ")}${left.length > 3 ? ", \u2026" : ""}) and git-ignored files are not in it` : ""}`);
+    const note = `${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)`;
+    if (!meta.warnings.some((w) => w.startsWith(note))) {
+      meta.warnings.push(`${note}${left.length ? `; the secret-looking files (${left.slice(0, 3).join(", ")}${left.length > 3 ? ", \u2026" : ""}) and git-ignored files are not in it` : ""}`);
+    }
     return void 0;
   } catch (e) {
     return `could not make a snapshot for ${backend.name} (${e.message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself`;
   }
 }
-function strayWrites(meta, backend) {
+function changedIn(dir) {
   try {
-    const files = changedFiles(meta.snapshot.dir);
-    if (!files.length || meta.warnings.some((w) => w.startsWith("READ-ONLY VIOLATION"))) return;
-    const shown = files.slice(0, 5).join(", ") + (files.length > 5 ? `, +${files.length - 5} more` : "");
-    meta.warnings.push(`READ-ONLY VIOLATION: ${backend.name} wrote in its read-only snapshot (your project is untouched): ${shown}`);
+    return changedFiles(dir);
   } catch {
+    return [];
   }
+}
+function strayWrites(meta, backend, before) {
+  const earlier = new Set(before);
+  const files = changedIn(meta.snapshot.dir).filter((f) => !earlier.has(f));
+  if (!files.length || meta.warnings.some((w) => w.startsWith("READ-ONLY VIOLATION"))) return;
+  const shown = files.slice(0, 5).join(", ") + (files.length > 5 ? `, +${files.length - 5} more` : "");
+  meta.warnings.push(`READ-ONLY VIOLATION: ${backend.name} wrote in its read-only snapshot (not in your project; no other worker reads it): ${shown}`);
 }
 function sharedSnapshot(meta, root) {
   const snapshot = meta.snapshot;
@@ -7383,11 +7416,10 @@ ${rulings}`,
 import crypto11 from "node:crypto";
 import fs38 from "node:fs";
 import path34 from "node:path";
-function mayWrite2(o) {
+function preferredReadsOwnSnapshot(o) {
   try {
     const preferred = effective().worker.value;
-    const t = parseTarget(o.worker ?? preferred, preferred);
-    return getBackend(t.backend).capabilities.readOnly === "snapshot";
+    return readsOwnSnapshot(getBackend(parseTarget(o.worker ?? preferred, preferred).backend));
   } catch {
     return false;
   }
@@ -7408,7 +7440,7 @@ function cacheKey(o) {
     });
     const question = o.task.replace(/\s+/g, " ").trim();
     const readIn2 = READ_IN.includes(effective().readIn.value) ? effective().readIn.value : "auto";
-    const where = !o.inPlace && (mayWrite2(o) || wantSnapshot(readIn2, root, dir)) ? "snapshot" : "project";
+    const where = !o.inPlace && (preferredReadsOwnSnapshot(o) || wantSnapshot(readIn2, root, dir)) ? "snapshot" : "project";
     const key = crypto11.createHash("sha256").update(JSON.stringify([question, path34.relative(root, dir), files, where])).digest("hex");
     return { key, state: `${head}:${tree}`, where };
   } catch {
@@ -7531,7 +7563,7 @@ function scoreAnswer(q, truth, answer, root) {
   if (!summary && !details) return { score: 0, got: "(no answer)" };
   if ("line" in truth) {
     const flat = summary.replace(/\s+/g, " ");
-    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape3(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
+    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape2(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
     const named = pathsIn(flat).includes(truth.path);
     return { score: named ? 0.5 : 0, got: flat.slice(0, 120) };
   }
@@ -7548,7 +7580,7 @@ function scoreAnswer(q, truth, answer, root) {
   const f1 = precision + recall ? 2 * precision * recall / (precision + recall) : 0;
   return { score: !truth.files.length && !got.length ? 1 : f1, got: `${hit}/${truth.files.length} found, ${got.length - hit} extra` };
 }
-var escape3 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 var median = (a) => {
   const s = a.filter((x) => x !== void 0).sort((x, y) => x - y);
@@ -8564,7 +8596,7 @@ function liveProbe(target) {
   } catch (e) {
     return { level: "fail", message: e.message };
   }
-  const scratch = backend.capabilities.readOnly === "snapshot" ? fs42.mkdtempSync(path37.join(os13.tmpdir(), "pitroom-probe-")) : void 0;
+  const scratch = readsOwnSnapshot(backend) ? fs42.mkdtempSync(path37.join(os13.tmpdir(), "pitroom-probe-")) : void 0;
   const cwd = scratch ?? process.cwd();
   try {
     return probe(backend, target, cwd);

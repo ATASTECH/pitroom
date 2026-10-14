@@ -81,6 +81,8 @@ export interface RunMeta {
   inPlace?: boolean;
   /** The answer cache's key for this read run (see cache.ts). */
   cache?: { key: string; state: string; where?: 'snapshot' | 'project' };
+  /** No worker was started (its read snapshot could not be made): the run says nothing about the worker. */
+  noAttempt?: boolean;
   /** For an audit: the audited run's id. An audit re-checks a read run's answer with another worker. */
   auditOf?: string;
   auditVerdict?: AuditVerdict;

@@ -12,6 +12,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { findBinary, resolveCommand } from '../exec.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, Mode, ParsedRun, WorkerRequest } from '../types.js';
+import { splitModel } from '../text.js';
 import { parseEvents } from './events.js';
 
 const binary = () => findBinary('codex', 'PITROOM_CODEX_BIN');
@@ -31,12 +32,6 @@ function cx(args: string[], timeout = 60_000) {
 const SANDBOX: Record<Mode, string> = { read: 'read-only', write: 'workspace-write', isolate: 'workspace-write' };
 const toml = (s: string) => JSON.stringify(s); // TOML basic strings share JSON's escaping
 
-/** "gpt-5.6-sol#low" → model and reasoning effort. */
-export function splitModel(model: string | undefined): { model?: string; effort?: string } {
-  if (!model) return {};
-  const [m, effort] = model.split('#');
-  return { model: m || undefined, effort: effort || undefined };
-}
 
 function invocation(req: WorkerRequest) {
   const { model, effort } = splitModel(req.model);

@@ -5,7 +5,7 @@
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getBackend } from '../backends/index.js';
+import { getBackend, readsOwnSnapshot } from '../backends/index.js';
 import type { Backend, Failure, Mode, Target } from '../backends/types.js';
 import { applyPatch, canonical, createIsolatedCopy, diffTrees, linkIntoWorktree, removeIsolatedCopy, repoRoot, snapshotTree } from '../vcs/git.js';
 import { resolveChain } from './chain.js';
@@ -153,7 +153,7 @@ export function prepareRun(o: RunOptions): RunMeta {
   const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
   // A worker (or fallback) whose CLI cannot be trusted to stay read-only gets a snapshot of its own when it runs
   // (ownSnapshot); where that is not done, say so.
-  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find(mayWrite);
+  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find(readsOwnSnapshot);
   const snap = mode === 'read' && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn, root, dir) : undefined;
   if (untrusted && mode === 'read' && !parent && (o.review || o.inPlace || !root)) {
     warnings.push(`this read run is not in a snapshot${root ? '' : ' (not a git repository)'}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
@@ -275,6 +275,7 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
   try {
     prepareTree(meta);
     writeMeta(meta);
+    const planned: Planned = { snapshot: meta.snapshot && { ...meta.snapshot }, cwd: meta.cwd };
 
     const chain: Target[] = [];
     for (const t of [meta.worker, ...meta.fallback]) if (!chain.some((c) => sameTarget(c, t))) chain.push(t);
@@ -288,11 +289,13 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
         writeMeta(meta);
         continue;
       }
-      const cannot = readPlace(meta, backend);
+      const cannot = readPlace(meta, backend, planned, i + 1);
       if (cannot) {
         // like a failed attempt that did no work: the next worker runs, and the last one's reason is the run's error
         if (i === chain.length - 1) {
           meta.error = cannot;
+          // no worker ran: not a run of this worker for its record (history.ts)
+          if (!meta.ran) meta.noAttempt = true;
           break;
         }
         (meta.attempts ??= []).push({ target: describeTarget(target), error: cannot });
@@ -301,8 +304,10 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
       }
       meta.ran = target;
       writeMeta(meta);
+      const own = meta.snapshot?.private && readsOwnSnapshot(backend);
+      const before = own ? changedIn(meta.snapshot!.dir) : [];
       result = await attempt(meta, backend, target);
-      if (meta.snapshot?.private && mayWrite(backend)) strayWrites(meta, backend);
+      if (own) strayWrites(meta, backend, before);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
@@ -441,47 +446,67 @@ function prepareTree(meta: RunMeta): void {
 }
 
 /** A worker whose CLI may write in a read run: it never reads the project, nor a snapshot another run shares. */
-const mayWrite = (b: Backend): boolean => b.capabilities.readOnly === 'snapshot';
+/** Where a read run was meant to read before any worker that may write got a snapshot of its own. */
+interface Planned {
+  snapshot?: RunMeta['snapshot'];
+  cwd: string;
+}
 
 /**
  * Where a read run's worker reads, settled just before each attempt: the clean snapshot planned for it (secret-looking
- * files, readIn), made on first use and shared, or, for a worker that may write, a snapshot of the run's own. Returns
- * why the worker cannot run, if it cannot.
+ * files, readIn), made on first use and shared; for a worker that may write, a snapshot of the run's own. A worker
+ * after it goes back to the planned place, so it never reads what the other one wrote. Returns why the worker cannot
+ * run, if it cannot.
  */
-function readPlace(meta: RunMeta, backend: Backend): string | undefined {
+function readPlace(meta: RunMeta, backend: Backend, planned: Planned, attemptNo: number): string | undefined {
   const root = meta.repoRoot;
   if (!root || meta.mode !== 'read') return undefined;
-  if (mayWrite(backend)) return ownSnapshot(meta, root, backend);
+  if (readsOwnSnapshot(backend)) return ownSnapshot(meta, root, backend, attemptNo);
+  if (meta.snapshot?.private && !meta.parent) {
+    meta.snapshot = planned.snapshot && { ...planned.snapshot };
+    meta.cwd = planned.cwd;
+  }
   if (meta.snapshot && !meta.snapshot.dir) sharedSnapshot(meta, root);
   return undefined;
 }
 
-function ownSnapshot(meta: RunMeta, root: string, backend: Backend): string | undefined {
-  // its follow-ups read the snapshot it had; --in-place and reviews read the directory (prepareRun warned)
-  if (meta.snapshot?.private || meta.parent || meta.inPlace || meta.reviewOf) return undefined;
+function ownSnapshot(meta: RunMeta, root: string, backend: Backend, attemptNo: number): string | undefined {
+  // a follow-up reads the snapshot its parent had; --in-place and reviews read the directory (prepareRun warned)
+  if (meta.parent || meta.inPlace || meta.reviewOf) return undefined;
+  // an earlier attempt's own snapshot is reused only while nothing was written in it
+  if (meta.snapshot?.private && !changedIn(meta.snapshot.dir).length) return undefined;
   const left = meta.snapshot?.left ?? [];
   try {
-    const s = readSnapshot(root, meta.id);
+    const s = readSnapshot(root, meta.snapshot?.private ? `${meta.id}-${attemptNo}` : meta.id);
     meta.snapshot = { dir: s.dir, tree: s.tree, left, private: true };
     meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
     if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
-    meta.warnings.push(`${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)${left.length ? `; the secret-looking files (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', …' : ''}) and git-ignored files are not in it` : ''}`);
+    const note = `${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)`;
+    if (!meta.warnings.some((w) => w.startsWith(note))) {
+      meta.warnings.push(`${note}${left.length ? `; the secret-looking files (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', …' : ''}) and git-ignored files are not in it` : ''}`);
+    }
     return undefined;
   } catch (e) {
     return `could not make a snapshot for ${backend.name} (${(e as Error).message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself`;
   }
 }
 
-/** What a worker that may write left in its own snapshot: the files git sees changed there. */
-function strayWrites(meta: RunMeta, backend: Backend): void {
+/** The files git sees changed in a snapshot; none when it cannot tell. */
+function changedIn(dir: string): string[] {
   try {
-    const files = changedFiles(meta.snapshot!.dir);
-    if (!files.length || meta.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION'))) return;
-    const shown = files.slice(0, 5).join(', ') + (files.length > 5 ? `, +${files.length - 5} more` : '');
-    meta.warnings.push(`READ-ONLY VIOLATION: ${backend.name} wrote in its read-only snapshot (your project is untouched): ${shown}`);
+    return changedFiles(dir);
   } catch {
-    // the check is a report, not a guard: the project was never in reach
+    return [];
   }
+}
+
+/** What a worker that may write left in its own snapshot during its attempt: the files changed since `before`. */
+function strayWrites(meta: RunMeta, backend: Backend, before: string[]): void {
+  const earlier = new Set(before);
+  const files = changedIn(meta.snapshot!.dir).filter((f) => !earlier.has(f));
+  if (!files.length || meta.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION'))) return;
+  const shown = files.slice(0, 5).join(', ') + (files.length > 5 ? `, +${files.length - 5} more` : '');
+  meta.warnings.push(`READ-ONLY VIOLATION: ${backend.name} wrote in its read-only snapshot (not in your project; no other worker reads it): ${shown}`);
 }
 
 function sharedSnapshot(meta: RunMeta, root: string): void {

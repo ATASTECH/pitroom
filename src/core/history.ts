@@ -363,7 +363,7 @@ export function workerRecord(backend: string, model: string | undefined, sinceMs
   const fits = (m: string | null) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
   const rec: WorkerRecord = { runs: 0, ok: 0, audited: 0, agreed: 0 };
   try {
-    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} GROUP BY model`).all(backend, since)) {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY model`).all(backend, since)) {
       if (!fits(r.model)) continue;
       rec.runs += r.runs ?? 0;
       rec.ok += r.ok ?? 0;
@@ -450,6 +450,8 @@ function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { a
  * A run that failed on a rate limit or quota. Newer records say so (`failureKind`); older ones carry the hint
  * Pitroom adds to such an error.
  */
+/** A run in which no worker was started (its read snapshot could not be made) says nothing about the worker. */
+const ATTEMPTED = `json_extract(meta_json,'$.noAttempt') IS NULL`;
 const LIMITED = `(state='failed' AND (json_extract(meta_json,'$.failureKind')='rate-limited' OR error LIKE '%the model is rate-limited or overloaded%'))`;
 
 export function historyStats(sinceMs?: number): Stats {

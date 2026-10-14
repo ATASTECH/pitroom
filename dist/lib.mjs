@@ -156,6 +156,9 @@ var FORBIDDEN_COMMANDS = [
   "git add",
   "rm -rf",
   "rm -fr",
+  "rm -r",
+  "rm -R",
+  "rm --recursive",
   "sudo",
   "chown",
   "kill",
@@ -223,11 +226,21 @@ function writeIfChanged(file, body) {
   fs4.mkdirSync(path3.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}-${crypto2.randomBytes(3).toString("hex")}.tmp`;
   fs4.writeFileSync(tmp, body);
-  try {
-    fs4.renameSync(tmp, file);
-  } catch (e) {
-    fs4.rmSync(tmp, { force: true });
-    throw e;
+  for (let tries = 0; ; tries++) {
+    try {
+      fs4.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      const busy = ["EPERM", "EBUSY", "EACCES"].includes(e.code ?? "");
+      if (busy && tries < 10) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        continue;
+      }
+      fs4.rmSync(tmp, { force: true });
+      if (!busy) throw e;
+      fs4.writeFileSync(file, body);
+      return;
+    }
   }
 }
 function linkInto(dir, from) {
@@ -248,9 +261,6 @@ function linkInto(dir, from) {
   }
 }
 
-// src/backends/types.ts
-var MAX_STEPS = 400;
-
 // src/backends/text.ts
 var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 function num(v) {
@@ -259,6 +269,15 @@ function num(v) {
 function oneLine(s, max = 80) {
   return clip(s.replace(/\s+/g, " ").trim(), max);
 }
+var escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function splitModel(model) {
+  if (!model) return {};
+  const [m, effort] = model.split("#");
+  return { model: m || void 0, effort: effort || void 0 };
+}
+
+// src/backends/types.ts
+var MAX_STEPS = 400;
 
 // src/backends/antigravity/events.ts
 var EDIT_TOOLS = /* @__PURE__ */ new Set(["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file"]);
@@ -408,9 +427,9 @@ function agy(args, timeout = 3e4) {
 }
 var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path4.join(os3.homedir(), ".gemini", "antigravity-cli");
 var TOKEN = "antigravity-oauth-token";
-var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-var words = (c) => escape(c).replace(/ /g, "\\s+");
-var START = "(^|[;&|(`\\n]|\\$\\()\\s*((\\w+=\\S*|env|command|exec|nohup|time|nice|xargs)\\s+)*";
+var words = (c) => escapeRegex(c).replace(/ /g, "\\s+");
+var WRAPPER = "(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*";
+var START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
 var END = "(\\s|$|[;&|)`])";
 function denyCommandRules() {
   return [
@@ -418,6 +437,8 @@ function denyCommandRules() {
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
     `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
+    // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
+    `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,
     // a command inside a string is not matched above
     `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`
   ];
@@ -465,7 +486,7 @@ function invocation(req) {
     "24h"
   ];
   if (req.sessionId) args.push("--conversation", req.sessionId);
-  const [model, effort] = (req.model ?? "").split("#");
+  const { model, effort } = splitModel(req.model);
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   const { command, prefix } = resolveCommand(binary());
@@ -879,11 +900,6 @@ function cx(args, timeout = 6e4) {
 }
 var SANDBOX = { read: "read-only", write: "workspace-write", isolate: "workspace-write" };
 var toml = (s) => JSON.stringify(s);
-function splitModel(model) {
-  if (!model) return {};
-  const [m, effort] = model.split("#");
-  return { model: m || void 0, effort: effort || void 0 };
-}
 function invocation3(req) {
   const { model, effort } = splitModel(req.model);
   const args = ["exec"];
@@ -1859,10 +1875,10 @@ function parseEvents6(jsonl) {
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += Math.max(0, num2(u.input_tokens) - num2(u.cache_read_input_tokens));
-      usage.cacheRead += num2(u.cache_read_input_tokens);
-      usage.output += num2(u.output_tokens);
-      usage.total += num2(u.total_tokens) || num2(u.input_tokens) + num2(u.output_tokens);
+      usage.input += Math.max(0, num(u.input_tokens) - num(u.cache_read_input_tokens));
+      usage.cacheRead += num(u.cache_read_input_tokens);
+      usage.output += num(u.output_tokens);
+      usage.total += num(u.total_tokens) || num(u.input_tokens) + num(u.output_tokens);
       usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         error ??= apiError(String(e.error?.message ?? e.result ?? e.subtype ?? "Qwen Code error"));
@@ -1874,7 +1890,6 @@ function parseEvents6(jsonl) {
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
 var apiError = (text) => text.replace(API_ERROR, "").replace(/\](?=\s*(\n|$))/, "").replace(/\s+/g, " ").trim() || text;
-var num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
 
 // src/backends/qwen/index.ts
 var binary7 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
@@ -2116,10 +2131,10 @@ function verifyRefs(refs, dirs) {
 }
 function mentions(lines, ref) {
   const near = lines.slice(Math.max(0, ref.start - 1 - WINDOW), ref.end + WINDOW).join("\n");
-  return new RegExp(`(^|[^\\w$])${escape2(ref.symbol)}([^\\w$]|$)`).test(near);
+  return new RegExp(`(^|[^\\w$])${escape(ref.symbol)}([^\\w$]|$)`).test(near);
 }
 function enclosedBy(lines, ref) {
-  const name = escape2(ref.symbol);
+  const name = escape(ref.symbol);
   const def = new RegExp(
     `\\b(function|def|fn|func|class|interface|struct|impl|type|const|let|var)\\s+\\*?${name}\\b|^\\s*(export\\s+)?(default\\s+)?(async\\s+)?(static\\s+)?${name}\\s*[(:=]`
   );
@@ -2170,7 +2185,7 @@ function inside(file, roots) {
     return rel !== "" && !rel.startsWith("..") && !path11.isAbsolute(rel);
   });
 }
-var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
 import fs12 from "node:fs";
@@ -2792,7 +2807,7 @@ function scoreAnswer(q, truth, answer, root) {
   if (!summary && !details) return { score: 0, got: "(no answer)" };
   if ("line" in truth) {
     const flat = summary.replace(/\s+/g, " ");
-    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape3(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
+    if (new RegExp(`(^|[^\\w./-])\\.?/?${escape2(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
     const named = pathsIn(flat).includes(truth.path);
     return { score: named ? 0.5 : 0, got: flat.slice(0, 120) };
   }
@@ -2809,7 +2824,7 @@ function scoreAnswer(q, truth, answer, root) {
   const f1 = precision + recall ? 2 * precision * recall / (precision + recall) : 0;
   return { score: !truth.files.length && !got.length ? 1 : f1, got: `${hit}/${truth.files.length} found, ${got.length - hit} extra` };
 }
-var escape3 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 var mean = (a) => a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0;
 var median = (a) => {
   const s = a.filter((x) => x !== void 0).sort((x, y) => x - y);

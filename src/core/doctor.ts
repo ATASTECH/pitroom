@@ -4,7 +4,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { allBackends, getBackend } from '../backends/index.js';
+import { allBackends, getBackend, readsOwnSnapshot } from '../backends/index.js';
 import type { Backend, DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimReady } from '../vcs/guard.js';
@@ -243,7 +243,7 @@ function liveProbe(target: Target): DoctorCheck {
     return { level: 'fail', message: (e as Error).message };
   }
   // A worker that may write in a read run (`readOnly: 'snapshot'`) is probed in an empty folder, not in the project.
-  const scratch = backend.capabilities.readOnly === 'snapshot' ? fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-probe-')) : undefined;
+  const scratch = readsOwnSnapshot(backend) ? fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-probe-')) : undefined;
   const cwd = scratch ?? process.cwd();
   try {
     return probe(backend, target, cwd);

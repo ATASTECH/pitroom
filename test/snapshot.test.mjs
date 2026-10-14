@@ -155,9 +155,27 @@ test('snapshot: a worker that may write in a read run (Antigravity) reads a snap
   assert.equal(path.dirname(shared), SNAPSHOTS(s));
   assert.notEqual(shared, real(call.cwd));
   assert.ok(!fs.existsSync(path.join(shared, 'stray.txt')));
-  // a follow-up continues in the same snapshot of its own
-  s.run(['run', '--continue', meta.id, 'and sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  // a follow-up continues in the same snapshot of its own, and is not blamed for what its parent wrote there
+  const follow = JSON.parse(s.run(['run', '--json', '--continue', meta.id, 'and sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK }).stdout);
   assert.equal(real(agyCalls(s).at(-1).cwd), real(call.cwd));
+  assert.ok(!follow.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION')), follow.warnings.join('\n'));
+});
+
+test('snapshot: a worker after Antigravity in the chain never reads what it wrote; a second Antigravity attempt gets a fresh snapshot', () => {
+  const s = sandbox();
+  // agy writes, then fails (no answer): the next worker reads the project as planned, not agy's snapshot
+  s.config({ worker: 'antigravity', fallback: ['opencode:mock/good-model'] });
+  const r = s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl' });
+  const meta = JSON.parse(r.stdout);
+  assert.equal(meta.ran.backend, 'opencode', r.stdout);
+  assert.equal(ranIn(s), real(s.repo), 'opencode reads the project, where it would have read without agy');
+  assert.equal(meta.snapshot, undefined);
+  assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')));
+  // two Antigravity targets: the second does not read the first one's writes
+  s.config({ worker: 'antigravity:model-a', fallback: ['antigravity:model-b'] });
+  s.run(['run', 'where is sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota-exit-three.stdout.jsonl' });
+  const [first, second] = agyCalls(s).slice(-2);
+  assert.notEqual(real(first.cwd), real(second.cwd));
 });
 
 test('snapshot: Antigravity as a fallback costs nothing until it runs, then reads a snapshot of its own', () => {
@@ -178,9 +196,10 @@ test('snapshot: Antigravity does not run when its snapshot cannot be made; --in-
   const s = sandbox();
   fs.mkdirSync(path.join(s.base, 'home'), { recursive: true });
   fs.writeFileSync(path.join(s.base, 'home', 'snapshots'), 'not a folder\n');
-  const r = s.run(['run', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt' });
+  const r = s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt' });
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /could not make a snapshot for Antigravity CLI/);
+  assert.equal(JSON.parse(r.stdout).noAttempt, true, 'not counted against the worker in its record');
   assert.equal(agyCalls(s).length, 0, 'agy never started');
   assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')));
   const inPlace = s.run(['run', '--in-place', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
@@ -197,4 +216,22 @@ test('snapshot: an Antigravity answer is cached under "snapshot", and the doctor
   assert.ok(probe.argv[1].includes('PONG'), 'the probe ran');
   assert.match(path.basename(probe.cwd), /^pitroom-probe-/, 'an empty folder of its own, not the project');
   assert.ok(!fs.existsSync(probe.cwd), 'removed afterwards');
+});
+
+test('snapshot: runs\' own snapshots keep their own quota when pruning, so they do not push out the shared ones', () => {
+  const s = sandbox();
+  const dir = path.join(s.base, 'home', 'snapshots');
+  fs.mkdirSync(dir, { recursive: true });
+  const old = (Date.now() - 3_600_000) / 1000;
+  const make = (name) => {
+    fs.mkdirSync(path.join(dir, name, '.git'), { recursive: true });
+    fs.utimesSync(path.join(dir, name), old, old);
+  };
+  make('a'.repeat(40));
+  for (let i = 0; i < 8; i++) make(`${'b'.repeat(40)}-20261014-12000${i}-abcd`);
+  // making a snapshot prunes the others
+  assert.equal(s.run(['run', 'where is app.txt?'], { PITROOM_READ_IN: 'snapshot' }).status, 0);
+  const left = fs.readdirSync(dir);
+  assert.ok(left.includes('a'.repeat(40)), 'an older shared snapshot stays');
+  assert.equal(left.filter((n) => n.includes('-')).length, 6, 'the newest few own snapshots stay');
 });

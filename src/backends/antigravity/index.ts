@@ -21,6 +21,7 @@ import { home } from '../../core/store.js';
 import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
 import { linkInto, writeIfChanged } from '../home.js';
+import { escapeRegex, splitModel } from '../text.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
@@ -37,16 +38,17 @@ const userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path.join(os.homed
 
 const TOKEN = 'antigravity-oauth-token';
 
-const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const words = (c: string) => escape(c).replace(/ /g, '\\s+');
+const words = (c: string) => escapeRegex(c).replace(/ /g, '\\s+');
 
 /**
  * Where a command starts in a command line: at its beginning or after a separator (`;`, `&&`, `||`, `|`, `&`, a
  * subshell or command substitution), behind any `VAR=value` assignments and wrappers that run the rest (`env`,
- * `command`, `exec`, `nohup`, `time`, `nice`, `xargs`). agy matches a rule against the whole command line with a
- * regex, so the rule itself has to find every command in it.
+ * `command`, `exec`, `nohup`, `time`, `timeout`, `nice`, `xargs`, `stdbuf`, `setsid`), with their options and
+ * numbers (`env -i`, `nice -n 5`, `timeout 60`, `xargs -0`). agy matches a rule against the whole command line with
+ * a regex, so the rule itself has to find every command in it.
  */
-const START = '(^|[;&|(`\\n]|\\$\\()\\s*((\\w+=\\S*|env|command|exec|nohup|time|nice|xargs)\\s+)*';
+const WRAPPER = '(env|command|exec|nohup|time|timeout|nice|xargs|stdbuf|setsid)(\\s+(-\\S+|\\d\\S*|\\w+=\\S*))*';
+const START = `(^|[;&|(\`\\n]|\\$\\()\\s*((\\w+=\\S*|${WRAPPER})\\s+)*`;
 const END = '(\\s|$|[;&|)`])';
 
 /** The command deny rules: Pitroom's forbidden commands, git by path or with options that point it elsewhere, and shells that would hide a command in a string. */
@@ -56,6 +58,8 @@ export function denyCommandRules(): string[] {
     // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
     `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
     `command(regex:${START}\\S*[\\\\/]git${END})`,
+    // a recursive delete however its options are spelled or placed (rm -r -f, rm -Rf, rm --recursive, rm dir -rf)
+    `command(regex:${START}rm(\\s+[^\\s;&|]+)*\\s+(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)${END})`,
     // a command inside a string is not matched above
     `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`,
   ];
@@ -107,7 +111,7 @@ function invocation(req: WorkerRequest) {
   ];
   // The conversation id of the stream: never --continue (the latest conversation), which is unsafe beside parallel workers.
   if (req.sessionId) args.push('--conversation', req.sessionId);
-  const [model, effort] = (req.model ?? '').split('#');
+  const { model, effort } = splitModel(req.model);
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   const { command, prefix } = resolveCommand(binary());

@@ -6,7 +6,8 @@ import path from 'node:path';
 
 /**
  * Writes `body` to `file` only when it differs, through a temporary file renamed over it: a worker starting at the
- * same moment reads the old file or the new one, never half of one.
+ * same moment reads the old file or the new one, never half of one. On Windows a file another process has open
+ * cannot be replaced (EPERM, EBUSY): the rename is retried for a moment, then the file is written in place.
  */
 export function writeIfChanged(file: string, body: string): void {
   try {
@@ -17,11 +18,21 @@ export function writeIfChanged(file: string, body: string): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}-${crypto.randomBytes(3).toString('hex')}.tmp`;
   fs.writeFileSync(tmp, body);
-  try {
-    fs.renameSync(tmp, file);
-  } catch (e) {
-    fs.rmSync(tmp, { force: true });
-    throw e;
+  for (let tries = 0; ; tries++) {
+    try {
+      fs.renameSync(tmp, file);
+      return;
+    } catch (e) {
+      const busy = ['EPERM', 'EBUSY', 'EACCES'].includes((e as NodeJS.ErrnoException).code ?? '');
+      if (busy && tries < 10) {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
+        continue;
+      }
+      fs.rmSync(tmp, { force: true });
+      if (!busy) throw e;
+      fs.writeFileSync(file, body);
+      return;
+    }
   }
 }
 

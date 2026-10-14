@@ -124,13 +124,15 @@ export function prune(now = Date.now(), maxAgeMs = PRUNE_AGE_MS, keepNewest = KE
     .filter((e): e is { n: string; dir: string; age: number } => !!e)
     .sort((x, y) => x.age - y.age); // newest first
   let removed = 0;
-  let rank = 0;
+  // shared snapshots and runs' own ones (`<tree>-<run id>`) each keep their newest few: a burst of runs with their
+  // own snapshots does not push out the one every other read run shares
+  const rank = { shared: 0, own: 0 };
   for (const e of entries) {
     if (inUse.has(path.resolve(e.dir))) continue;
     const half = e.n.startsWith('.tmp-');
     // a half-made snapshot is left alone for a day, in case a run is still making it
     const old = e.age >= (half ? KEEP_MS : maxAgeMs);
-    const surplus = !half && ++rank > keepNewest && e.age >= JUST_USED_MS;
+    const surplus = !half && ++rank[e.n.includes('-') ? 'own' : 'shared'] > keepNewest && e.age >= JUST_USED_MS;
     if (!old && !surplus) continue;
     try {
       makeWritable(e.dir);

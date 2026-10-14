@@ -13,7 +13,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { getBackend } from '../backends/index.js';
+import { getBackend, readsOwnSnapshot } from '../backends/index.js';
 import { effective } from './config.js';
 import { parseTarget } from './target.js';
 import type { RunOptions } from './run.js';
@@ -22,12 +22,14 @@ import { readSummary } from './report.js';
 import { type RunMeta, isActive, listRunIds, readMeta } from './store.js';
 import { canonical, commitOf, repoRoot, snapshotTree } from '../vcs/git.js';
 
-/** Whether the run's preferred worker reads a snapshot of its own (`readOnly: 'snapshot'`), whatever readIn says. */
-function mayWrite(o: RunOptions): boolean {
+/**
+ * Whether the run's preferred worker reads a snapshot of its own, whatever readIn says. A guess: tiers, ranking and
+ * the budget can change who runs; a run that then reads elsewhere is not cached under this key (run.ts finalize).
+ */
+function preferredReadsOwnSnapshot(o: RunOptions): boolean {
   try {
     const preferred = effective().worker.value;
-    const t = parseTarget(o.worker ?? preferred, preferred);
-    return getBackend(t.backend).capabilities.readOnly === 'snapshot';
+    return readsOwnSnapshot(getBackend(parseTarget(o.worker ?? preferred, preferred).backend));
   } catch {
     return false;
   }
@@ -61,7 +63,7 @@ export function cacheKey(o: RunOptions): CacheKey | undefined {
     });
     const question = o.task.replace(/\s+/g, ' ').trim();
     const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
-    const where = !o.inPlace && (mayWrite(o) || wantSnapshot(readIn, root, dir)) ? 'snapshot' : 'project';
+    const where = !o.inPlace && (preferredReadsOwnSnapshot(o) || wantSnapshot(readIn, root, dir)) ? 'snapshot' : 'project';
     const key = crypto.createHash('sha256').update(JSON.stringify([question, path.relative(root, dir), files, where])).digest('hex');
     return { key, state: `${head}:${tree}`, where };
   } catch {

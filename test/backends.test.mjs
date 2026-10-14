@@ -435,9 +435,12 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
     'npm test && rm -rf src', 'cd x; claude -p hi', 'ls | xargs kill', 'env sudo ls', 'FOO=1 git push', 'git  commit',
     'echo $(git push)', '(git commit -m x)', 'nohup codex exec x &', 'git -C /other/repo status', 'git -c core.x=y commit',
     'bash -c "git push"', 'sh -lc x', 'eval "$CMD"', 'true\ngit push',
+    // wrappers with options, and every spelling of a recursive delete
+    'env -i rm -rf src', 'nice -n 5 claude -p x', 'find . | xargs -0 rm -rf', 'timeout 60 agy -p hi', 'stdbuf -oL gemini -p x',
+    'rm -r -f src', 'rm -Rf src', 'rm --recursive --force src', 'rm src -rf', 'rm -r src',
   ];
   for (const c of forbidden) assert.ok(denied('command', c), c);
-  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini']) {
+  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini', 'rm notes-r.txt', 'rm a.txt; ls -R', 'timeout 60 npm test', 'env -i node x.js']) {
     assert.ok(!denied('command', c), c);
   }
   assert.ok(denied('mcp', 'linter/lint') && denied('read_url', 'https://example.com'));
