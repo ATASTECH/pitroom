@@ -228,8 +228,12 @@ export interface OutsideRead {
 /** Entries a granted folder may hold: its secret files are found by looking at every one, or it is not granted. */
 const MAX_SCANNED = 20_000;
 
-/** All the secret-looking files under `dir`, at any depth and in every folder; undefined when there are too many entries to be sure. */
+/**
+ * All the secret-looking files under `dir`, at any depth and in every folder; undefined when there are too many
+ * entries to be sure, or when a link in it leads out of it (the link's name says nothing about what it opens).
+ */
 function allSecrets(dir: string): string[] | undefined {
+  const root = realOf(dir) ?? dir;
   const found: string[] = [];
   let seen = 0;
   const stack = [dir];
@@ -244,7 +248,12 @@ function allSecrets(dir: string): string[] | undefined {
     for (const e of entries) {
       if (++seen > MAX_SCANNED) return undefined;
       const p = path.join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
+      if (e.isSymbolicLink()) {
+        // a link inside the folder is checked where it leads, which is scanned too; one out of it is not granted
+        const target = realOf(p);
+        if (target && !inside(target, root)) return undefined;
+        if (looksSecret(e.name)) found.push(p);
+      } else if (e.isDirectory()) stack.push(p);
       else if (looksSecret(e.name)) found.push(p);
     }
   }
@@ -270,6 +279,7 @@ export function outsideReads(prompt: string, workspace: string, project?: string
   const own = realOf(home()) ?? home();
   const found = new Map<string, OutsideRead>();
   for (const { abs } of pathsIn(prompt)) {
+    // a named path is taken where its links lead, so a link's name does not decide what is opened
     const p = realOf(abs);
     if (!p || found.has(p) || inside(p, ws) || inside(p, own)) continue;
     if (inside(homeDir, p) || inside(ws, p) || (proj && inside(proj, p))) continue;

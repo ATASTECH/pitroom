@@ -649,6 +649,7 @@ var inside = (p, dir) => {
 };
 var MAX_SCANNED = 2e4;
 function allSecrets(dir) {
+  const root = realOf(dir) ?? dir;
   const found = [];
   let seen = 0;
   const stack = [dir];
@@ -663,7 +664,11 @@ function allSecrets(dir) {
     for (const e of entries) {
       if (++seen > MAX_SCANNED) return void 0;
       const p = path5.join(d, e.name);
-      if (e.isDirectory()) stack.push(p);
+      if (e.isSymbolicLink()) {
+        const target = realOf(p);
+        if (target && !inside(target, root)) return void 0;
+        if (looksSecret(e.name)) found.push(p);
+      } else if (e.isDirectory()) stack.push(p);
       else if (looksSecret(e.name)) found.push(p);
     }
   }
