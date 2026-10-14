@@ -358,13 +358,14 @@ var DENY_COMMANDS = [
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 function workerSettings() {
   return {
-    // Shell commands run in agy's terminal sandbox without asking (a headless run cannot answer); edits are
-    // approved by --mode accept-edits in write runs and blocked by --mode plan in read runs.
+    // Shell commands run in agy's terminal sandbox without asking: a headless run cannot answer, and a command
+    // without a grant is refused (#1054), which ends the turn. Narrow command(…) grants are reported not to work in
+    // -p runs (#548), command(*) is; the deny rules below still win. Edits are approved by --mode accept-edits.
     toolPermission: "proceed-in-sandbox",
     artifactReviewPolicy: "always-proceed",
     allowNonWorkspaceAccess: false,
     permissions: {
-      allow: [],
+      allow: ["command(*)"],
       deny: [
         // A denied read also denies the write of the same path.
         "read_file(regex:(^|[\\\\/])\\.env($|\\.)|[^\\\\/]\\.env$|\\.(pem|p12|pfx|key)$|(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)|(^|[\\\\/])\\.netrc$)",
@@ -436,12 +437,13 @@ function failure(run, stderr, exitCode) {
   const lines = stderr.trim().split("\n").map((l) => l.trim()).filter(Boolean);
   const envelope = lines.find((l) => l.startsWith("AGY_ERROR"));
   const detail = (envelope && fromEnvelope(envelope)) ?? lines.find((l) => /RESOURCE_EXHAUSTED|error|failed|quota|exhausted|denied|not found|\bsign.?in\b/i.test(l) && !TIMED_OUT.test(l));
-  const quiet = !run.finalText && !run.sessionId && run.usage.steps === 0;
   if (exitCode === 0 && !run.error) {
-    if (!run.finalText && detail) return { kind: classify(detail), message: detail };
-    if (lines.some((l) => TIMED_OUT.test(l)) && !run.finalText) return { kind: "other", message: "agy stopped at its own --print-timeout before answering" };
-    if (quiet && !stderr.trim()) return { kind: "other", message: "agy printed nothing (some agy versions write no output to a pipe); update agy" };
-    return void 0;
+    if (run.finalText) return void 0;
+    if (detail) return { kind: classify(detail), message: detail };
+    if (lines.some((l) => TIMED_OUT.test(l))) return { kind: "other", message: "agy stopped at its own --print-timeout before answering" };
+    if (run.usage.denied) return { kind: "other", message: "agy ended its turn without an answer when a tool call was refused" };
+    if (!run.sessionId && !stderr.trim()) return { kind: "other", message: "agy printed nothing (some agy versions write no output to a pipe); update agy" };
+    return { kind: "other", message: "agy ended without an answer (a refused tool call ends its turn with no other sign)" };
   }
   const message = run.error ?? detail ?? lines.at(-1) ?? `agy exited with code ${exitCode}`;
   return { kind: classify(`${message} ${detail ?? ""}`), message };
@@ -467,7 +469,7 @@ function doctor({ models, hasFallback }) {
     { level: "ok", message: `Antigravity CLI ${version.out.trim().split("\n")[0]} at ${binary()}` },
     {
       level: "warn",
-      message: "the Antigravity worker is experimental: its read-only mode (--mode plan), sandbox and deny rules have not been checked against a real agy yet; try it with -i first and look for READ-ONLY VIOLATION in read runs"
+      message: "the Antigravity worker is experimental: not yet checked against a real agy. agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes"
     }
   ];
   if (process.platform === "win32") {
@@ -484,7 +486,7 @@ function doctor({ models, hasFallback }) {
 var antigravity = {
   id: "antigravity",
   name: "Antigravity CLI",
-  capabilities: { readOnly: "approval-mode", resume: "by-id", reportsCost: false, attachFiles: false },
+  capabilities: { readOnly: "snapshot", resume: "by-id", reportsCost: false, attachFiles: false },
   binary,
   invocation,
   parse: parseEvents,

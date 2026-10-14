@@ -41,7 +41,7 @@ for (const b of allBackends()) {
   const expected = JSON.parse(fs.readFileSync(path.join(dir, 'expected.json'), 'utf8'));
 
   test(`${b.id}: declares valid capabilities`, () => {
-    assert.ok(['permission-rules', 'os-sandbox', 'tool-allowlist', 'approval-mode'].includes(b.capabilities.readOnly));
+    assert.ok(['permission-rules', 'os-sandbox', 'tool-allowlist', 'approval-mode', 'snapshot'].includes(b.capabilities.readOnly));
     assert.ok(['by-id', 'none'].includes(b.capabilities.resume));
     assert.equal(typeof b.capabilities.reportsCost, 'boolean');
     assert.equal(typeof b.capabilities.attachFiles, 'boolean');
@@ -423,6 +423,8 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
   const settings = JSON.parse(fs.readFileSync(path.join(dir, 'settings.json'), 'utf8'));
   assert.equal(settings.allowNonWorkspaceAccess, false);
   assert.equal(settings.toolPermission, 'proceed-in-sandbox', 'commands run sandboxed, never unsandboxed without asking');
+  assert.deepEqual(settings.permissions.allow, ['command(*)'], 'without a grant agy refuses a command and ends the turn; narrow grants do not work in -p runs');
+  assert.equal(b.capabilities.readOnly, 'snapshot', 'agy has no read-only mode for -p runs: read runs read a snapshot');
   const rule = (action) => settings.permissions.deny.filter((r) => r.startsWith(`${action}(regex:`)).map((r) => new RegExp(r.slice(action.length + 7, -1)));
   const denied = (action, target) => rule(action).some((re) => re.test(target));
   for (const f of ['/p/.env', '/p/.env.local', '/p/prod.env', '/p/server.pem', '/home/u/.ssh/id_ed25519', 'C:\\p\\.env']) assert.ok(denied('read_file', f), f);

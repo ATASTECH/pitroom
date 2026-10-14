@@ -149,8 +149,14 @@ export function prepareRun(o: RunOptions): RunMeta {
   for (const f of files) if (!fs.existsSync(f)) throw new UserError(`file not found: ${f}`);
 
   // A read run in a directory with secret-looking files reads a clean snapshot instead (made when it starts).
-  const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
+  const configured = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
+  // A worker (or fallback) whose CLI cannot be trusted to stay read-only reads a snapshot, whatever readIn says (--in-place still wins).
+  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find((b) => b.capabilities.readOnly === 'snapshot');
+  const readIn: ReadIn = untrusted ? 'snapshot' : configured;
   const snap = mode === 'read' && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn, root, dir) : undefined;
+  if (untrusted && mode === 'read' && !parent && (o.review || o.inPlace || !root)) {
+    warnings.push(`this read run is not in a snapshot${root ? '' : ' (not a git repository)'}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
+  }
   if (parent?.snapshot?.dir && !fs.existsSync(parent.snapshot.dir)) {
     throw new UserError(`the read snapshot of run ${parent.id} is gone (cleaned up); ask the question again as a new run`, 3);
   }

@@ -74,6 +74,7 @@ const READ_ONLY_HOW: Record<string, string> = {
   'os-sandbox': 'an OS sandbox',
   'tool-allowlist': 'a tool allowlist',
   'approval-mode': "the CLI's read-only approval mode",
+  snapshot: 'a read-only snapshot of the project (the CLI\'s own read-only mode is not relied on)',
 };
 
 export function doctor(probe: boolean): number {

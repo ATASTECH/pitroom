@@ -51,6 +51,11 @@
       "exitCode": 0,
       "kind": "other",
       "messageIncludes": "printed nothing"
+    },
+    "turn-discarded": {
+      "exitCode": 0,
+      "kind": "other",
+      "messageIncludes": "refused"
     }
   }
 }

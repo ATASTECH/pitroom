@@ -1,0 +1,3 @@
+{"type":"init","conversation_id":"6c2f8e14-0a9b-4d37-b5e1-7f3a2c9d0b48"}
+{"type":"step_update","step_update":{"conversation_id":"6c2f8e14-0a9b-4d37-b5e1-7f3a2c9d0b48","step_index":1,"state":"DONE","step_type":"tool","tool_info":{"name":"run_command","parameters":{"CommandLine":"ls -la"},"error":"command permission for ls auto-denied in headless mode","status":"DENIED"}}}
+{"type":"result","status":"SUCCESS","conversation_id":"6c2f8e14-0a9b-4d37-b5e1-7f3a2c9d0b48","response":""}

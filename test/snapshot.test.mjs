@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { sandbox } from './helpers.mjs';
 
 const real = (p) => fs.realpathSync(p);
@@ -127,4 +128,30 @@ test('snapshot: only the newest few are kept, however recent they are', () => {
   fs.appendFileSync(path.join(s.repo, 'app.txt'), 'one more\n');
   assert.equal(s.run(['run', 'last']).status, 0);
   assert.equal(snapshots(s).length, 6, 'the newest six: the fresh one and five of the old ones');
+});
+
+const AGY_MOCK = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity', 'mock', 'agy.mjs');
+
+test('snapshot: a worker that cannot stay read-only (Antigravity) always reads a snapshot, even without secret files', () => {
+  const s = sandbox();
+  const before = s.status();
+  // agy writes in a read run despite --mode plan: here it writes a new file and reports two edits
+  const r = s.run(['run', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'events/isolate-edit.jsonl' });
+  const call = s.calls().filter((c) => c.backend === 'antigravity' && c.argv[0] === '-p').at(-1);
+  assert.ok(call, r.stdout + r.stderr);
+  assert.equal(path.dirname(real(call.cwd)), real(path.join(s.base, 'home', 'snapshots')), 'the worker ran in a snapshot');
+  assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')), 'the project itself is untouched');
+  assert.equal(s.status(), before);
+  assert.match(r.stdout, /READ-ONLY VIOLATION/, 'and the write is reported');
+});
+
+test('snapshot: the same holds when Antigravity is only a fallback; --in-place reads the project, with a warning', () => {
+  const s = sandbox();
+  s.config({ fallback: ['antigravity'] });
+  s.run(['run', 'where is app.txt?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  assert.equal(path.dirname(ranIn(s)), real(path.join(s.base, 'home', 'snapshots')), 'the first worker reads the snapshot too');
+  const r = s.run(['run', '--in-place', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  const call = s.calls().filter((c) => c.backend === 'antigravity' && c.argv[0] === '-p').at(-1);
+  assert.equal(real(call.cwd), real(s.repo));
+  assert.match(r.stdout, /not in a snapshot, and Antigravity CLI does not reliably stay read-only/);
 });

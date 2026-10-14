@@ -98,8 +98,11 @@ export interface DoctorCheck {
 }
 
 export interface Capabilities {
-  /** How read-only mode is enforced, shown by `pitroom doctor`. */
-  readOnly: 'permission-rules' | 'os-sandbox' | 'tool-allowlist' | 'approval-mode';
+  /**
+   * How read-only mode is enforced, shown by `pitroom doctor`. `snapshot`: the CLI's own read-only mode is not to be
+   * trusted, so the core runs its read runs in a read-only snapshot of the project (never in place, unless --in-place).
+   */
+  readOnly: 'permission-rules' | 'os-sandbox' | 'tool-allowlist' | 'approval-mode' | 'snapshot';
   /** Whether `pitroom run --continue` can resume the worker's session. */
   resume: 'by-id' | 'none';
   reportsCost: boolean;
