@@ -1,8 +1,8 @@
 // Antigravity CLI adapter: `agy -p … --output-format stream-json`, locked down with agy's own mechanisms where they
 // hold, and with Pitroom's where they do not:
 //   read-only                   agy has no read-only mode for -p runs (google-antigravity/antigravity-cli#45), and
-//                               --mode plan still writes in them (#1181). So `readOnly: 'snapshot'`: the core runs
-//                               every read run in a read-only snapshot of the project, never in the project itself.
+//                               --mode plan still writes in them (#1181). So `readOnly: 'snapshot'`: the core gives
+//                               every read run a read-only snapshot of its own, never the project or a shared one.
 //                               --mode plan is passed anyway; write and isolate use accept-edits.
 //   --sandbox                   shell commands run in agy's terminal sandbox (the project writable, no network)
 //   ANTIGRAVITY_APP_DATA_DIR    a private data folder for workers (<pitroom home>/antigravity-home) whose
@@ -18,7 +18,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { home } from '../../core/store.js';
+import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
+import { linkInto, writeIfChanged } from '../home.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
@@ -35,16 +37,29 @@ const userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path.join(os.homed
 
 const TOKEN = 'antigravity-oauth-token';
 
-// Same intent as the other workers' deny lists; the git guard env layer backs it up.
-export const DENY_COMMANDS = [
-  'git commit', 'git push', 'git pull', 'git reset', 'git checkout', 'git restore', 'git clean', 'git stash',
-  'git rebase', 'git merge', 'git switch', 'git branch', 'git tag', 'git rm', 'git worktree', 'git update-ref',
-  'git config', 'git remote', 'git cherry-pick', 'git revert', 'git am', 'git add',
-  'rm -rf', 'rm -fr', 'sudo', 'chown', 'kill', 'pkill', 'killall', 'gh', 'npm publish',
-  'pitroom', 'opencode', 'claude', 'codex', 'gemini', 'qwen', 'kilo', 'kilocode', 'agy',
-];
-
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const words = (c: string) => escape(c).replace(/ /g, '\\s+');
+
+/**
+ * Where a command starts in a command line: at its beginning or after a separator (`;`, `&&`, `||`, `|`, `&`, a
+ * subshell or command substitution), behind any `VAR=value` assignments and wrappers that run the rest (`env`,
+ * `command`, `exec`, `nohup`, `time`, `nice`, `xargs`). agy matches a rule against the whole command line with a
+ * regex, so the rule itself has to find every command in it.
+ */
+const START = '(^|[;&|(`\\n]|\\$\\()\\s*((\\w+=\\S*|env|command|exec|nohup|time|nice|xargs)\\s+)*';
+const END = '(\\s|$|[;&|)`])';
+
+/** The command deny rules: Pitroom's forbidden commands, git by path or with options that point it elsewhere, and shells that would hide a command in a string. */
+export function denyCommandRules(): string[] {
+  return [
+    `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join('|')})${END})`,
+    // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
+    `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
+    `command(regex:${START}\\S*[\\\\/]git${END})`,
+    // a command inside a string is not matched above
+    `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`,
+  ];
+}
 
 /**
  * Pitroom's settings for agy workers. One file for every mode, since a follow-up continues its conversation in the
@@ -63,9 +78,7 @@ export function workerSettings() {
       deny: [
         // A denied read also denies the write of the same path.
         'read_file(regex:(^|[\\\\/])\\.env($|\\.)|[^\\\\/]\\.env$|\\.(pem|p12|pfx|key)$|(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)|(^|[\\\\/])\\.netrc$)',
-        `command(regex:^\\s*(${DENY_COMMANDS.map(escape).join('|')})(\\s|$))`,
-        // git by path would bypass the git guard's PATH shim
-        'command(regex:^\\s*\\S*[\\\\/]git(\\s|$))',
+        ...denyCommandRules(),
         'mcp(regex:.*)',
         // No web for agy workers: the rule is in the shared settings file, so --web cannot switch it on per run.
         'read_url(regex:.*)',
@@ -74,28 +87,11 @@ export function workerSettings() {
   };
 }
 
-/** The private data folder of workers, written only when it changed, so invoking stays cheap and repeatable. */
+/** The private data folder of workers: its settings rewritten when they change, the user's sign-in linked in. */
 function workerDir(): string {
   const dir = path.join(home(), 'antigravity-home');
-  const file = path.join(dir, 'settings.json');
-  const body = `${JSON.stringify(workerSettings(), null, 2)}\n`;
-  let same = false;
-  try {
-    same = fs.readFileSync(file, 'utf8') === body;
-  } catch {
-    // not written yet
-  }
-  if (!same) {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(file, body);
-  }
-  const from = path.join(userDir(), TOKEN);
-  const to = path.join(dir, TOKEN);
-  try {
-    if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to);
-  } catch {
-    // no link: the worker then asks to sign in, which fails with an auth error that doctor explains
-  }
+  writeIfChanged(path.join(dir, 'settings.json'), `${JSON.stringify(workerSettings(), null, 2)}\n`);
+  linkInto(dir, path.join(userDir(), TOKEN));
   return dir;
 }
 

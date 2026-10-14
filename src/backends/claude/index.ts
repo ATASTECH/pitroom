@@ -15,6 +15,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { findBinary, resolveCommand } from '../exec.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, Mode, ParsedRun, WorkerRequest } from '../types.js';
+import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { parseEvents } from './events.js';
 
 const binary = () => findBinary('claude', 'PITROOM_CLAUDE_BIN', ['~/.local/bin/claude', '~/.claude/local/claude']);
@@ -35,13 +36,7 @@ const WRITE_TOOLS = [...READ_TOOLS, 'Edit', 'Write', 'Bash'];
 const WEB_TOOLS = ['WebFetch', 'WebSearch'];
 
 // Same intent as the OpenCode write profile; the git guard env layer backs it up.
-const DENY_BASH = [
-  'git commit', 'git push', 'git pull', 'git reset', 'git checkout', 'git restore', 'git clean', 'git stash',
-  'git rebase', 'git merge', 'git switch', 'git branch', 'git tag', 'git rm', 'git worktree', 'git update-ref',
-  'git config', 'git remote', 'git cherry-pick', 'git revert', 'git am', 'git add',
-  'rm -rf', 'rm -fr', 'sudo', 'chown', 'kill', 'pkill', 'killall', 'gh', 'npm publish',
-  'pitroom', 'opencode', 'claude', 'codex', 'gemini', 'qwen', 'kilo', 'kilocode', 'agy',
-].map((c) => `Bash(${c}:*)`);
+const DENY_BASH = FORBIDDEN_COMMANDS.map((c) => `Bash(${c}:*)`);
 
 const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/id_rsa*', '**/id_ed25519*'].map((p) => `Read(${p})`);
 

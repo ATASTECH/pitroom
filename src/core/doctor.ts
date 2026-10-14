@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { allBackends, getBackend } from '../backends/index.js';
-import type { DoctorCheck, Target } from '../backends/types.js';
+import type { Backend, DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
 import { guardEnv, shimReady } from '../vcs/guard.js';
 import { pickAuditor } from './audit.js';
@@ -242,10 +242,21 @@ function liveProbe(target: Target): DoctorCheck {
   } catch (e) {
     return { level: 'fail', message: (e as Error).message };
   }
+  // A worker that may write in a read run (`readOnly: 'snapshot'`) is probed in an empty folder, not in the project.
+  const scratch = backend.capabilities.readOnly === 'snapshot' ? fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-probe-')) : undefined;
+  const cwd = scratch ?? process.cwd();
+  try {
+    return probe(backend, target, cwd);
+  } finally {
+    if (scratch) fs.rmSync(scratch, { recursive: true, force: true });
+  }
+}
+
+function probe(backend: Backend, target: Target, cwd: string): DoctorCheck {
   const inv = backend.invocation({
     mode: 'read',
     prompt: 'Reply with exactly: PONG',
-    cwd: process.cwd(),
+    cwd,
     model: target.model,
     files: [],
     web: false,
@@ -257,7 +268,8 @@ function liveProbe(target: Target): DoctorCheck {
     timeout: 300_000,
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
-    env: guardEnv({ ...process.env, ...inv.env, PWD: process.cwd(), PITROOM_ACTIVE: '1' }),
+    cwd,
+    env: guardEnv({ ...process.env, ...inv.env, PWD: cwd, PITROOM_ACTIVE: '1' }),
   });
   const secs = ((Date.now() - t0) / 1000).toFixed(1);
   const run = backend.parse(r.stdout ?? '');

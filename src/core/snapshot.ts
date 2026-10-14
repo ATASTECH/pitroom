@@ -30,11 +30,15 @@ export function wantSnapshot(readIn: ReadIn, root: string | undefined, dir: stri
   return readIn === 'snapshot' || secrets.length ? { secrets } : undefined;
 }
 
-/** The snapshot of the project's current state without secret-looking files; made once per state, then reused. */
-export function readSnapshot(root: string): { dir: string; tree: string; created: boolean } {
+/**
+ * The snapshot of the project's current state without secret-looking files; made once per state, then reused.
+ * With an `owner` (a run id) it is that run's own: a worker that may write in a read run (`readOnly: 'snapshot'`)
+ * never reads, or leaves its writes in, the snapshot other runs share. Its follow-ups read it too.
+ */
+export function readSnapshot(root: string, owner?: string): { dir: string; tree: string; created: boolean } {
   const drop = findSecretFilesInTree(root, root);
   const tree = snapshotTree(root, [], drop);
-  const dest = path.join(snapshotsDir(), tree);
+  const dest = path.join(snapshotsDir(), owner ? `${tree}-${owner}` : tree);
   if (fs.existsSync(path.join(dest, '.git'))) {
     touch(dest);
     return { dir: dest, tree, created: false };

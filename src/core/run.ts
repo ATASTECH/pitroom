@@ -15,6 +15,7 @@ import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { READ_IN, type ReadIn, backToProject, readSnapshot, wantSnapshot } from './snapshot.js';
+import { changedFiles } from '../vcs/git.js';
 import { auditRate, auditTask, auditable, fixTask, focusedRate, pickAuditor, sampled, wantsFix } from './audit.js';
 import { workerRecord } from './history.js';
 import { withinBudget } from './budget.js';
@@ -65,7 +66,7 @@ export interface RunOptions {
   /** This run's own audit chance, 0 to 1: --audit is 1, --no-audit is 0. */
   auditRate?: number;
   /** The answer cache's key, stored on the run so a later identical question finds it (see cache.ts). */
-  cache?: { key: string; state: string };
+  cache?: { key: string; state: string; where?: 'snapshot' | 'project' };
   /** Set by `pitroom review`. */
   review?: { of: string; kind: 'task' | 'fix' | 'range'; packageFile: string; plan?: RunMeta['plan'] };
 }
@@ -149,10 +150,10 @@ export function prepareRun(o: RunOptions): RunMeta {
   for (const f of files) if (!fs.existsSync(f)) throw new UserError(`file not found: ${f}`);
 
   // A read run in a directory with secret-looking files reads a clean snapshot instead (made when it starts).
-  const configured = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
-  // A worker (or fallback) whose CLI cannot be trusted to stay read-only reads a snapshot, whatever readIn says (--in-place still wins).
-  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find((b) => b.capabilities.readOnly === 'snapshot');
-  const readIn: ReadIn = untrusted ? 'snapshot' : configured;
+  const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
+  // A worker (or fallback) whose CLI cannot be trusted to stay read-only gets a snapshot of its own when it runs
+  // (ownSnapshot); where that is not done, say so.
+  const untrusted = [worker, ...fallback].map((t) => getBackend(t.backend)).find(mayWrite);
   const snap = mode === 'read' && !o.review && !o.inPlace && !parent ? wantSnapshot(readIn, root, dir) : undefined;
   if (untrusted && mode === 'read' && !parent && (o.review || o.inPlace || !root)) {
     warnings.push(`this read run is not in a snapshot${root ? '' : ' (not a git repository)'}, and ${untrusted.name} does not reliably stay read-only: it could change files here`);
@@ -287,9 +288,21 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
         writeMeta(meta);
         continue;
       }
+      const cannot = readPlace(meta, backend);
+      if (cannot) {
+        // like a failed attempt that did no work: the next worker runs, and the last one's reason is the run's error
+        if (i === chain.length - 1) {
+          meta.error = cannot;
+          break;
+        }
+        (meta.attempts ??= []).push({ target: describeTarget(target), error: cannot });
+        writeMeta(meta);
+        continue;
+      }
       meta.ran = target;
       writeMeta(meta);
       result = await attempt(meta, backend, target);
+      if (meta.snapshot?.private && mayWrite(backend)) strayWrites(meta, backend);
       if (result.timedOut || result.stopped || result.spawnError) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
@@ -416,21 +429,6 @@ function startFix(target: RunMeta): void {
 
 function prepareTree(meta: RunMeta): void {
   const root = meta.repoRoot;
-  if (root && meta.mode === 'read' && meta.snapshot && !meta.snapshot.dir) {
-    const shown = meta.snapshot.left.slice(0, 3).join(', ') + (meta.snapshot.left.length > 3 ? `, +${meta.snapshot.left.length - 3} more` : '');
-    try {
-      const s = readSnapshot(root);
-      meta.snapshot.dir = s.dir;
-      meta.snapshot.tree = s.tree;
-      meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
-      if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
-      if (shown) meta.warnings.push(`read in a clean snapshot of your project: the secret-looking files (${shown}) and git-ignored files are not in it; --in-place reads the directory itself`);
-    } catch (e) {
-      // not worth failing the run: read the directory, and say what is exposed
-      meta.snapshot = undefined;
-      meta.warnings.push(`could not make a clean snapshot (${(e as Error).message.slice(0, 120)}): the worker reads the directory itself${shown ? `, where secret-looking files sit (${shown})` : ''}`);
-    }
-  }
   if (root && meta.mode === 'write') meta.baseTree = snapshotTree(root);
   if (root && meta.mode === 'isolate' && !meta.worktree) {
     meta.baseTree = snapshotTree(root);
@@ -439,6 +437,67 @@ function prepareTree(meta: RunMeta): void {
     meta.cwd = path.join(meta.worktree, path.relative(root, meta.dir));
     const linked = linkIntoWorktree(root, meta.worktree, meta.link);
     if (linked.length) meta.warnings.push(`linked into the isolated copy (shared with your tree): ${linked.join(', ')}`);
+  }
+}
+
+/** A worker whose CLI may write in a read run: it never reads the project, nor a snapshot another run shares. */
+const mayWrite = (b: Backend): boolean => b.capabilities.readOnly === 'snapshot';
+
+/**
+ * Where a read run's worker reads, settled just before each attempt: the clean snapshot planned for it (secret-looking
+ * files, readIn), made on first use and shared, or, for a worker that may write, a snapshot of the run's own. Returns
+ * why the worker cannot run, if it cannot.
+ */
+function readPlace(meta: RunMeta, backend: Backend): string | undefined {
+  const root = meta.repoRoot;
+  if (!root || meta.mode !== 'read') return undefined;
+  if (mayWrite(backend)) return ownSnapshot(meta, root, backend);
+  if (meta.snapshot && !meta.snapshot.dir) sharedSnapshot(meta, root);
+  return undefined;
+}
+
+function ownSnapshot(meta: RunMeta, root: string, backend: Backend): string | undefined {
+  // its follow-ups read the snapshot it had; --in-place and reviews read the directory (prepareRun warned)
+  if (meta.snapshot?.private || meta.parent || meta.inPlace || meta.reviewOf) return undefined;
+  const left = meta.snapshot?.left ?? [];
+  try {
+    const s = readSnapshot(root, meta.id);
+    meta.snapshot = { dir: s.dir, tree: s.tree, left, private: true };
+    meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
+    if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
+    meta.warnings.push(`${backend.name} reads a snapshot of your project of its own (it does not reliably stay read-only)${left.length ? `; the secret-looking files (${left.slice(0, 3).join(', ')}${left.length > 3 ? ', …' : ''}) and git-ignored files are not in it` : ''}`);
+    return undefined;
+  } catch (e) {
+    return `could not make a snapshot for ${backend.name} (${(e as Error).message.slice(0, 120)}), and it does not reliably stay read-only, so it does not read the project itself`;
+  }
+}
+
+/** What a worker that may write left in its own snapshot: the files git sees changed there. */
+function strayWrites(meta: RunMeta, backend: Backend): void {
+  try {
+    const files = changedFiles(meta.snapshot!.dir);
+    if (!files.length || meta.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION'))) return;
+    const shown = files.slice(0, 5).join(', ') + (files.length > 5 ? `, +${files.length - 5} more` : '');
+    meta.warnings.push(`READ-ONLY VIOLATION: ${backend.name} wrote in its read-only snapshot (your project is untouched): ${shown}`);
+  } catch {
+    // the check is a report, not a guard: the project was never in reach
+  }
+}
+
+function sharedSnapshot(meta: RunMeta, root: string): void {
+  const snapshot = meta.snapshot!;
+  const shown = snapshot.left.slice(0, 3).join(', ') + (snapshot.left.length > 3 ? `, +${snapshot.left.length - 3} more` : '');
+  try {
+    const s = readSnapshot(root);
+    snapshot.dir = s.dir;
+    snapshot.tree = s.tree;
+    meta.cwd = path.join(s.dir, path.relative(root, meta.dir));
+    if (!fs.existsSync(meta.cwd)) meta.cwd = s.dir;
+    if (shown) meta.warnings.push(`read in a clean snapshot of your project: the secret-looking files (${shown}) and git-ignored files are not in it; --in-place reads the directory itself`);
+  } catch (e) {
+    // not worth failing the run: read the directory, and say what is exposed
+    meta.snapshot = undefined;
+    meta.warnings.push(`could not make a clean snapshot (${(e as Error).message.slice(0, 120)}): the worker reads the directory itself${shown ? `, where secret-looking files sit (${shown})` : ''}`);
   }
 }
 
@@ -506,7 +565,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   } catch (e) {
     meta.warnings.push(`could not compute changes: ${(e as Error).message}`);
   }
-  if (meta.mode === 'read' && run.edits.length) {
+  if (meta.mode === 'read' && run.edits.length && !meta.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION'))) {
     meta.warnings.push(`READ-ONLY VIOLATION: worker modified ${[...new Set(run.edits)].join(', ')}`);
   }
   if (meta.sessionId && backend.resolveModel) meta.resolvedModel = backend.resolveModel(meta.sessionId);
@@ -519,6 +578,8 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
     }
   }
 
+  // the cache key says where the worker was expected to read: a run that read elsewhere is not found under it
+  if (meta.cache?.where && meta.cache.where !== (meta.snapshot?.dir ? 'snapshot' : 'project')) meta.cache = undefined;
   meta.state = res.timedOut ? 'timeout' : res.stopped ? 'stopped' : meta.error ? 'failed' : 'done';
   if (meta.auditOf && meta.state === 'done') {
     const found = parseAudit(run.finalText);

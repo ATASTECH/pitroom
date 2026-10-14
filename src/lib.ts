@@ -2,6 +2,8 @@
 // helpers (git guard, slots and locks, secret detection, receipts) the tests call directly. Built to
 // dist/lib.mjs; the adapter contract tests run against it.
 export { allBackends, backendIds, DEFAULT_BACKEND, getBackend } from './backends/index.js';
+export { FORBIDDEN_COMMANDS } from './backends/deny.js';
+export { linkInto, writeIfChanged } from './backends/home.js';
 export type * from './backends/types.js';
 export { describeTarget, formatTarget, parseTarget } from './core/target.js';
 export { extractRefs, verifyRefs } from './core/refs.js';

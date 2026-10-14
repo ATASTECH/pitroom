@@ -8,9 +8,9 @@ var UserError = class extends Error {
 
 // src/backends/antigravity/index.ts
 import { spawnSync } from "node:child_process";
-import fs4 from "node:fs";
+import fs5 from "node:fs";
 import os3 from "node:os";
-import path3 from "node:path";
+import path4 from "node:path";
 
 // src/core/store.ts
 import fs2 from "node:fs";
@@ -130,190 +130,8 @@ function freshMeta(id2) {
   return meta;
 }
 
-// src/backends/exec.ts
-import fs3 from "node:fs";
-import os2 from "node:os";
-import path2 from "node:path";
-function findBinary(name, envVar, known = []) {
-  const override = process.env[envVar];
-  if (override) return override;
-  const exts = process.platform === "win32" ? [".exe", ".cmd", ""] : [""];
-  for (const dir of (process.env.PATH ?? "").split(path2.delimiter).filter(Boolean)) {
-    for (const ext of exts) {
-      const p = path2.join(dir, `${name}${ext}`);
-      if (isFile(p)) return p;
-    }
-  }
-  return known.map((k) => k.replace(/^~/, os2.homedir())).find(isFile) ?? name;
-}
-function isFile(p) {
-  try {
-    return fs3.statSync(p).isFile();
-  } catch {
-    return false;
-  }
-}
-function resolveCommand(bin) {
-  try {
-    const real = fs3.realpathSync(bin);
-    const fd = fs3.openSync(real, "r");
-    const head = Buffer.alloc(128);
-    const n = fs3.readSync(fd, head, 0, 128, 0);
-    fs3.closeSync(fd);
-    const firstLine = head.subarray(0, n).toString("utf8").split("\n")[0] ?? "";
-    if (/^#!.*\bnode\b/.test(firstLine)) return { command: process.execPath, prefix: [real] };
-  } catch {
-  }
-  return { command: bin, prefix: [] };
-}
-
-// src/backends/types.ts
-var MAX_STEPS = 400;
-
-// src/backends/antigravity/events.ts
-var EDIT_TOOLS = /* @__PURE__ */ new Set(["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file"]);
-var SHELL = "run_command";
-var DENIED = /soft-denied|permission|denied|not allowed|blocked|refus|requires approval/i;
-var FAILED = /error|fail|denied|cancel|reject/i;
-var OK = /^(success|succeeded|ok|done|completed?)$/i;
-function parseEvents(jsonl) {
-  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
-  const stepUsage = [];
-  const tools = {};
-  const edits = [];
-  const timeline = [];
-  const said = /* @__PURE__ */ new Map();
-  const stepOf = /* @__PURE__ */ new Map();
-  const toolSeen = /* @__PURE__ */ new Set();
-  const done = /* @__PURE__ */ new Set();
-  let sessionId;
-  let model;
-  let lastText = "";
-  let response;
-  let lastActivity;
-  let error;
-  let haveResultUsage = false;
-  let turns = 0;
-  let inTurn = false;
-  const startTurn = () => {
-    if (!inTurn) turns++;
-    inTurn = true;
-  };
-  for (const line of jsonl.split("\n")) {
-    if (!line.trim()) continue;
-    let e;
-    try {
-      e = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (!e || typeof e !== "object") continue;
-    const type = String(e.type ?? "").toLowerCase();
-    if (type === "init") {
-      sessionId ??= id(e.conversation_id ?? e.session_id);
-      model ??= id(e.model);
-    } else if (type === "step_update") {
-      const s = e.step_update && typeof e.step_update === "object" ? e.step_update : e;
-      sessionId ??= id(s.conversation_id);
-      const kind2 = String(s.step_type ?? "").toLowerCase();
-      const key = String(s.step_index ?? s.step_id ?? `${kind2}-${timeline.length}`);
-      const finished = String(s.state ?? "").toUpperCase() === "DONE";
-      if (kind2 === "agent_response") {
-        startTurn();
-        const text = (said.get(key) ?? "") + str(s.text_delta);
-        said.set(key, text);
-        if (finished && !done.has(key)) {
-          done.add(key);
-          const t = text.trim();
-          if (t) {
-            lastText = t;
-            lastActivity = `says: ${oneLine(t)}`;
-            if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(t, 600) });
-          }
-        }
-      } else if (kind2 === "tool") {
-        const info = s.tool_info && typeof s.tool_info === "object" ? s.tool_info : {};
-        const name = String(info.name ?? info.tool_name ?? s.tool_name ?? "tool");
-        const p = info.parameters ?? info.args ?? info.arguments ?? s.parameters ?? {};
-        if (!toolSeen.has(key)) {
-          toolSeen.add(key);
-          startTurn();
-          lastText = "";
-          usage.toolCalls++;
-          tools[name] = (tools[name] ?? 0) + 1;
-          const target = p.CommandLine ?? p.command ?? p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path ?? p.SearchPath ?? p.Query ?? p.query ?? p.Url ?? p.url;
-          lastActivity = `${name} ${target ? oneLine(String(target), 60) : ""}`.trim();
-          if (timeline.length < MAX_STEPS) {
-            const step = { kind: EDIT_TOOLS.has(name) ? "edit" : name === SHELL ? "shell" : "tool", name, text: clip(String(target ?? ""), 240) };
-            timeline.push(step);
-            stepOf.set(key, step);
-          }
-        }
-        if (finished && !done.has(key)) {
-          done.add(key);
-          inTurn = false;
-          const problem = `${str(info.error?.message ?? info.error)} ${str(info.status ?? s.status)}`.trim();
-          const ok = !problem || OK.test(problem) || !FAILED.test(problem);
-          const step = stepOf.get(key);
-          if (step) step.ok = ok;
-          if (!ok && DENIED.test(`${problem} ${str(info.output)}`)) usage.denied++;
-          const file = p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path;
-          if (ok && EDIT_TOOLS.has(name) && file) edits.push(String(file));
-        }
-      }
-      if (finished && s.usage && typeof s.usage === "object") stepUsage.push(s.usage);
-    } else if (type === "result") {
-      sessionId ??= id(e.conversation_id);
-      model ??= id(e.model);
-      if (typeof e.response === "string") response = e.response.trim();
-      if (e.usage && typeof e.usage === "object") {
-        add(usage, e.usage);
-        haveResultUsage = true;
-      }
-      const status = str(e.status);
-      const message = str(e.error?.message ?? e.error);
-      if (message || status && !OK.test(status)) {
-        error ??= message || (/^waiting$/i.test(status) ? "agy stopped waiting for an approval a headless run cannot give" : `agy ended with status ${status}`);
-      }
-    } else if (type === "error") {
-      error ??= str(e.message ?? e.error?.message ?? e.error) || "Antigravity CLI error";
-    }
-  }
-  if (!haveResultUsage) for (const u of stepUsage) add(usage, u);
-  usage.steps = turns;
-  const finalText = error ? "" : response || lastText;
-  return { sessionId, model, finalText, usage, tools, edits, lastActivity, timeline, error };
-}
-function add(u, r) {
-  const cached3 = num(r.cache_read_tokens ?? r.cached_tokens);
-  const input = num(r.input_tokens);
-  u.cacheRead += cached3;
-  u.input += Math.max(0, input - cached3);
-  u.output += num(r.output_tokens);
-  u.reasoning += num(r.thinking_tokens ?? r.reasoning_tokens);
-  u.total += num(r.total_tokens) || input + num(r.output_tokens) + num(r.thinking_tokens ?? r.reasoning_tokens);
-}
-var id = (v) => typeof v === "string" && v ? v : void 0;
-var str = (v) => typeof v === "string" ? v : v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
-var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-function num(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-function oneLine(s, max = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
-}
-
-// src/backends/antigravity/index.ts
-var binary = () => findBinary("agy", "PITROOM_ANTIGRAVITY_BIN", ["~/.local/bin/agy", "~/.antigravity/bin/agy"]);
-function agy(args, timeout = 3e4) {
-  const { command, prefix } = resolveCommand(binary());
-  const r = spawnSync(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"] });
-  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
-}
-var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path3.join(os3.homedir(), ".gemini", "antigravity-cli");
-var TOKEN = "antigravity-oauth-token";
-var DENY_COMMANDS = [
+// src/backends/deny.ts
+var FORBIDDEN_COMMANDS = [
   "git commit",
   "git push",
   "git pull",
@@ -355,7 +173,255 @@ var DENY_COMMANDS = [
   "kilocode",
   "agy"
 ];
+
+// src/backends/exec.ts
+import fs3 from "node:fs";
+import os2 from "node:os";
+import path2 from "node:path";
+function findBinary(name, envVar, known = []) {
+  const override = process.env[envVar];
+  if (override) return override;
+  const exts = process.platform === "win32" ? [".exe", ".cmd", ""] : [""];
+  for (const dir of (process.env.PATH ?? "").split(path2.delimiter).filter(Boolean)) {
+    for (const ext of exts) {
+      const p = path2.join(dir, `${name}${ext}`);
+      if (isFile(p)) return p;
+    }
+  }
+  return known.map((k) => k.replace(/^~/, os2.homedir())).find(isFile) ?? name;
+}
+function isFile(p) {
+  try {
+    return fs3.statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+function resolveCommand(bin) {
+  try {
+    const real = fs3.realpathSync(bin);
+    const fd = fs3.openSync(real, "r");
+    const head = Buffer.alloc(128);
+    const n = fs3.readSync(fd, head, 0, 128, 0);
+    fs3.closeSync(fd);
+    const firstLine = head.subarray(0, n).toString("utf8").split("\n")[0] ?? "";
+    if (/^#!.*\bnode\b/.test(firstLine)) return { command: process.execPath, prefix: [real] };
+  } catch {
+  }
+  return { command: bin, prefix: [] };
+}
+
+// src/backends/home.ts
+import crypto2 from "node:crypto";
+import fs4 from "node:fs";
+import path3 from "node:path";
+function writeIfChanged(file, body) {
+  try {
+    if (fs4.readFileSync(file, "utf8") === body) return;
+  } catch {
+  }
+  fs4.mkdirSync(path3.dirname(file), { recursive: true });
+  const tmp = `${file}.${process.pid}-${crypto2.randomBytes(3).toString("hex")}.tmp`;
+  fs4.writeFileSync(tmp, body);
+  try {
+    fs4.renameSync(tmp, file);
+  } catch (e) {
+    fs4.rmSync(tmp, { force: true });
+    throw e;
+  }
+}
+function linkInto(dir, from) {
+  const to = path3.join(dir, path3.basename(from));
+  try {
+    let st;
+    try {
+      st = fs4.lstatSync(to);
+    } catch {
+    }
+    if (st && !st.isSymbolicLink()) return;
+    if (st) {
+      if (fs4.readlinkSync(to) === from && fs4.existsSync(from)) return;
+      fs4.unlinkSync(to);
+    }
+    if (fs4.existsSync(from)) fs4.symlinkSync(from, to);
+  } catch {
+  }
+}
+
+// src/backends/types.ts
+var MAX_STEPS = 400;
+
+// src/backends/text.ts
+var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
+function num(v) {
+  return typeof v === "number" && Number.isFinite(v) ? v : 0;
+}
+function oneLine(s, max = 80) {
+  return clip(s.replace(/\s+/g, " ").trim(), max);
+}
+
+// src/backends/antigravity/events.ts
+var EDIT_TOOLS = /* @__PURE__ */ new Set(["write_to_file", "replace_file_content", "multi_replace_file_content", "edit_file", "write_file"]);
+var SHELL = "run_command";
+var DENIED = /soft-denied|permission|denied|not allowed|blocked|refus|requires approval/i;
+var FAILED = /error|fail|denied|cancel|reject/i;
+var OK = /^(success|succeeded|ok|done|completed?)$/i;
+function parseEvents(jsonl) {
+  const usage = { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, total: 0, steps: 0, toolCalls: 0, denied: 0 };
+  const stepUsage = [];
+  const tools = {};
+  const edits = [];
+  const timeline = [];
+  const said = /* @__PURE__ */ new Map();
+  const stepOf = /* @__PURE__ */ new Map();
+  const toolSeen = /* @__PURE__ */ new Set();
+  const done = /* @__PURE__ */ new Set();
+  let sessionId;
+  let model;
+  let lastText = "";
+  let response;
+  let lastActivity;
+  let error;
+  let streamError;
+  let resultSeen = false;
+  let haveResultUsage = false;
+  const open = /* @__PURE__ */ new Map();
+  let unnamed = 0;
+  let turns = 0;
+  let inTurn = false;
+  const startTurn = () => {
+    if (!inTurn) turns++;
+    inTurn = true;
+  };
+  for (const line of jsonl.split("\n")) {
+    if (!line.trim()) continue;
+    let e;
+    try {
+      e = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!e || typeof e !== "object") continue;
+    const type = String(e.type ?? "").toLowerCase();
+    if (type === "init") {
+      sessionId ??= id(e.conversation_id ?? e.session_id);
+      model ??= id(e.model);
+    } else if (type === "step_update") {
+      const s = e.step_update && typeof e.step_update === "object" ? e.step_update : e;
+      sessionId ??= id(s.conversation_id);
+      const kind2 = String(s.step_type ?? "").toLowerCase();
+      const finished = String(s.state ?? "").toUpperCase() === "DONE";
+      let key = s.step_index ?? s.step_id;
+      if (key === void 0 || key === null) {
+        key = open.get(kind2) ?? `${kind2}#${unnamed++}`;
+        if (finished) open.delete(kind2);
+        else open.set(kind2, key);
+      }
+      key = String(key);
+      if (kind2 === "agent_response") {
+        startTurn();
+        const text = (said.get(key) ?? "") + str(s.text_delta);
+        said.set(key, text);
+        if (finished && !done.has(key)) {
+          done.add(key);
+          const t = text.trim();
+          if (t) {
+            lastText = t;
+            lastActivity = `says: ${oneLine(t)}`;
+            if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(t, 600) });
+          }
+        }
+      } else if (kind2 === "tool") {
+        const info = s.tool_info && typeof s.tool_info === "object" ? s.tool_info : {};
+        const name = String(info.name ?? info.tool_name ?? s.tool_name ?? "tool");
+        const p = info.parameters ?? info.args ?? info.arguments ?? s.parameters ?? {};
+        if (!toolSeen.has(key)) {
+          toolSeen.add(key);
+          startTurn();
+          lastText = "";
+          usage.toolCalls++;
+          tools[name] = (tools[name] ?? 0) + 1;
+          const target = p.CommandLine ?? p.command ?? p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path ?? p.SearchPath ?? p.Query ?? p.query ?? p.Url ?? p.url;
+          lastActivity = `${name} ${target ? oneLine(String(target), 60) : ""}`.trim();
+          if (timeline.length < MAX_STEPS) {
+            const step = { kind: EDIT_TOOLS.has(name) ? "edit" : name === SHELL ? "shell" : "tool", name, text: clip(String(target ?? ""), 240) };
+            timeline.push(step);
+            stepOf.set(key, step);
+          }
+        }
+        if (finished && !done.has(key)) {
+          done.add(key);
+          inTurn = false;
+          const problem = `${errText(info.error)} ${str(info.status ?? s.status)}`.trim();
+          const ok = !problem || OK.test(problem) || !FAILED.test(problem);
+          const step = stepOf.get(key);
+          if (step) step.ok = ok;
+          if (!ok && DENIED.test(`${problem} ${str(info.output)}`)) usage.denied++;
+          const file = p.TargetFile ?? p.AbsolutePath ?? p.file_path ?? p.path;
+          if (ok && EDIT_TOOLS.has(name) && file) edits.push(String(file));
+        }
+      }
+      if (finished && s.usage && typeof s.usage === "object") stepUsage.push(s.usage);
+    } else if (type === "result") {
+      sessionId ??= id(e.conversation_id);
+      model ??= id(e.model);
+      if (typeof e.response === "string") response = e.response.trim();
+      if (e.usage && typeof e.usage === "object") {
+        add(usage, e.usage);
+        haveResultUsage = true;
+      }
+      resultSeen = true;
+      const status = str(e.status);
+      const message = errText(e.error);
+      if (status ? !OK.test(status) : !!message) {
+        error ??= message || (/^waiting$/i.test(status) ? "agy stopped waiting for an approval a headless run cannot give" : `agy ended with status ${status}`);
+      }
+    } else if (type === "error") {
+      streamError ??= errText(e) || errText(e.error) || "Antigravity CLI error";
+    }
+  }
+  if (streamError && (!resultSeen || !response)) error ??= streamError;
+  if (!haveResultUsage) for (const u of stepUsage) add(usage, u);
+  usage.steps = turns;
+  const finalText = error ? "" : response || lastText;
+  return { sessionId, model, finalText, usage, tools, edits, lastActivity, timeline, error };
+}
+function add(u, r) {
+  const cached3 = num(r.cache_read_tokens ?? r.cached_tokens);
+  const input = num(r.input_tokens);
+  u.cacheRead += cached3;
+  u.input += Math.max(0, input - cached3);
+  u.output += num(r.output_tokens);
+  u.reasoning += num(r.thinking_tokens ?? r.reasoning_tokens);
+  u.total += num(r.total_tokens) || input + num(r.output_tokens) + num(r.thinking_tokens ?? r.reasoning_tokens);
+}
+var id = (v) => typeof v === "string" && v ? v : void 0;
+var errText = (v) => typeof v === "string" ? v : typeof v?.message === "string" ? v.message : "";
+var str = (v) => typeof v === "string" ? v : v === void 0 || v === null ? "" : typeof v === "object" ? JSON.stringify(v) : String(v);
+
+// src/backends/antigravity/index.ts
+var binary = () => findBinary("agy", "PITROOM_ANTIGRAVITY_BIN", ["~/.local/bin/agy", "~/.antigravity/bin/agy"]);
+function agy(args, timeout = 3e4) {
+  const { command, prefix } = resolveCommand(binary());
+  const r = spawnSync(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"] });
+  return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
+}
+var userDir = () => process.env.ANTIGRAVITY_APP_DATA_DIR || path4.join(os3.homedir(), ".gemini", "antigravity-cli");
+var TOKEN = "antigravity-oauth-token";
 var escape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var words = (c) => escape(c).replace(/ /g, "\\s+");
+var START = "(^|[;&|(`\\n]|\\$\\()\\s*((\\w+=\\S*|env|command|exec|nohup|time|nice|xargs)\\s+)*";
+var END = "(\\s|$|[;&|)`])";
+function denyCommandRules() {
+  return [
+    `command(regex:${START}(${FORBIDDEN_COMMANDS.map(words).join("|")})${END})`,
+    // git by path would bypass the git guard's PATH shim; -C, -c, --git-dir and --work-tree point it elsewhere
+    `command(regex:${START}(\\S*[\\\\/])?git\\s+(-C|-c|--git-dir|--work-tree)\\b)`,
+    `command(regex:${START}\\S*[\\\\/]git${END})`,
+    // a command inside a string is not matched above
+    `command(regex:${START}((ba|z|da|k)?sh|eval)\\s+(-\\w*c\\b|['"])|${START}eval${END})`
+  ];
+}
 function workerSettings() {
   return {
     // Shell commands run in agy's terminal sandbox without asking: a headless run cannot answer, and a command
@@ -369,9 +435,7 @@ function workerSettings() {
       deny: [
         // A denied read also denies the write of the same path.
         "read_file(regex:(^|[\\\\/])\\.env($|\\.)|[^\\\\/]\\.env$|\\.(pem|p12|pfx|key)$|(^|[\\\\/])id_(rsa|ed25519|ecdsa|dsa)|(^|[\\\\/])\\.netrc$)",
-        `command(regex:^\\s*(${DENY_COMMANDS.map(escape).join("|")})(\\s|$))`,
-        // git by path would bypass the git guard's PATH shim
-        "command(regex:^\\s*\\S*[\\\\/]git(\\s|$))",
+        ...denyCommandRules(),
         "mcp(regex:.*)",
         // No web for agy workers: the rule is in the shared settings file, so --web cannot switch it on per run.
         "read_url(regex:.*)"
@@ -380,25 +444,10 @@ function workerSettings() {
   };
 }
 function workerDir() {
-  const dir = path3.join(home(), "antigravity-home");
-  const file = path3.join(dir, "settings.json");
-  const body = `${JSON.stringify(workerSettings(), null, 2)}
-`;
-  let same = false;
-  try {
-    same = fs4.readFileSync(file, "utf8") === body;
-  } catch {
-  }
-  if (!same) {
-    fs4.mkdirSync(dir, { recursive: true });
-    fs4.writeFileSync(file, body);
-  }
-  const from = path3.join(userDir(), TOKEN);
-  const to = path3.join(dir, TOKEN);
-  try {
-    if (fs4.existsSync(from) && !fs4.existsSync(to)) fs4.symlinkSync(from, to);
-  } catch {
-  }
+  const dir = path4.join(home(), "antigravity-home");
+  writeIfChanged(path4.join(dir, "settings.json"), `${JSON.stringify(workerSettings(), null, 2)}
+`);
+  linkInto(dir, path4.join(userDir(), TOKEN));
   return dir;
 }
 function invocation(req) {
@@ -475,7 +524,7 @@ function doctor({ models, hasFallback }) {
   if (process.platform === "win32") {
     checks.push({ level: "warn", message: "agy's permission rules and terminal sandbox are for macOS and Linux; on Windows run the Antigravity worker only with -i (an isolated copy)" });
   }
-  if (process.platform === "linux" && !fs4.existsSync(path3.join(userDir(), TOKEN))) {
+  if (process.platform === "linux" && !fs5.existsSync(path4.join(userDir(), TOKEN))) {
     checks.push({ level: "warn", message: "no Antigravity sign-in file found: if a run fails to sign in, run `agy` once and sign in with your Google account" });
   }
   for (const m of models) checks.push({ level: "ok", message: m ? `Antigravity model: ${m}` : "Antigravity model: agy's own choice (`agy models` lists yours)" });
@@ -496,9 +545,9 @@ var antigravity = {
 
 // src/backends/claude/index.ts
 import { spawnSync as spawnSync2 } from "node:child_process";
-import fs5 from "node:fs";
+import fs6 from "node:fs";
 import os4 from "node:os";
-import path4 from "node:path";
+import path5 from "node:path";
 
 // src/backends/claude/events.ts
 var EDIT_TOOLS2 = /* @__PURE__ */ new Set(["Edit", "Write", "MultiEdit", "NotebookEdit"]);
@@ -549,16 +598,16 @@ function parseEvents2(jsonl) {
       for (const c of content) {
         if (c.type === "text" && String(c.text ?? "").trim()) {
           lastText = String(c.text).trim();
-          lastActivity = `says: ${oneLine2(lastText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip2(lastText, 600) });
+          lastActivity = `says: ${oneLine(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(lastText, 600) });
         } else if (c.type === "tool_use") {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
-          lastActivity = `${c.name} ${target ? oneLine2(String(target), 60) : ""}`.trim();
+          lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ""}`.trim();
           if (EDIT_TOOLS2.has(c.name) && c.input?.file_path) pendingEdits.set(c.id, String(c.input.file_path));
           if (timeline.length < MAX_STEPS) {
-            const step = { kind: EDIT_TOOLS2.has(c.name) ? "edit" : c.name === "Bash" ? "shell" : "tool", name: c.name, text: clip2(String(target ?? ""), 240) };
+            const step = { kind: EDIT_TOOLS2.has(c.name) ? "edit" : c.name === "Bash" ? "shell" : "tool", name: c.name, text: clip(String(target ?? ""), 240) };
             timeline.push(step);
             stepOf.set(String(c.id), step);
           }
@@ -578,13 +627,13 @@ function parseEvents2(jsonl) {
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += num2(u.input_tokens);
-      usage.cacheRead += num2(u.cache_read_input_tokens);
-      usage.cacheWrite += num2(u.cache_creation_input_tokens);
-      usage.reasoning += num2(u.output_tokens_details?.thinking_tokens);
-      usage.output += Math.max(0, num2(u.output_tokens) - num2(u.output_tokens_details?.thinking_tokens));
-      usage.total += num2(u.input_tokens) + num2(u.cache_read_input_tokens) + num2(u.cache_creation_input_tokens) + num2(u.output_tokens);
-      usage.cost = (usage.cost ?? 0) + num2(e.total_cost_usd);
+      usage.input += num(u.input_tokens);
+      usage.cacheRead += num(u.cache_read_input_tokens);
+      usage.cacheWrite += num(u.cache_creation_input_tokens);
+      usage.reasoning += num(u.output_tokens_details?.thinking_tokens);
+      usage.output += Math.max(0, num(u.output_tokens) - num(u.output_tokens_details?.thinking_tokens));
+      usage.total += num(u.input_tokens) + num(u.cache_read_input_tokens) + num(u.cache_creation_input_tokens) + num(u.output_tokens);
+      usage.cost = (usage.cost ?? 0) + num(e.total_cost_usd);
       usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         const tags = [e.terminal_reason, e.api_error_status && `HTTP ${e.api_error_status}`].filter(Boolean);
@@ -596,14 +645,6 @@ function parseEvents2(jsonl) {
   }
   usage.steps = steps.size;
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
-}
-var clip2 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-function num2(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-function oneLine2(s, max = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 
 // src/backends/claude/index.ts
@@ -621,48 +662,7 @@ function cl(args, timeout = 6e4) {
 var READ_TOOLS = ["Read", "Grep", "Glob"];
 var WRITE_TOOLS = [...READ_TOOLS, "Edit", "Write", "Bash"];
 var WEB_TOOLS = ["WebFetch", "WebSearch"];
-var DENY_BASH = [
-  "git commit",
-  "git push",
-  "git pull",
-  "git reset",
-  "git checkout",
-  "git restore",
-  "git clean",
-  "git stash",
-  "git rebase",
-  "git merge",
-  "git switch",
-  "git branch",
-  "git tag",
-  "git rm",
-  "git worktree",
-  "git update-ref",
-  "git config",
-  "git remote",
-  "git cherry-pick",
-  "git revert",
-  "git am",
-  "git add",
-  "rm -rf",
-  "rm -fr",
-  "sudo",
-  "chown",
-  "kill",
-  "pkill",
-  "killall",
-  "gh",
-  "npm publish",
-  "pitroom",
-  "opencode",
-  "claude",
-  "codex",
-  "gemini",
-  "qwen",
-  "kilo",
-  "kilocode",
-  "agy"
-].map((c) => `Bash(${c}:*)`);
+var DENY_BASH = FORBIDDEN_COMMANDS.map((c) => `Bash(${c}:*)`);
 var SECRETS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "**/id_ed25519*"].map((p) => `Read(${p})`);
 function toolsFor(mode, web2) {
   return [...mode === "read" ? READ_TOOLS : WRITE_TOOLS, ...web2 ? WEB_TOOLS : []];
@@ -714,7 +714,7 @@ function failure2(run, stderr, exitCode) {
 }
 function defaultModel() {
   try {
-    const settings2 = JSON.parse(fs5.readFileSync(path4.join(os4.homedir(), ".claude", "settings.json"), "utf8"));
+    const settings2 = JSON.parse(fs6.readFileSync(path5.join(os4.homedir(), ".claude", "settings.json"), "utf8"));
     return typeof settings2.model === "string" ? settings2.model : void 0;
   } catch {
     return void 0;
@@ -767,9 +767,9 @@ var claude = {
 
 // src/backends/codex/index.ts
 import { spawnSync as spawnSync3 } from "node:child_process";
-import fs6 from "node:fs";
+import fs7 from "node:fs";
 import os5 from "node:os";
-import path5 from "node:path";
+import path6 from "node:path";
 
 // src/backends/codex/events.ts
 var WORK = /* @__PURE__ */ new Set(["agent_message", "reasoning", "command_execution", "file_change", "mcp_tool_call", "web_search", "todo_list"]);
@@ -815,31 +815,31 @@ function parseEvents3(jsonl) {
         }
         if (it.type === "agent_message" && String(it.text ?? "").trim()) {
           finalText = String(it.text).trim();
-          lastActivity = `says: ${oneLine3(finalText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip3(finalText, 600) });
+          lastActivity = `says: ${oneLine(finalText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(finalText, 600) });
         } else if (it.type === "command_execution") {
           if (it.status === "declined" || /operation not permitted|sandbox/i.test(String(it.aggregated_output ?? ""))) usage.denied++;
-          lastActivity = `shell ${oneLine3(String(it.command ?? ""), 60)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "shell", name: "shell", text: clip3(String(it.command ?? "").replace(/^\/bin\/\w+ -lc /, ""), 240), ok: it.exit_code === 0 });
+          lastActivity = `shell ${oneLine(String(it.command ?? ""), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "shell", name: "shell", text: clip(String(it.command ?? "").replace(/^\/bin\/\w+ -lc /, ""), 240), ok: it.exit_code === 0 });
         } else if (it.type === "file_change") {
           const paths = (it.changes ?? []).map((c) => String(c.path));
           if (it.status !== "failed" && it.status !== "declined") edits.push(...paths);
           else usage.denied++;
-          lastActivity = `edit ${oneLine3(paths.join(", "), 60)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "edit", name: "edit", text: clip3(paths.join(", "), 240), ok: it.status !== "failed" && it.status !== "declined" });
+          lastActivity = `edit ${oneLine(paths.join(", "), 60)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "edit", name: "edit", text: clip(paths.join(", "), 240), ok: it.status !== "failed" && it.status !== "declined" });
         }
         break;
       }
       case "turn.completed": {
         const u = e.usage ?? {};
-        const cached3 = num3(u.cached_input_tokens);
-        const reasoning = num3(u.reasoning_output_tokens);
-        usage.input += Math.max(0, num3(u.input_tokens) - cached3);
+        const cached3 = num(u.cached_input_tokens);
+        const reasoning = num(u.reasoning_output_tokens);
+        usage.input += Math.max(0, num(u.input_tokens) - cached3);
         usage.cacheRead += cached3;
-        usage.cacheWrite += num3(u.cache_write_input_tokens);
-        usage.output += Math.max(0, num3(u.output_tokens) - reasoning);
+        usage.cacheWrite += num(u.cache_write_input_tokens);
+        usage.output += Math.max(0, num(u.output_tokens) - reasoning);
         usage.reasoning += reasoning;
-        usage.total += num3(u.input_tokens) + num3(u.output_tokens);
+        usage.total += num(u.input_tokens) + num(u.output_tokens);
         break;
       }
       case "error":
@@ -863,18 +863,10 @@ function describe(raw) {
     return s;
   }
 }
-function num3(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-function oneLine3(s, max = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
-}
-var clip3 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 
 // src/backends/codex/index.ts
 var binary3 = () => findBinary("codex", "PITROOM_CODEX_BIN");
-var codexHome = () => process.env.CODEX_HOME ?? path5.join(os5.homedir(), ".codex");
+var codexHome = () => process.env.CODEX_HOME ?? path6.join(os5.homedir(), ".codex");
 function cx(args, timeout = 6e4) {
   const { command, prefix } = resolveCommand(binary3());
   const r = spawnSync3(command, [...prefix, ...args], {
@@ -928,18 +920,18 @@ function failure3(run, stderr, exitCode) {
   return { kind: classify3(message), message };
 }
 function resolveModel(sessionId) {
-  const root = path5.join(codexHome(), "sessions");
-  const day = (d) => path5.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0"));
+  const root = path6.join(codexHome(), "sessions");
+  const day = (d) => path6.join(root, String(d.getFullYear()), String(d.getMonth() + 1).padStart(2, "0"), String(d.getDate()).padStart(2, "0"));
   const now = /* @__PURE__ */ new Date();
   for (const dir of [day(now), day(new Date(now.getTime() - 864e5))]) {
     let files = [];
     try {
-      files = fs6.readdirSync(dir).filter((f) => f.includes(sessionId));
+      files = fs7.readdirSync(dir).filter((f) => f.includes(sessionId));
     } catch {
       continue;
     }
     for (const f of files) {
-      const m = /"model":"([^"]+)"/.exec(fs6.readFileSync(path5.join(dir, f), "utf8"));
+      const m = /"model":"([^"]+)"/.exec(fs7.readFileSync(path6.join(dir, f), "utf8"));
       if (m) return m[1];
     }
   }
@@ -966,9 +958,9 @@ function doctor3({ models, hasFallback }) {
   return checks;
 }
 function catalog2() {
-  const file = path5.join(codexHome(), "models_cache.json");
+  const file = path6.join(codexHome(), "models_cache.json");
   try {
-    const raw = JSON.parse(fs6.readFileSync(file, "utf8"));
+    const raw = JSON.parse(fs7.readFileSync(file, "utf8"));
     const models = (raw.models ?? []).filter((m) => m.visibility !== "hide" && typeof m.slug === "string").map((m) => ({
       id: m.slug,
       efforts: (m.supported_reasoning_levels ?? []).map(
@@ -996,9 +988,9 @@ var codex = {
 
 // src/backends/gemini/index.ts
 import { spawnSync as spawnSync4 } from "node:child_process";
-import fs7 from "node:fs";
+import fs8 from "node:fs";
 import os6 from "node:os";
-import path6 from "node:path";
+import path7 from "node:path";
 import { fileURLToPath } from "node:url";
 
 // src/backends/gemini/events.ts
@@ -1034,8 +1026,8 @@ function parseEvents4(jsonl) {
     text = "";
     if (!said) return;
     lastText = said;
-    lastActivity = `says: ${oneLine4(said)}`;
-    if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip4(said, 600) });
+    lastActivity = `says: ${oneLine(said)}`;
+    if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(said, 600) });
   };
   const startTurn = () => {
     if (!inTurn) turns++;
@@ -1067,11 +1059,11 @@ function parseEvents4(jsonl) {
       usage.toolCalls++;
       tools[name] = (tools[name] ?? 0) + 1;
       const target = p.file_path ?? p.absolute_path ?? p.path ?? p.dir_path ?? p.pattern ?? p.command ?? p.query ?? p.url ?? p.prompt;
-      lastActivity = `${name} ${target ? oneLine4(String(target), 60) : ""}`.trim();
+      lastActivity = `${name} ${target ? oneLine(String(target), 60) : ""}`.trim();
       const file = p.file_path ?? p.absolute_path ?? p.path;
       if (EDIT_TOOLS3.has(name) && file) pendingEdits.set(String(e.tool_id), String(file));
       if (timeline.length < MAX_STEPS) {
-        const step = { kind: EDIT_TOOLS3.has(name) ? "edit" : name === "run_shell_command" ? "shell" : "tool", name, text: clip4(String(target ?? ""), 240) };
+        const step = { kind: EDIT_TOOLS3.has(name) ? "edit" : name === "run_shell_command" ? "shell" : "tool", name, text: clip(String(target ?? ""), 240) };
         timeline.push(step);
         stepOf.set(String(e.tool_id), step);
       }
@@ -1086,12 +1078,12 @@ function parseEvents4(jsonl) {
       if (e.severity === "error") error ??= String(e.message ?? "Gemini CLI error");
     } else if (e.type === "result") {
       const s = e.stats ?? {};
-      const cached3 = num4(s.cached);
+      const cached3 = num(s.cached);
       usage.cacheRead += cached3;
-      usage.input += s.input !== void 0 ? num4(s.input) : Math.max(0, num4(s.input_tokens) - cached3);
-      usage.output += num4(s.output_tokens);
-      usage.total += num4(s.total_tokens) || num4(s.input_tokens) + num4(s.output_tokens);
-      usage.toolCalls = Math.max(usage.toolCalls, num4(s.tool_calls));
+      usage.input += s.input !== void 0 ? num(s.input) : Math.max(0, num(s.input_tokens) - cached3);
+      usage.output += num(s.output_tokens);
+      usage.total += num(s.total_tokens) || num(s.input_tokens) + num(s.output_tokens);
+      usage.toolCalls = Math.max(usage.toolCalls, num(s.tool_calls));
       model ??= Object.keys(s.models ?? {})[0];
       if (e.status === "error") error ??= String(e.error?.message ?? e.error?.type ?? "Gemini CLI error");
     }
@@ -1099,14 +1091,6 @@ function parseEvents4(jsonl) {
   flush();
   usage.steps = turns;
   return { sessionId, model, finalText: error ? "" : lastText, usage, tools, edits, lastActivity, timeline, error };
-}
-var clip4 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-function num4(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-function oneLine4(s, max = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
 }
 
 // src/backends/gemini/index.ts
@@ -1121,29 +1105,16 @@ function gem(args, timeout = 6e4) {
   });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var policyDir = () => path6.resolve(path6.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
+var policyDir = () => path7.resolve(path7.dirname(fileURLToPath(import.meta.url)), "..", "policies", "gemini");
 function workerHome() {
-  const root = path6.join(home(), "gemini-home");
-  const dir = path6.join(root, ".gemini");
-  const base = JSON.parse(fs7.readFileSync(path6.join(policyDir(), "worker-settings.json"), "utf8"));
+  const root = path7.join(home(), "gemini-home");
+  const dir = path7.join(root, ".gemini");
+  const base = JSON.parse(fs8.readFileSync(path7.join(policyDir(), "worker-settings.json"), "utf8"));
   const auth = settings().security?.auth;
   const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}
 `;
-  const file = path6.join(dir, "settings.json");
-  try {
-    if (fs7.readFileSync(file, "utf8") === body) return root;
-  } catch {
-  }
-  fs7.mkdirSync(dir, { recursive: true });
-  fs7.writeFileSync(file, body);
-  for (const name of ["oauth_creds.json", "google_accounts.json"]) {
-    const from = path6.join(geminiHome(), name);
-    const to = path6.join(dir, name);
-    try {
-      if (fs7.existsSync(from) && !fs7.existsSync(to)) fs7.symlinkSync(from, to);
-    } catch {
-    }
-  }
+  writeIfChanged(path7.join(dir, "settings.json"), body);
+  for (const name of ["oauth_creds.json", "google_accounts.json"]) linkInto(dir, path7.join(geminiHome(), name));
   return root;
 }
 function invocation4(req) {
@@ -1160,15 +1131,15 @@ function invocation4(req) {
     "-e",
     "none"
   ];
-  for (const p of policies) args.push("--policy", path6.join(dir, p));
+  for (const p of policies) args.push("--policy", path7.join(dir, p));
   if (req.sessionId) args.push("--resume", req.sessionId);
   if (process.env.PITROOM_GEMINI_TRUST === "1") args.push("--skip-trust");
   const [model] = (req.model ?? "").split("#");
   if (model) args.push("--model", model);
   const { command, prefix } = resolveCommand(binary4());
   const env = { GEMINI_CLI_HOME: workerHome() };
-  const trusted = path6.join(geminiHome(), "trustedFolders.json");
-  if (fs7.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
+  const trusted = path7.join(geminiHome(), "trustedFolders.json");
+  if (fs8.existsSync(trusted)) env.GEMINI_CLI_TRUSTED_FOLDERS_PATH = trusted;
   return { command, args: [...prefix, ...args], env };
 }
 function classify4(message) {
@@ -1189,11 +1160,11 @@ function failure4(run, stderr, exitCode) {
   return { kind: classify4(message), message };
 }
 function geminiHome() {
-  return path6.join(process.env.GEMINI_CLI_HOME ?? os6.homedir(), ".gemini");
+  return path7.join(process.env.GEMINI_CLI_HOME ?? os6.homedir(), ".gemini");
 }
 function settings() {
   try {
-    return JSON.parse(fs7.readFileSync(path6.join(geminiHome(), "settings.json"), "utf8"));
+    return JSON.parse(fs8.readFileSync(path7.join(geminiHome(), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -1212,7 +1183,7 @@ function doctor4({ models, hasFallback }) {
   const checks = [{ level: "ok", message: `Gemini CLI ${version.out.trim()} at ${binary4()}` }];
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
   const vertex = process.env.GOOGLE_GENAI_USE_VERTEXAI === "true" || process.env.GOOGLE_GENAI_USE_VERTEXAI === "1";
-  const signedIn = fs7.existsSync(path6.join(geminiHome(), "oauth_creds.json"));
+  const signedIn = fs8.existsSync(path7.join(geminiHome(), "oauth_creds.json"));
   const type = settings().security?.auth?.selectedType;
   if (key || vertex) {
     checks.push({ level: "ok", message: `Gemini CLI: ${key ? "an API key is set" : "Vertex AI is set up"}` });
@@ -1260,7 +1231,7 @@ var gemini = {
 
 // src/backends/kilo/index.ts
 import { spawnSync as spawnSync6 } from "node:child_process";
-import path8 from "node:path";
+import path9 from "node:path";
 
 // src/backends/opencode/index.ts
 import { spawnSync as spawnSync5 } from "node:child_process";
@@ -1305,8 +1276,8 @@ function parseEvents5(ndjson) {
         const key = String(p.messageID ?? "");
         if (!textByMessage.has(key)) textByMessage.set(key, []);
         textByMessage.get(key).push(text);
-        lastActivity = `says: ${oneLine5(text)}`;
-        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip5(text.trim(), 600), at: stamp(e.timestamp) });
+        lastActivity = `says: ${oneLine(text)}`;
+        if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(text.trim(), 600), at: stamp(e.timestamp) });
         break;
       }
       case "tool_use": {
@@ -1322,20 +1293,20 @@ function parseEvents5(ndjson) {
         if (timeline.length < MAX_STEPS) {
           const kind2 = EDIT_TOOLS4.has(name) ? "edit" : /^(bash|shell)$/.test(name) ? "shell" : "tool";
           const text = kind2 === "shell" ? String(st.input?.command ?? "") : String(st.input?.filePath ?? st.input?.path ?? st.input?.pattern ?? st.input?.url ?? "") || describe2(st.input);
-          timeline.push({ kind: kind2, name, text: clip5(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
+          timeline.push({ kind: kind2, name, text: clip(text, 240), ok: st.status === "completed" ? true : st.status === "error" ? false : void 0, at: stamp(e.timestamp) });
         }
         break;
       }
       case "step_finish": {
         const t = p.tokens ?? {};
         usage.steps++;
-        usage.input += num5(t.input);
-        usage.output += num5(t.output);
-        usage.reasoning += num5(t.reasoning);
-        usage.cacheRead += num5(t.cache?.read);
-        usage.cacheWrite += num5(t.cache?.write);
-        usage.total += num5(t.total) || num5(t.input) + num5(t.output) + num5(t.reasoning) + num5(t.cache?.read);
-        usage.cost = (usage.cost ?? 0) + num5(p.cost);
+        usage.input += num(t.input);
+        usage.output += num(t.output);
+        usage.reasoning += num(t.reasoning);
+        usage.cacheRead += num(t.cache?.read);
+        usage.cacheWrite += num(t.cache?.write);
+        usage.total += num(t.total) || num(t.input) + num(t.output) + num(t.reasoning) + num(t.cache?.read);
+        usage.cost = (usage.cost ?? 0) + num(p.cost);
         break;
       }
       case "error": {
@@ -1359,25 +1330,17 @@ function describeError(err) {
   const tags = [err.type, inner, err.status && `HTTP ${err.status}`].filter(Boolean);
   return tags.length ? `${message} [${tags.join(", ")}]` : message;
 }
-var clip5 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
 var stamp = (v) => typeof v === "number" && Number.isFinite(v) ? v : void 0;
-function num5(v) {
-  return typeof v === "number" && Number.isFinite(v) ? v : 0;
-}
-function oneLine5(s, max = 80) {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
-}
 function describe2(input) {
   if (!input || typeof input !== "object") return "";
   const v = input.filePath ?? input.path ?? input.pattern ?? input.command ?? input.url ?? input.query;
-  return v ? oneLine5(String(v), 60) : "";
+  return v ? oneLine(String(v), 60) : "";
 }
 
 // src/backends/opencode/profiles.ts
-import fs8 from "node:fs";
+import fs9 from "node:fs";
 import os7 from "node:os";
-import path7 from "node:path";
+import path8 from "node:path";
 var AGENT = { read: "pitroom-read", write: "pitroom-write" };
 var READ_FILES = {
   "*": "allow",
@@ -1478,18 +1441,18 @@ var FORBIDDEN_BASH = [
   "*pitroom*"
 ];
 function scratchDirs(app) {
-  const data = process.env.XDG_DATA_HOME ?? path7.join(os7.homedir(), ".local", "share");
+  const data = process.env.XDG_DATA_HOME ?? path8.join(os7.homedir(), ".local", "share");
   const rules = {
     "*": "deny",
-    [path7.join(data, app, "tool-output", "*")]: "allow",
-    [path7.join(data, app, "shell", "*", "*")]: "allow"
+    [path8.join(data, app, "tool-output", "*")]: "allow",
+    [path8.join(data, app, "shell", "*", "*")]: "allow"
   };
-  for (const tmp of /* @__PURE__ */ new Set([os7.tmpdir(), realpath(os7.tmpdir())])) rules[path7.join(tmp, app, "*")] = "allow";
+  for (const tmp of /* @__PURE__ */ new Set([os7.tmpdir(), realpath(os7.tmpdir())])) rules[path8.join(tmp, app, "*")] = "allow";
   return rules;
 }
 function realpath(p) {
   try {
-    return fs8.realpathSync(p);
+    return fs9.realpathSync(p);
   } catch {
     return p;
   }
@@ -1763,7 +1726,7 @@ function invocation6(req) {
       // A worker run must not upgrade Kilo underneath the user.
       KILO_CONFIG_CONTENT: configContent(process.env.KILO_CONFIG_CONTENT, req.web, "kilo", { autoupdate: false }),
       // No daemon to attach to: a private server per run (see above).
-      XDG_STATE_HOME: path8.join(home(), "kilo-state")
+      XDG_STATE_HOME: path9.join(home(), "kilo-state")
     }
   };
 }
@@ -1820,9 +1783,9 @@ var kiloBackend = {
 
 // src/backends/qwen/index.ts
 import { spawnSync as spawnSync7 } from "node:child_process";
-import fs9 from "node:fs";
+import fs10 from "node:fs";
 import os8 from "node:os";
-import path9 from "node:path";
+import path10 from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // src/backends/qwen/events.ts
@@ -1867,16 +1830,16 @@ function parseEvents6(jsonl) {
       for (const c of content) {
         if (c.type === "text" && String(c.text ?? "").trim()) {
           lastText = String(c.text).trim();
-          lastActivity = `says: ${oneLine6(lastText)}`;
-          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip6(lastText, 600) });
+          lastActivity = `says: ${oneLine(lastText)}`;
+          if (timeline.length < MAX_STEPS) timeline.push({ kind: "say", text: clip(lastText, 600) });
         } else if (c.type === "tool_use") {
           usage.toolCalls++;
           tools[c.name] = (tools[c.name] ?? 0) + 1;
           const target = c.input?.file_path ?? c.input?.path ?? c.input?.pattern ?? c.input?.command ?? c.input?.url;
-          lastActivity = `${c.name} ${target ? oneLine6(String(target), 60) : ""}`.trim();
+          lastActivity = `${c.name} ${target ? oneLine(String(target), 60) : ""}`.trim();
           if (EDIT_TOOLS5.has(c.name) && c.input?.file_path) pendingEdits.set(String(c.id), String(c.input.file_path));
           if (timeline.length < MAX_STEPS) {
-            const step = { kind: EDIT_TOOLS5.has(c.name) ? "edit" : c.name === SHELL2 ? "shell" : "tool", name: c.name, text: clip6(String(target ?? ""), 240) };
+            const step = { kind: EDIT_TOOLS5.has(c.name) ? "edit" : c.name === SHELL2 ? "shell" : "tool", name: c.name, text: clip(String(target ?? ""), 240) };
             timeline.push(step);
             stepOf.set(String(c.id), step);
           }
@@ -1896,10 +1859,10 @@ function parseEvents6(jsonl) {
       }
     } else if (e.type === "result") {
       const u = e.usage ?? {};
-      usage.input += Math.max(0, num6(u.input_tokens) - num6(u.cache_read_input_tokens));
-      usage.cacheRead += num6(u.cache_read_input_tokens);
-      usage.output += num6(u.output_tokens);
-      usage.total += num6(u.total_tokens) || num6(u.input_tokens) + num6(u.output_tokens);
+      usage.input += Math.max(0, num2(u.input_tokens) - num2(u.cache_read_input_tokens));
+      usage.cacheRead += num2(u.cache_read_input_tokens);
+      usage.output += num2(u.output_tokens);
+      usage.total += num2(u.total_tokens) || num2(u.input_tokens) + num2(u.output_tokens);
       usage.denied = Math.max(usage.denied, Array.isArray(e.permission_denials) ? e.permission_denials.length : 0);
       if (e.is_error) {
         error ??= apiError(String(e.error?.message ?? e.result ?? e.subtype ?? "Qwen Code error"));
@@ -1911,16 +1874,11 @@ function parseEvents6(jsonl) {
   return { sessionId, model, finalText: finalText ?? (error ? "" : lastText), usage, tools, edits, lastActivity, timeline, error };
 }
 var apiError = (text) => text.replace(API_ERROR, "").replace(/\](?=\s*(\n|$))/, "").replace(/\s+/g, " ").trim() || text;
-var clip6 = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
-var num6 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
-var oneLine6 = (s, max = 80) => {
-  const t = s.replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max - 1)}\u2026` : t;
-};
+var num2 = (v) => typeof v === "number" && Number.isFinite(v) ? v : 0;
 
 // src/backends/qwen/index.ts
 var binary7 = () => findBinary("qwen", "PITROOM_QWEN_BIN", ["~/.local/bin/qwen", "~/.npm-global/bin/qwen"]);
-var policyDir2 = () => path9.resolve(path9.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
+var policyDir2 = () => path10.resolve(path10.dirname(fileURLToPath2(import.meta.url)), "..", "policies", "qwen");
 var EXCLUDED = [
   "agent",
   "send_message",
@@ -1945,48 +1903,7 @@ var EXCLUDED = [
 ];
 var WEB = ["web_fetch", "web_search"];
 var EDITS_HERE = ["Edit(./**)", "write_file(./**)", "notebook_edit(./**)"];
-var DENY_SHELL = [
-  "git commit",
-  "git push",
-  "git pull",
-  "git reset",
-  "git checkout",
-  "git restore",
-  "git clean",
-  "git stash",
-  "git rebase",
-  "git merge",
-  "git switch",
-  "git branch",
-  "git tag",
-  "git rm",
-  "git worktree",
-  "git update-ref",
-  "git config",
-  "git remote",
-  "git cherry-pick",
-  "git revert",
-  "git am",
-  "git add",
-  "rm -rf",
-  "rm -fr",
-  "sudo",
-  "chown",
-  "kill",
-  "pkill",
-  "killall",
-  "gh",
-  "npm publish",
-  "pitroom",
-  "opencode",
-  "claude",
-  "codex",
-  "gemini",
-  "qwen",
-  "kilo",
-  "kilocode",
-  "agy"
-].map((c) => `run_shell_command(${c})`);
+var DENY_SHELL = FORBIDDEN_COMMANDS.map((c) => `run_shell_command(${c})`);
 function invocation7(req) {
   const read = req.mode === "read";
   const exclude = [...EXCLUDED, ...req.web ? [] : WEB, ...read ? [] : DENY_SHELL];
@@ -2011,7 +1928,7 @@ function invocation7(req) {
     command,
     args: [...prefix, ...args],
     env: {
-      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path9.join(policyDir2(), "worker-defaults.json"),
+      QWEN_CODE_SYSTEM_DEFAULTS_PATH: path10.join(policyDir2(), "worker-defaults.json"),
       QWEN_CODE_DISABLE_CRON: "1",
       QWEN_DISABLE_AUTO_TITLE: "1"
     }
@@ -2031,7 +1948,7 @@ function failure7(run, stderr, exitCode) {
 }
 function userSettings() {
   try {
-    return JSON.parse(fs9.readFileSync(path9.join(process.env.QWEN_HOME ?? path9.join(os8.homedir(), ".qwen"), "settings.json"), "utf8"));
+    return JSON.parse(fs10.readFileSync(path10.join(process.env.QWEN_HOME ?? path10.join(os8.homedir(), ".qwen"), "settings.json"), "utf8"));
   } catch {
     return {};
   }
@@ -2102,8 +2019,8 @@ var formatTarget = (t) => t.model ? `${t.backend}:${t.model}` : t.backend;
 var describeTarget = (t) => t.model ? formatTarget(t) : `${t.backend} (default model)`;
 
 // src/core/refs.ts
-import fs10 from "node:fs";
-import path10 from "node:path";
+import fs11 from "node:fs";
+import path11 from "node:path";
 var FILE_EXTENSIONS = new Set(
   "ts tsx mts cts js jsx mjs cjs json jsonc json5 md mdx txt rst py pyi rb go rs java kt kts swift c h cc cpp cxx hpp hh cs fs php lua r jl sh bash zsh fish ps1 bat yml yaml toml ini cfg conf env html htm css scss sass less vue svelte astro sql graphql gql proto lock xml svg csv tsv gradle tf hcl dart ex exs erl hs ml scala clj vim el mk cmake dockerfile gitignore gitattributes editorconfig npmrc nvmrc".split(" ")
 );
@@ -2154,13 +2071,13 @@ function extractRefs(answer) {
   return [...seen.values()];
 }
 function verifyRefs(refs, dirs) {
-  const roots = [...new Set(dirs.filter(Boolean).map((d) => path10.resolve(d)))];
+  const roots = [...new Set(dirs.filter(Boolean).map((d) => path11.resolve(d)))];
   const invalid = [];
   const lineCache = /* @__PURE__ */ new Map();
   const load = (file) => {
     if (!lineCache.has(file)) {
-      const size = fs10.statSync(file).size;
-      const lines = size > MAX_BYTES ? null : fs10.readFileSync(file, "utf8").split("\n");
+      const size = fs11.statSync(file).size;
+      const lines = size > MAX_BYTES ? null : fs11.readFileSync(file, "utf8").split("\n");
       if (lines && lines[lines.length - 1] === "") lines.pop();
       lineCache.set(file, lines);
     }
@@ -2171,9 +2088,9 @@ function verifyRefs(refs, dirs) {
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
-    if (path10.isAbsolute(ref.file)) return [];
+    if (path11.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path10.basename(wanted)) ?? []).filter((f) => f.split(path10.sep).join("/").endsWith(`/${wanted}`) || path10.basename(f) === wanted).slice(0, 20);
+    return (byName().get(path11.basename(wanted)) ?? []).filter((f) => f.split(path11.sep).join("/").endsWith(`/${wanted}`) || path11.basename(f) === wanted).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -2188,7 +2105,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path10.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path11.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -2209,7 +2126,7 @@ function enclosedBy(lines, ref) {
   return lines.slice(Math.max(0, ref.start - 1 - DEFINITION_LOOKBACK), ref.start).some((l) => def.test(l));
 }
 var isFileName = (name) => {
-  const base = path10.basename(name);
+  const base = path11.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
 function indexFiles(roots) {
@@ -2218,19 +2135,19 @@ function indexFiles(roots) {
   const walk = (dir) => {
     let entries;
     try {
-      entries = fs10.readdirSync(dir, { withFileTypes: true });
+      entries = fs11.readdirSync(dir, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       if (count >= MAX_INDEXED) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path10.join(dir, e.name));
+        if (!SKIP_DIRS.has(e.name)) walk(path11.join(dir, e.name));
       } else if (e.isFile()) {
         count++;
         const list2 = index.get(e.name);
-        if (list2) list2.push(path10.join(dir, e.name));
-        else index.set(e.name, [path10.join(dir, e.name)]);
+        if (list2) list2.push(path11.join(dir, e.name));
+        else index.set(e.name, [path11.join(dir, e.name)]);
       }
     }
   };
@@ -2238,10 +2155,10 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path10.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path10.join(r, ref));
+  const candidates = path11.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path11.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs10.statSync(c).isFile() && inside(c, roots);
+      return fs11.statSync(c).isFile() && inside(c, roots);
     } catch {
       return false;
     }
@@ -2249,21 +2166,21 @@ function resolve(ref, roots) {
 }
 function inside(file, roots) {
   return roots.some((r) => {
-    const rel = path10.relative(r, path10.resolve(file));
-    return rel !== "" && !rel.startsWith("..") && !path10.isAbsolute(rel);
+    const rel = path11.relative(r, path11.resolve(file));
+    return rel !== "" && !rel.startsWith("..") && !path11.isAbsolute(rel);
   });
 }
 var escape2 = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
 // src/core/templates.ts
-import fs11 from "node:fs";
-import path12 from "node:path";
+import fs12 from "node:fs";
+import path13 from "node:path";
 
 // src/core/install.ts
-import path11 from "node:path";
+import path12 from "node:path";
 import { fileURLToPath as fileURLToPath3 } from "node:url";
 function packageRoot() {
-  return path11.resolve(path11.dirname(fileURLToPath3(import.meta.url)), "..");
+  return path12.resolve(path12.dirname(fileURLToPath3(import.meta.url)), "..");
 }
 
 // src/core/templates.ts
@@ -2274,9 +2191,9 @@ var FILES = {
   "code-reviewer": "pitroom-review/code-reviewer.md"
 };
 function loadTemplate(name, root = packageRoot()) {
-  const file = path12.join(root, "skills", FILES[name]);
-  if (!fs11.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
-  return fs11.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
+  const file = path13.join(root, "skills", FILES[name]);
+  if (!fs12.existsSync(file)) throw new UserError(`template missing: ${file} (broken install? run pitroom doctor)`, 3);
+  return fs12.readFileSync(file, "utf8").replace(/^\s*<!--[\s\S]*?-->\s*/, "");
 }
 function fill(template, values) {
   const missing = [...template.matchAll(/\{\{([A-Z_]+)\}\}/g)].map((m) => m[1]).filter((k) => !(k in values));
@@ -2290,12 +2207,12 @@ var OVERLOAD_MS = 20 * 6e4;
 var DAILY_MS = 4 * 36e5;
 function retryAfterMs(message) {
   const compact2 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
-  const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
+  const words2 = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
   let ms = 0;
   if (compact2) {
     for (const [, n, unit] of compact2.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
-  } else if (words) {
-    ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
+  } else if (words2) {
+    ms = Number(words2[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words2[2].toLowerCase()];
   }
   return ms > 0 ? ms : void 0;
 }
@@ -2333,9 +2250,9 @@ function parseAudit(text) {
 }
 
 // src/core/config.ts
-import fs12 from "node:fs";
+import fs13 from "node:fs";
 import os9 from "node:os";
-import path13 from "node:path";
+import path14 from "node:path";
 var SCHEMA = {
   worker: "string",
   fallback: "string[]",
@@ -2366,9 +2283,9 @@ var SCHEMA = {
   rankWorkers: "boolean"
 };
 function configPath() {
-  if (process.env.PITROOM_CONFIG) return path13.resolve(process.env.PITROOM_CONFIG);
-  const base = process.platform === "win32" ? process.env.APPDATA ?? path13.join(os9.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path13.join(os9.homedir(), ".config");
-  return path13.join(base, "pitroom", "config.json");
+  if (process.env.PITROOM_CONFIG) return path14.resolve(process.env.PITROOM_CONFIG);
+  const base = process.platform === "win32" ? process.env.APPDATA ?? path14.join(os9.homedir(), "AppData", "Roaming") : process.env.XDG_CONFIG_HOME ?? path14.join(os9.homedir(), ".config");
+  return path14.join(base, "pitroom", "config.json");
 }
 var cached;
 function loadConfig() {
@@ -2376,10 +2293,10 @@ function loadConfig() {
   const file = configPath();
   const config = {};
   const warnings = [];
-  if (fs12.existsSync(file)) {
+  if (fs13.existsSync(file)) {
     let raw;
     try {
-      raw = JSON.parse(fs12.readFileSync(file, "utf8"));
+      raw = JSON.parse(fs13.readFileSync(file, "utf8"));
     } catch (e) {
       warnings.push(`${file}: invalid JSON (${e.message}); ignored`);
     }
@@ -2532,13 +2449,13 @@ function rankChain(chain, recordOf) {
 }
 
 // src/core/receipt.ts
-import fs14 from "node:fs";
+import fs15 from "node:fs";
 
 // src/core/prices.ts
-import fs13 from "node:fs";
-import path14 from "node:path";
+import fs14 from "node:fs";
+import path15 from "node:path";
 var RETRY_AFTER_FAILURE_MS = 60 * 6e4;
-var catalogFile = () => path14.join(home(), "prices.json");
+var catalogFile = () => path15.join(home(), "prices.json");
 function trim(raw) {
   const out = {};
   if (!raw || typeof raw !== "object") return out;
@@ -2556,9 +2473,9 @@ var cached2;
 function readCatalog() {
   const file = catalogFile();
   try {
-    const { mtimeMs } = fs13.statSync(file);
+    const { mtimeMs } = fs14.statSync(file);
     if (cached2?.file === file && cached2.mtimeMs === mtimeMs) return cached2.catalog;
-    const parsed = JSON.parse(fs13.readFileSync(file, "utf8"));
+    const parsed = JSON.parse(fs14.readFileSync(file, "utf8"));
     const catalog6 = parsed && typeof parsed.models === "object" && parsed.models && Number.isFinite(Date.parse(parsed.fetchedAt)) ? parsed : void 0;
     cached2 = { file, mtimeMs, catalog: catalog6 };
     return catalog6;
@@ -2616,8 +2533,8 @@ function savedUsd(usage, returnedTokens, price = primaryPrice()) {
   return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
 function readLedger(sinceMs) {
-  if (!fs14.existsSync(ledgerFile())) return [];
-  return fs14.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
+  if (!fs15.existsSync(ledgerFile())) return [];
+  return fs15.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
       return [JSON.parse(l)];
     } catch {
@@ -2695,8 +2612,8 @@ ${tile(0, compact(t.tokens), "Tokens offloaded")}${tile(1, t.ratio ? `${Math.rou
 var WEEK_MS = 7 * 24 * 3600 * 1e3;
 
 // src/core/plan.ts
-import fs15 from "node:fs";
-import path15 from "node:path";
+import fs16 from "node:fs";
+import path16 from "node:path";
 var FENCE = /^ {0,3}(`{3,}|~{3,})(.*)$/;
 var RULE = /^ {0,3}([-*_])(\s*\1){2,}\s*$/;
 function structure(lines) {
@@ -2743,9 +2660,9 @@ function parsePlan(text, file = "") {
   return { file, title: titleHeading?.text ?? "", header, constraints, tasks };
 }
 function loadPlan(file) {
-  const abs = path15.resolve(file);
-  if (!fs15.existsSync(abs) || !fs15.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
-  const plan = parsePlan(fs15.readFileSync(abs, "utf8"), fs15.realpathSync(abs));
+  const abs = path16.resolve(file);
+  if (!fs16.existsSync(abs) || !fs16.statSync(abs).isFile()) throw new UserError(`plan not found: ${file}`);
+  const plan = parsePlan(fs16.readFileSync(abs, "utf8"), fs16.realpathSync(abs));
   if (!plan.tasks.length) throw new UserError(`${file} has no "Task N" headings (see pitroom-writing-plans)`);
   return plan;
 }
@@ -2764,7 +2681,7 @@ function brief(plan, task) {
   ].filter(Boolean).join("\n\n")}
 `;
 }
-var planName = (file) => path15.basename(file).replace(/\.md$/i, "");
+var planName = (file) => path16.basename(file).replace(/\.md$/i, "");
 
 // src/core/style.ts
 var enabled = () => {
@@ -2797,12 +2714,12 @@ function retryCommands(metas, shell = retryShell()) {
 
 // src/core/eval.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
-import fs16 from "node:fs";
+import fs17 from "node:fs";
 var KINDS = ["definition", "count", "set"];
 function loadEval(file) {
   let raw;
   try {
-    raw = JSON.parse(fs16.readFileSync(file, "utf8"));
+    raw = JSON.parse(fs17.readFileSync(file, "utf8"));
   } catch (e) {
     throw new UserError(`cannot read ${file}: ${e.message}`);
   }
@@ -2913,8 +2830,8 @@ function summarize(rows) {
 }
 
 // src/vcs/guard.ts
-import fs17 from "node:fs";
-import path16 from "node:path";
+import fs18 from "node:fs";
+import path17 from "node:path";
 var VERSION = 2;
 var WINDOWS = process.platform === "win32";
 var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
@@ -2991,29 +2908,29 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path16.join(home(), "shim", `v${VERSION}`);
+  return path17.join(home(), "shim", `v${VERSION}`);
 }
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const dir of (process.env.PATH ?? "").split(path16.delimiter).filter(Boolean)) {
-    if (same(path16.resolve(dir), skip)) continue;
-    const p = path16.join(dir, WINDOWS ? "git.exe" : "git");
+  for (const dir of (process.env.PATH ?? "").split(path17.delimiter).filter(Boolean)) {
+    if (same(path17.resolve(dir), skip)) continue;
+    const p = path17.join(dir, WINDOWS ? "git.exe" : "git");
     try {
-      fs17.accessSync(p, fs17.constants.X_OK);
-      if (fs17.statSync(p).isFile()) return p;
+      fs18.accessSync(p, fs18.constants.X_OK);
+      if (fs18.statSync(p).isFile()) return p;
     } catch {
     }
   }
   return void 0;
 }
 function findGitSh(realGit) {
-  let dir = path16.dirname(realGit);
+  let dir = path17.dirname(realGit);
   for (let i = 0; i < 4; i++) {
     for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
-      const p = path16.join(dir, rel);
-      if (fs17.existsSync(p)) return p;
+      const p = path17.join(dir, rel);
+      if (fs18.existsSync(p)) return p;
     }
-    const up = path16.dirname(dir);
+    const up = path17.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
@@ -3031,12 +2948,12 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path16.join(home(), "git-hooks", `v${HOOK_VERSION}`);
-function writeIfChanged(file, content) {
-  if (fs17.existsSync(file) && fs17.readFileSync(file, "utf8") === content) return;
-  fs17.mkdirSync(path16.dirname(file), { recursive: true });
+var hooksDir = () => path17.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+function writeIfChanged2(file, content) {
+  if (fs18.existsSync(file) && fs18.readFileSync(file, "utf8") === content) return;
+  fs18.mkdirSync(path17.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs17.writeFileSync(tmp, content, { mode: 493 });
+  fs18.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
 }
 function pathKey(env) {
@@ -3068,7 +2985,7 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  writeIfChanged(path16.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged2(path17.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -3080,11 +2997,11 @@ function guardEnv(env) {
   if (WINDOWS) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
-    writeIfChanged(path16.join(dir, "git.cmd"), cmdShim(sh));
+    writeIfChanged2(path17.join(dir, "git.cmd"), cmdShim(sh));
   }
-  writeIfChanged(path16.join(dir, "git"), SHIM);
+  writeIfChanged2(path17.join(dir, "git"), SHIM);
   const key = pathKey(env);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path16.delimiter}${env[key] ?? ""}` };
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path17.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
@@ -3092,11 +3009,11 @@ function shimReady() {
 }
 
 // src/core/slots.ts
-import crypto2 from "node:crypto";
-import fs18 from "node:fs";
-import path17 from "node:path";
-var slotsDir = () => path17.join(home(), "slots");
-var locksDir = () => path17.join(home(), "locks");
+import crypto3 from "node:crypto";
+import fs19 from "node:fs";
+import path18 from "node:path";
+var slotsDir = () => path18.join(home(), "slots");
+var locksDir = () => path18.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -3110,23 +3027,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs18.mkdirSync(path17.dirname(file), { recursive: true });
+  fs19.mkdirSync(path18.dirname(file), { recursive: true });
   try {
-    fs18.writeFileSync(file, runId, { flag: "wx" });
+    fs19.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs18.readFileSync(file, "utf8").trim();
+    owner = fs19.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs18.rmSync(file, { force: true });
+  fs19.rmSync(file, { force: true });
   try {
-    fs18.writeFileSync(file, runId, { flag: "wx" });
+    fs19.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -3135,35 +3052,35 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs18.readFileSync(file, "utf8").trim() === runId) fs18.rmSync(file, { force: true });
+    if (fs19.readFileSync(file, "utf8").trim() === runId) fs19.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path17.join(slotsDir(), `slot-${n}`);
+    const file = path18.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
 function slotHolders() {
-  if (!fs18.existsSync(slotsDir())) return [];
-  return fs18.readdirSync(slotsDir()).map((f) => {
+  if (!fs19.existsSync(slotsDir())) return [];
+  return fs19.readdirSync(slotsDir()).map((f) => {
     try {
-      return fs18.readFileSync(path17.join(slotsDir(), f), "utf8").trim();
+      return fs19.readFileSync(path18.join(slotsDir(), f), "utf8").trim();
     } catch {
       return "";
     }
   }).filter((id2) => holderActive(id2, ""));
 }
-var lockFile = (repoRoot) => path17.join(locksDir(), `write-${crypto2.createHash("sha1").update(path17.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path18.join(locksDir(), `write-${crypto3.createHash("sha1").update(path18.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs18.readFileSync(file, "utf8").trim();
+    owner = fs19.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -3172,8 +3089,8 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 
 // src/core/secrets.ts
 import { execFileSync } from "node:child_process";
-import fs19 from "node:fs";
-import path18 from "node:path";
+import fs20 from "node:fs";
+import path19 from "node:path";
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_VISITED = 2e4;
 var MAX_DEPTH = 4;
@@ -3191,16 +3108,16 @@ function findSecretFiles(dir) {
     if (depth > MAX_DEPTH || visited > MAX_VISITED) return;
     let entries;
     try {
-      entries = fs19.readdirSync(d, { withFileTypes: true });
+      entries = fs20.readdirSync(d, { withFileTypes: true });
     } catch {
       return;
     }
     for (const e of entries) {
       visited++;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path18.join(d, e.name), depth + 1);
+        if (!SKIP_DIRS2.has(e.name)) walk(path19.join(d, e.name), depth + 1);
       } else if (e.isFile() && looksSecret(e.name)) {
-        found.push(slash(path18.relative(dir, path18.join(d, e.name))));
+        found.push(slash(path19.relative(dir, path19.join(d, e.name))));
       }
     }
   };
@@ -3210,7 +3127,7 @@ function findSecretFiles(dir) {
 function findSecretFilesInTree(root, dir) {
   try {
     const out = execFileSync("git", ["-C", root, "ls-files", "-z", "--cached", "--others", "--exclude-standard"], { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
-    return out.split("\0").filter((f) => f && looksSecret(path18.basename(f)) && !path18.relative(dir, path18.join(root, f)).startsWith("..")).map((f) => slash(path18.relative(dir, path18.join(root, f)))).sort();
+    return out.split("\0").filter((f) => f && looksSecret(path19.basename(f)) && !path19.relative(dir, path19.join(root, f)).startsWith("..")).map((f) => slash(path19.relative(dir, path19.join(root, f)))).sort();
   } catch {
     return [];
   }
@@ -3222,14 +3139,14 @@ function secretWarning(files, mode) {
   const fix = mode === "isolate" ? "add them to .gitignore, or" : "use an isolated copy (-i, git-ignored files are left out) or a clean checkout, or";
   return `secret-looking files ${where} (${shown}): the worker is told not to read them, but nothing stops it, and its model may be hosted by a third party; ${fix} set PITROOM_NO_SECRET_WARNING=1 to silence this`;
 }
-var slash = (p) => p.split(path18.sep).join("/");
+var slash = (p) => p.split(path19.sep).join("/");
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs20 from "node:fs";
+import fs21 from "node:fs";
 async function spawnWorker(inv, opts) {
-  const out = fs20.openSync(opts.stdoutFile, "w");
-  const err = fs20.openSync(opts.stderrFile, "w");
+  const out = fs21.openSync(opts.stdoutFile, "w");
+  const err = fs21.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -3252,7 +3169,7 @@ async function spawnWorker(inv, opts) {
   }, opts.timeoutSec * 1e3);
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
-      res.spawnError = e.code === "ENOENT" ? fs20.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      res.spawnError = e.code === "ENOENT" ? fs21.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
       resolve2(127);
     });
     child.on("close", (c) => resolve2(c));
@@ -3261,13 +3178,14 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs20.closeSync(out);
-  fs20.closeSync(err);
+  fs21.closeSync(out);
+  fs21.closeSync(err);
   return res;
 }
 export {
   ASKS_FOR_LIST,
   DEFAULT_BACKEND,
+  FORBIDDEN_COMMANDS,
   STOP_FILE,
   TERMINAL,
   acquireWriteLock,
@@ -3296,6 +3214,7 @@ export {
   home,
   isActive,
   isAlive,
+  linkInto,
   listRunIds,
   loadEval,
   loadPlan,
@@ -3341,5 +3260,6 @@ export {
   usd,
   verifyRefs,
   workerCostOf,
+  writeIfChanged,
   writeMeta
 };

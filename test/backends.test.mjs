@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
-import { allBackends, getBackend, parseTarget } from '../dist/lib.mjs';
+import { FORBIDDEN_COMMANDS, allBackends, getBackend, linkInto, parseTarget, writeIfChanged } from '../dist/lib.mjs';
 
 // Adapters may keep private files under Pitroom's home: tests must not write to the real one.
 process.env.PITROOM_HOME ??= fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-backends-'));
@@ -429,7 +429,72 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
   const denied = (action, target) => rule(action).some((re) => re.test(target));
   for (const f of ['/p/.env', '/p/.env.local', '/p/prod.env', '/p/server.pem', '/home/u/.ssh/id_ed25519', 'C:\\p\\.env']) assert.ok(denied('read_file', f), f);
   for (const f of ['/p/src/env.ts', '/p/README.md', '/p/environment.js']) assert.ok(!denied('read_file', f), f);
-  for (const c of ['git commit -am x', 'git push', ' rm -rf /', 'sudo ls', 'agy -p hi', 'pitroom run x', '/usr/bin/git commit']) assert.ok(denied('command', c), c);
-  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk']) assert.ok(!denied('command', c), c);
+  const forbidden = [
+    'git commit -am x', 'git push', ' rm -rf /', 'sudo ls', 'agy -p hi', 'pitroom run x', '/usr/bin/git commit',
+    // chained, wrapped, prefixed or respelled: agy matches the whole command line, so the rule must find them
+    'npm test && rm -rf src', 'cd x; claude -p hi', 'ls | xargs kill', 'env sudo ls', 'FOO=1 git push', 'git  commit',
+    'echo $(git push)', '(git commit -m x)', 'nohup codex exec x &', 'git -C /other/repo status', 'git -c core.x=y commit',
+    'bash -c "git push"', 'sh -lc x', 'eval "$CMD"', 'true\ngit push',
+  ];
+  for (const c of forbidden) assert.ok(denied('command', c), c);
+  for (const c of ['git status', 'git diff', 'npm test', 'node --test', 'gitk', 'grep -rn "git commit" .', 'echo commit', 'ls skill/', 'npm run lint && npm test', 'cat x | grep gemini']) {
+    assert.ok(!denied('command', c), c);
+  }
   assert.ok(denied('mcp', 'linter/lint') && denied('read_url', 'https://example.com'));
+});
+
+test('antigravity: the parser keeps an answer after a retried error, and steps without an index are counted once', () => {
+  const b = getBackend('antigravity');
+  const lines = (...events) => events.map((e) => JSON.stringify(e)).join('\n');
+  const retried = b.parse(lines(
+    { type: 'init', conversation_id: 'C1' },
+    { type: 'error', message: 'API error (attempt 1): 503 overloaded' },
+    { type: 'result', status: 'SUCCESS', response: 'SUMMARY: done', error: {} },
+  ));
+  assert.equal(retried.error, undefined);
+  assert.equal(retried.finalText, 'SUMMARY: done');
+  assert.equal(b.failure(retried, '', 0), undefined);
+  const unrecovered = b.parse(lines({ type: 'init', conversation_id: 'C2' }, { type: 'error', message: 'RESOURCE_EXHAUSTED (code 429)' }, { type: 'result', status: 'SUCCESS', response: '' }));
+  assert.equal(b.failure(unrecovered, '', 0)?.kind, 'rate-limited', 'an error with no answer after it is the run\'s');
+  const tool = (state, extra = {}) => ({ type: 'step_update', step_update: { state, step_type: 'tool', tool_info: { name: 'view_file', parameters: { AbsolutePath: '/p/a.js' }, ...extra } } });
+  const say = (state, text_delta) => ({ type: 'step_update', step_update: { state, step_type: 'agent_response', text_delta } });
+  const noIndex = b.parse(lines(tool('ACTIVE'), tool('DONE', { output: 'x' }), tool('ACTIVE'), tool('DONE'), say('ACTIVE', 'SUMMARY: '), say('DONE', 'two reads')));
+  assert.equal(noIndex.usage.toolCalls, 2);
+  assert.equal(noIndex.timeline.filter((t) => t.kind === 'tool').length, 2);
+  assert.equal(noIndex.finalText, 'SUMMARY: two reads');
+});
+
+test('deny list: one list for every worker; Gemini\'s rule file and OpenCode\'s profiles name every other agent too', () => {
+  const toml = fs.readFileSync(path.join(FIXTURES, '..', '..', 'policies', 'gemini', 'shell.toml'), 'utf8');
+  const prefixes = [...toml.split('commandPrefix = [')[1].split(']')[0].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  assert.deepEqual(prefixes, FORBIDDEN_COMMANDS);
+  const claude = getBackend('claude').invocation(request({ mode: 'write' })).args;
+  const qwen = getBackend('qwen').invocation(request({ mode: 'write' })).args;
+  for (const c of FORBIDDEN_COMMANDS) {
+    assert.ok(claude.includes(`Bash(${c}:*)`), `claude: ${c}`);
+    assert.ok(qwen.includes(`run_shell_command(${c})`), `qwen: ${c}`);
+  }
+  const bash = JSON.parse(getBackend('opencode').invocation(request({ mode: 'write' })).env.OPENCODE_CONFIG_CONTENT).agent['pitroom-write'].permission.bash;
+  for (const agent of ['opencode', 'kilo', 'kilocode', 'agy', 'pitroom']) assert.ok(Object.keys(bash).some((k) => k.startsWith(agent) && bash[k] === 'deny'), `opencode: ${agent}`);
+});
+
+test('private homes: settings are replaced whole, a dangling sign-in link is repaired, a file the CLI wrote is kept', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pitroom-home-'));
+  const file = path.join(dir, 'h', 'settings.json');
+  writeIfChanged(file, 'one\n');
+  writeIfChanged(file, 'two\n');
+  assert.equal(fs.readFileSync(file, 'utf8'), 'two\n');
+  assert.deepEqual(fs.readdirSync(path.dirname(file)), ['settings.json'], 'no temporary file left behind');
+  const user = path.join(dir, 'user');
+  fs.mkdirSync(user);
+  const token = path.join(user, 'token');
+  fs.symlinkSync(path.join(dir, 'gone', 'token'), path.join(dir, 'h', 'token')); // dangling, from a moved folder
+  fs.writeFileSync(token, 'T\n');
+  linkInto(path.join(dir, 'h'), token);
+  assert.equal(fs.readlinkSync(path.join(dir, 'h', 'token')), token);
+  assert.equal(fs.readFileSync(path.join(dir, 'h', 'token'), 'utf8'), 'T\n');
+  fs.rmSync(path.join(dir, 'h', 'token'));
+  fs.writeFileSync(path.join(dir, 'h', 'token'), 'refreshed by the CLI\n');
+  linkInto(path.join(dir, 'h'), token);
+  assert.equal(fs.readFileSync(path.join(dir, 'h', 'token'), 'utf8'), 'refreshed by the CLI\n');
 });

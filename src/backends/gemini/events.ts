@@ -7,6 +7,7 @@
 //   {type: result, status: success | error, error?, stats?: {total_tokens, input_tokens, output_tokens, cached, input, tool_calls, models}}
 // Lines that are not JSON (output of a user's hooks, a banner) are skipped.
 import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const EDIT_TOOLS = new Set(['replace', 'write_file', 'edit']);
 const DENIED = /policy|permission|not allowed|denied|blocked|disallowed|refus/i;
@@ -102,15 +103,4 @@ export function parseEvents(jsonl: string): ParsedRun {
   flush();
   usage.steps = turns;
   return { sessionId, model, finalText: error ? '' : lastText, usage, tools, edits, lastActivity, timeline, error };
-}
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function oneLine(s: string, max = 80): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

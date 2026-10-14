@@ -5,6 +5,7 @@
 //   turn.completed {usage}                          → tokens (cached ⊂ input, reasoning ⊂ output)
 //   error / turn.failed {error: {message}}          → the failure; message is often a JSON API error
 import { MAX_STEPS, type ParsedRun, type Usage, type Step } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const WORK = new Set(['agent_message', 'reasoning', 'command_execution', 'file_change', 'mcp_tool_call', 'web_search', 'todo_list']);
 const TOOLS = new Set(['command_execution', 'file_change', 'mcp_tool_call', 'web_search']);
@@ -95,14 +96,3 @@ function describe(raw: unknown): string {
     return s;
   }
 }
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function oneLine(s: string, max = 80): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-}
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);

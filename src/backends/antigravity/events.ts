@@ -9,6 +9,7 @@
 // Tool names are agy's own (run_command, view_file, write_to_file, replace_file_content, …) with parameters such as
 // CommandLine, TargetFile and AbsolutePath. Lines that are not JSON are skipped.
 import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const EDIT_TOOLS = new Set(['write_to_file', 'replace_file_content', 'multi_replace_file_content', 'edit_file', 'write_file']);
 const SHELL = 'run_command';
@@ -33,7 +34,13 @@ export function parseEvents(jsonl: string): ParsedRun {
   let response: string | undefined;
   let lastActivity: string | undefined;
   let error: string | undefined;
+  // an `error` event: agy may retry after one, so it is the run's error only when no result follows
+  let streamError: string | undefined;
+  let resultSeen = false;
   let haveResultUsage = false;
+  // steps without an index: the open one of each kind, so its ACTIVE and DONE updates are one step
+  const open = new Map<string, string>();
+  let unnamed = 0;
   let turns = 0;
   let inTurn = false;
 
@@ -59,8 +66,14 @@ export function parseEvents(jsonl: string): ParsedRun {
       const s = e.step_update && typeof e.step_update === 'object' ? e.step_update : e;
       sessionId ??= id(s.conversation_id);
       const kind = String(s.step_type ?? '').toLowerCase();
-      const key = String(s.step_index ?? s.step_id ?? `${kind}-${timeline.length}`);
       const finished = String(s.state ?? '').toUpperCase() === 'DONE';
+      let key = s.step_index ?? s.step_id;
+      if (key === undefined || key === null) {
+        key = open.get(kind) ?? `${kind}#${unnamed++}`;
+        if (finished) open.delete(kind);
+        else open.set(kind, key);
+      }
+      key = String(key);
       if (kind === 'agent_response') {
         startTurn();
         const text = (said.get(key) ?? '') + str(s.text_delta);
@@ -95,7 +108,7 @@ export function parseEvents(jsonl: string): ParsedRun {
         if (finished && !done.has(key)) {
           done.add(key);
           inTurn = false;
-          const problem = `${str(info.error?.message ?? info.error)} ${str(info.status ?? s.status)}`.trim();
+          const problem = `${errText(info.error)} ${str(info.status ?? s.status)}`.trim();
           const ok = !problem || OK.test(problem) || !FAILED.test(problem);
           const step = stepOf.get(key);
           if (step) step.ok = ok;
@@ -113,17 +126,21 @@ export function parseEvents(jsonl: string): ParsedRun {
         add(usage, e.usage);
         haveResultUsage = true;
       }
+      resultSeen = true;
       const status = str(e.status);
-      const message = str(e.error?.message ?? e.error);
-      if (message || (status && !OK.test(status))) {
+      const message = errText(e.error);
+      // A successful status wins over an error field beside it (an empty `{}`, or an earlier attempt's error).
+      if (status ? !OK.test(status) : !!message) {
         error ??= message || (/^waiting$/i.test(status)
           ? 'agy stopped waiting for an approval a headless run cannot give'
           : `agy ended with status ${status}`);
       }
     } else if (type === 'error') {
-      error ??= str(e.message ?? e.error?.message ?? e.error) || 'Antigravity CLI error';
+      streamError ??= errText(e) || errText(e.error) || 'Antigravity CLI error';
     }
   }
+  // An error the run never recovered from: no result came, or the result has no answer.
+  if (streamError && (!resultSeen || !response)) error ??= streamError;
   // Without a result (a run cut short), the tokens are the sum of the finished steps' own usage.
   if (!haveResultUsage) for (const u of stepUsage) add(usage, u);
   usage.steps = turns;
@@ -144,15 +161,7 @@ function add(u: Usage, r: any): void {
 
 const id = (v: unknown): string | undefined => (typeof v === 'string' && v ? v : undefined);
 
+/** An error's text: a string, or an object's `message`; an empty object is no error. */
+const errText = (v: any): string => (typeof v === 'string' ? v : typeof v?.message === 'string' ? v.message : '');
+
 const str = (v: unknown): string => (typeof v === 'string' ? v : v === undefined || v === null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v));
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function oneLine(s: string, max = 80): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-}

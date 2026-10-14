@@ -4,6 +4,7 @@
 //   {type: user, message: {content: [tool_result {tool_use_id, is_error, content}]}}
 //   {type: result, result, is_error, total_cost_usd, usage, permission_denials, terminal_reason}
 import { MAX_STEPS, type ParsedRun, type Usage, type Step } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const DENIED = /permission|not allowed|denied|blocked|disallowed/i;
@@ -95,15 +96,4 @@ export function parseEvents(jsonl: string): ParsedRun {
   }
   usage.steps = steps.size;
   return { sessionId, model, finalText: finalText ?? (error ? '' : lastText), usage, tools, edits, lastActivity, timeline, error };
-}
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function oneLine(s: string, max = 80): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
 }

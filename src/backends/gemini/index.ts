@@ -18,6 +18,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { home } from '../../core/store.js';
 import { findBinary, resolveCommand } from '../exec.js';
+import { linkInto, writeIfChanged } from '../home.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ModelCatalog, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
 
@@ -39,7 +40,7 @@ const policyDir = () => path.resolve(path.dirname(fileURLToPath(import.meta.url)
 
 /**
  * The private GEMINI_CLI_HOME of workers: Pitroom's isolating settings plus the user's chosen sign-in method, and
- * links to their sign-in files. Written only when it changed, so invoking stays cheap and repeatable.
+ * links to their sign-in files. Written only when it changed (atomically), so invoking stays cheap and repeatable.
  */
 function workerHome(): string {
   const root = path.join(home(), 'gemini-home');
@@ -47,23 +48,8 @@ function workerHome(): string {
   const base = JSON.parse(fs.readFileSync(path.join(policyDir(), 'worker-settings.json'), 'utf8'));
   const auth = settings().security?.auth;
   const body = `${JSON.stringify(auth ? { ...base, security: { ...base.security, auth } } : base, null, 2)}\n`;
-  const file = path.join(dir, 'settings.json');
-  try {
-    if (fs.readFileSync(file, 'utf8') === body) return root;
-  } catch {
-    // not written yet
-  }
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(file, body);
-  for (const name of ['oauth_creds.json', 'google_accounts.json']) {
-    const from = path.join(geminiHome(), name);
-    const to = path.join(dir, name);
-    try {
-      if (fs.existsSync(from) && !fs.existsSync(to)) fs.symlinkSync(from, to);
-    } catch {
-      // no link: the worker then asks to sign in, which fails with an auth error that doctor explains
-    }
-  }
+  writeIfChanged(path.join(dir, 'settings.json'), body);
+  for (const name of ['oauth_creds.json', 'google_accounts.json']) linkInto(dir, path.join(geminiHome(), name));
   return root;
 }
 
