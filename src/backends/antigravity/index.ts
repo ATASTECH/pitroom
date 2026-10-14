@@ -230,7 +230,8 @@ const MAX_SCANNED = 20_000;
 
 /**
  * All the secret-looking files under `dir`, at any depth and in every folder; undefined when there are too many
- * entries to be sure, or when a link in it leads out of it (the link's name says nothing about what it opens).
+ * entries to be sure, when a link in it leads out of it or nowhere (the link's name says nothing about what it
+ * opens), or when a folder in it cannot be read: whatever cannot be checked is not granted.
  */
 function allSecrets(dir: string): string[] | undefined {
   const root = realOf(dir) ?? dir;
@@ -243,7 +244,7 @@ function allSecrets(dir: string): string[] | undefined {
     try {
       entries = fs.readdirSync(d, { withFileTypes: true });
     } catch {
-      continue;
+      return undefined;
     }
     for (const e of entries) {
       if (++seen > MAX_SCANNED) return undefined;
@@ -251,7 +252,7 @@ function allSecrets(dir: string): string[] | undefined {
       if (e.isSymbolicLink()) {
         // a link inside the folder is checked where it leads, which is scanned too; one out of it is not granted
         const target = realOf(p);
-        if (target && !inside(target, root)) return undefined;
+        if (!target || !inside(target, root)) return undefined;
         if (looksSecret(e.name)) found.push(p);
       } else if (e.isDirectory()) stack.push(p);
       else if (looksSecret(e.name)) found.push(p);
@@ -266,8 +267,8 @@ function allSecrets(dir: string): string[] | undefined {
  * agy cannot ask, so the read is refused and the turn ends without an answer. They are granted read-only (the
  * sandbox mounts them read-only too), with every secret-looking file in them denied. Never: the root or a top-level
  * folder (/tmp, /usr), your home itself or a folder above it, a folder holding the workspace or the project (that
- * would open the project and its secrets around a snapshot), a dot-folder in your home (~/.config and the like hold
- * credentials), Pitroom's own state, a secret-looking file, or a folder too big to check for secrets; and nothing on
+ * would open the project and its secrets around a snapshot), a dot-folder in your home or ~/Library (they hold
+ * credentials and apps' session tokens), Pitroom's own state, a secret-looking file, or a folder too big to check for secrets; and nothing on
  * Windows. The secrets in your home stay denied whatever is named.
  */
 export function outsideReads(prompt: string, workspace: string, project?: string): OutsideRead[] {
@@ -284,7 +285,8 @@ export function outsideReads(prompt: string, workspace: string, project?: string
     if (!p || found.has(p) || inside(p, ws) || inside(p, own)) continue;
     if (inside(homeDir, p) || inside(ws, p) || (proj && inside(proj, p))) continue;
     if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
-    if (inside(p, homeDir) && path.relative(homeDir, p).startsWith('.')) continue;
+    // dot-folders in your home, and ~/Library on macOS, hold credentials and apps' session tokens
+    if (inside(p, homeDir) && /^(\.|Library([\\/]|$))/.test(path.relative(homeDir, p))) continue;
     if (!isDir(p)) {
       if (!looksSecret(path.basename(p))) found.set(p, { path: p, secrets: [] });
     } else {

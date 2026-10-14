@@ -659,14 +659,14 @@ function allSecrets(dir) {
     try {
       entries = fs6.readdirSync(d, { withFileTypes: true });
     } catch {
-      continue;
+      return void 0;
     }
     for (const e of entries) {
       if (++seen > MAX_SCANNED) return void 0;
       const p = path5.join(d, e.name);
       if (e.isSymbolicLink()) {
         const target = realOf(p);
-        if (target && !inside(target, root)) return void 0;
+        if (!target || !inside(target, root)) return void 0;
         if (looksSecret(e.name)) found.push(p);
       } else if (e.isDirectory()) stack.push(p);
       else if (looksSecret(e.name)) found.push(p);
@@ -686,7 +686,7 @@ function outsideReads(prompt, workspace, project) {
     if (!p || found.has(p) || inside(p, ws) || inside(p, own)) continue;
     if (inside(homeDir, p) || inside(ws, p) || proj && inside(proj, p)) continue;
     if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
-    if (inside(p, homeDir) && path5.relative(homeDir, p).startsWith(".")) continue;
+    if (inside(p, homeDir) && /^(\.|Library([\\/]|$))/.test(path5.relative(homeDir, p))) continue;
     if (!isDir(p)) {
       if (!looksSecret(path5.basename(p))) found.set(p, { path: p, secrets: [] });
     } else {

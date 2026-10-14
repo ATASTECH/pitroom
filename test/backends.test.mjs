@@ -560,6 +560,10 @@ test('antigravity: what the task names outside the workspace is readable, minus 
   fs.symlinkSync(path.join(outside, '.env'), path.join(linked, 'notes.txt'));
   assert.ok(!settingsFor(`PROMPT-SENTINEL read ${linked}`).s.permissions.allow.some((r) => r.includes('agy-linked-')));
   assert.ok(!settingsFor(`PROMPT-SENTINEL read ${path.join(linked, 'notes.txt')}`).s.permissions.allow.some((r) => r.includes('.env')), 'a link to a secret is the secret');
+  // a link that leads nowhere cannot be checked either
+  const dangling = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-dangling-'));
+  fs.symlinkSync(path.join(dangling, 'missing'), path.join(dangling, 'later'));
+  assert.ok(!settingsFor(`PROMPT-SENTINEL read ${dangling}`).s.permissions.allow.some((r) => r.includes('agy-dangling-')));
   // in a snapshot or an isolated copy, the project's paths are the copy's; a longer name is another folder
   const { inv } = settingsFor('PROMPT-SENTINEL fix /work/proj/src/a.ts, not /work/proj-old/b.ts; see /work/proj.', { project: { root: '/work/proj', copy: '/state/copy' } });
   const prompt = inv.args[inv.args.indexOf('-p') + 1];
