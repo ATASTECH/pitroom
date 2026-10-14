@@ -107,7 +107,7 @@ export function denyCommandRules(): string[] {
  * listed one by one. A denied read also denies the write. `reads` are the folders and files outside the workspace
  * that the task names (`outsideReads`), granted read-only, minus the secret files in them.
  */
-export function workerSettings(workspace: string, workerHome: string, reads: string[] = []) {
+export function workerSettings(workspace: string, workerHome: string, reads: OutsideRead[] = []) {
   const real = (p: string) => {
     try {
       return fs.realpathSync(p);
@@ -117,7 +117,8 @@ export function workerSettings(workspace: string, workerHome: string, reads: str
   };
   const both = (p: string) => [...new Set([p, real(p)])];
   const secrets = [
-    ...[workspace, ...reads.filter((r) => isDir(r))].flatMap((d) => findSecretFiles(d).map((f) => path.join(d, f))),
+    ...findSecretFiles(workspace).map((f) => path.join(workspace, f)),
+    ...reads.flatMap((r) => r.secrets),
     ...HOME_SECRETS.map((f) => path.join(os.homedir(), f)).filter((p) => fs.existsSync(p)),
     // the keychain link of the worker's own home
     path.join(workerHome, 'Library'),
@@ -132,7 +133,7 @@ export function workerSettings(workspace: string, workerHome: string, reads: str
         ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${rulePath(p)})`),
         ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
-        ...reads.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
+        ...reads.map((r) => r.path).flatMap(both).map((p) => `read_file(${rulePath(p)})`),
       ],
       deny: [
         ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
@@ -218,28 +219,71 @@ const inside = (p: string, dir: string) => {
   return !rel || (!rel.startsWith('..') && !path.isAbsolute(rel));
 };
 
+export interface OutsideRead {
+  path: string;
+  /** Every secret-looking file in it, to deny. */
+  secrets: string[];
+}
+
+/** Entries a granted folder may hold: its secret files are found by looking at every one, or it is not granted. */
+const MAX_SCANNED = 20_000;
+
+/** All the secret-looking files under `dir`, at any depth and in every folder; undefined when there are too many entries to be sure. */
+function allSecrets(dir: string): string[] | undefined {
+  const found: string[] = [];
+  let seen = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const d = stack.pop()!;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(d, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (++seen > MAX_SCANNED) return undefined;
+      const p = path.join(d, e.name);
+      if (e.isDirectory()) stack.push(p);
+      else if (looksSecret(e.name)) found.push(p);
+    }
+  }
+  return found;
+}
+
 /**
  * The folders and files outside the workspace that a task names by absolute path (or `~/…`) and that exist, such as
  * "copy the components from /tmp/ui-source": agy's file tools stay in the workspace, and without a grant a headless
  * agy cannot ask, so the read is refused and the turn ends without an answer. They are granted read-only (the
- * sandbox mounts them read-only too). Never the root, your home itself or a folder above it, Pitroom's own state,
- * or a secret-looking file; the secrets in your home stay denied whatever is named.
+ * sandbox mounts them read-only too), with every secret-looking file in them denied. Never: the root or a top-level
+ * folder (/tmp, /usr), your home itself or a folder above it, a folder holding the workspace or the project (that
+ * would open the project and its secrets around a snapshot), a dot-folder in your home (~/.config and the like hold
+ * credentials), Pitroom's own state, a secret-looking file, or a folder too big to check for secrets; and nothing on
+ * Windows. The secrets in your home stay denied whatever is named.
  */
-export function outsideReads(prompt: string, workspace: string): string[] {
+export function outsideReads(prompt: string, workspace: string, project?: string): OutsideRead[] {
+  // agy compares Windows paths without their drive letter, so a grant would also open the same path on every drive
+  if (process.platform === 'win32') return [];
   const homeDir = realOf(os.homedir()) ?? os.homedir();
   const ws = realOf(workspace) ?? path.resolve(workspace);
+  const proj = project ? resolved(project) : undefined;
   const own = realOf(home()) ?? home();
-  const found = new Set<string>();
+  const found = new Map<string, OutsideRead>();
   for (const { abs } of pathsIn(prompt)) {
     const p = realOf(abs);
-    if (!p || inside(p, ws) || inside(p, own) || inside(homeDir, p)) continue;
-    // a top-level folder (/tmp, /usr) is too wide to grant
+    if (!p || found.has(p) || inside(p, ws) || inside(p, own)) continue;
+    if (inside(homeDir, p) || inside(ws, p) || (proj && inside(proj, p))) continue;
     if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
-    if (!isDir(p) && looksSecret(path.basename(p))) continue;
-    found.add(p);
+    if (inside(p, homeDir) && path.relative(homeDir, p).startsWith('.')) continue;
+    if (!isDir(p)) {
+      if (!looksSecret(path.basename(p))) found.set(p, { path: p, secrets: [] });
+    } else {
+      const secrets = allSecrets(p);
+      if (secrets) found.set(p, { path: p, secrets });
+    }
     if (found.size >= MAX_READS) break;
   }
-  return [...found];
+  return [...found.values()];
 }
 
 function baseSettings() {
@@ -263,7 +307,7 @@ const HOMES_KEPT_DAYS = 14;
  * The worker home for a workspace: its settings rewritten when they change, the user's sign-in linked in. Homes
  * not used for two weeks are removed (their conversations with them: a follow-up then starts a new one).
  */
-function workerHome(workspace: string, reads: string[] = []): string {
+function workerHome(workspace: string, reads: OutsideRead[] = []): string {
   const root = path.join(home(), 'antigravity-home');
   const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
   const dir = path.join(root, id);
@@ -331,7 +375,7 @@ function invocation(req: WorkerRequest) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd));
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root));
   // The worker's commands see this home too: the user's own dotfiles stay out of their reach.
   const env: Record<string, string> = { HOME: workerDir };
   if (process.platform === 'win32') env.USERPROFILE = workerDir;

@@ -525,22 +525,35 @@ test('antigravity: what the task names outside the workspace is readable, minus 
   fs.mkdirSync(path.join(outside, 'lib'));
   fs.writeFileSync(path.join(outside, 'lib', 'a.ts'), 'x');
   fs.writeFileSync(path.join(outside, '.env'), 'SECRET=x');
+  // secrets deeper than any walk limit, and in folders other scans skip
+  fs.mkdirSync(path.join(outside, 'a', 'b', 'c', 'd', 'e'), { recursive: true });
+  fs.writeFileSync(path.join(outside, 'a', 'b', 'c', 'd', 'e', '.env.local'), 'x');
+  fs.mkdirSync(path.join(outside, 'node_modules', 'pkg'), { recursive: true });
+  fs.writeFileSync(path.join(outside, 'node_modules', 'pkg', 'server.key'), 'x');
   const settingsFor = (prompt, over = {}) => {
     const inv = b.invocation(request({ cwd: workspace, prompt, ...over }));
     return { inv, s: JSON.parse(fs.readFileSync(path.join(inv.env.HOME, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')) };
   };
   const asAgy = (p) => fs.realpathSync(p).replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
+  if (process.platform === 'win32') {
+    // agy compares Windows paths without the drive letter: a grant would open the same path on every drive
+    assert.ok(!settingsFor(`PROMPT-SENTINEL read ${outside}`).s.permissions.allow.some((r) => r.includes('agy-src-')));
+    return;
+  }
   const { s } = settingsFor(`PROMPT-SENTINEL copy the components from ${outside}/lib, and also "${path.join(outside, 'lib', 'a.ts')}".`);
   assert.ok(s.permissions.allow.includes(`read_file(${asAgy(path.join(outside, 'lib'))})`), s.permissions.allow.join('\n'));
   assert.ok(s.permissions.allow.includes(`read_file(${asAgy(path.join(outside, 'lib', 'a.ts'))})`));
   assert.ok(!s.permissions.allow.some((r) => r.startsWith('write_file(') && r.includes('agy-src-')), 'read-only');
-  // too wide, missing, a secret, or the user's home: never granted
-  const wide = settingsFor(`PROMPT-SENTINEL look in / and ${os.homedir()} and ${os.tmpdir()} and /no/such/dir and ${path.join(outside, '.env')}`).s;
-  assert.deepEqual(wide.permissions.allow.filter((r) => r.includes('agy-src-') || r === 'read_file(/)' || r === `read_file(${asAgy(os.homedir())})`), []);
+  // too wide, missing, a secret, the user's home, or a folder holding the workspace: never granted
+  const wide = settingsFor(`PROMPT-SENTINEL look in / and ${os.homedir()} and ${path.dirname(workspace)} and /no/such/dir and ${path.join(outside, '.env')}`).s;
+  const bad = [asAgy(os.homedir()), asAgy(path.dirname(workspace))].map((p) => `read_file(${p})`);
+  assert.deepEqual(wide.permissions.allow.filter((r) => r.includes('agy-src-') || r === 'read_file(/)' || bad.includes(r)), []);
   // the secrets of a granted folder stay denied
   const granted = settingsFor(`PROMPT-SENTINEL read ${outside}`).s;
   assert.ok(granted.permissions.allow.includes(`read_file(${asAgy(outside)})`));
-  assert.ok(granted.permissions.deny.includes(`read_file(${asAgy(path.join(outside, '.env'))})`), granted.permissions.deny.filter((r) => r.includes('agy-src-')).join('\n'));
+  for (const f of ['.env', 'a/b/c/d/e/.env.local', 'node_modules/pkg/server.key']) {
+    assert.ok(granted.permissions.deny.includes(`read_file(${asAgy(path.join(outside, f))})`), f);
+  }
   // in a snapshot or an isolated copy, the project's paths are the copy's; a longer name is another folder
   const { inv } = settingsFor('PROMPT-SENTINEL fix /work/proj/src/a.ts, not /work/proj-old/b.ts; see /work/proj.', { project: { root: '/work/proj', copy: '/state/copy' } });
   const prompt = inv.args[inv.args.indexOf('-p') + 1];

@@ -552,7 +552,8 @@ function workerSettings(workspace, workerHome3, reads = []) {
   };
   const both = (p) => [.../* @__PURE__ */ new Set([p, real(p)])];
   const secrets = [
-    ...[workspace, ...reads.filter((r) => isDir(r))].flatMap((d) => findSecretFiles(d).map((f) => path5.join(d, f))),
+    ...findSecretFiles(workspace).map((f) => path5.join(workspace, f)),
+    ...reads.flatMap((r) => r.secrets),
     ...HOME_SECRETS.map((f) => path5.join(os3.homedir(), f)).filter((p) => fs6.existsSync(p)),
     // the keychain link of the worker's own home
     path5.join(workerHome3, "Library")
@@ -567,7 +568,7 @@ function workerSettings(workspace, workerHome3, reads = []) {
         ...both(path5.join(dataDir(workerHome3), "brain")).map((p) => `write_file(${rulePath(p)})`),
         ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
-        ...reads.flatMap(both).map((p) => `read_file(${rulePath(p)})`)
+        ...reads.map((r) => r.path).flatMap(both).map((p) => `read_file(${rulePath(p)})`)
       ],
       deny: [
         ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
@@ -630,20 +631,50 @@ var inside = (p, dir) => {
   const rel = path5.relative(dir, p);
   return !rel || !rel.startsWith("..") && !path5.isAbsolute(rel);
 };
-function outsideReads(prompt, workspace) {
+var MAX_SCANNED = 2e4;
+function allSecrets(dir) {
+  const found = [];
+  let seen = 0;
+  const stack = [dir];
+  while (stack.length) {
+    const d = stack.pop();
+    let entries;
+    try {
+      entries = fs6.readdirSync(d, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const e of entries) {
+      if (++seen > MAX_SCANNED) return void 0;
+      const p = path5.join(d, e.name);
+      if (e.isDirectory()) stack.push(p);
+      else if (looksSecret(e.name)) found.push(p);
+    }
+  }
+  return found;
+}
+function outsideReads(prompt, workspace, project) {
+  if (process.platform === "win32") return [];
   const homeDir = realOf(os3.homedir()) ?? os3.homedir();
   const ws = realOf(workspace) ?? path5.resolve(workspace);
+  const proj = project ? resolved(project) : void 0;
   const own = realOf(home()) ?? home();
-  const found = /* @__PURE__ */ new Set();
+  const found = /* @__PURE__ */ new Map();
   for (const { abs } of pathsIn(prompt)) {
     const p = realOf(abs);
-    if (!p || inside(p, ws) || inside(p, own) || inside(homeDir, p)) continue;
+    if (!p || found.has(p) || inside(p, ws) || inside(p, own)) continue;
+    if (inside(homeDir, p) || inside(ws, p) || proj && inside(proj, p)) continue;
     if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
-    if (!isDir(p) && looksSecret(path5.basename(p))) continue;
-    found.add(p);
+    if (inside(p, homeDir) && path5.relative(homeDir, p).startsWith(".")) continue;
+    if (!isDir(p)) {
+      if (!looksSecret(path5.basename(p))) found.set(p, { path: p, secrets: [] });
+    } else {
+      const secrets = allSecrets(p);
+      if (secrets) found.set(p, { path: p, secrets });
+    }
     if (found.size >= MAX_READS) break;
   }
-  return [...found];
+  return [...found.values()];
 }
 function baseSettings() {
   return {
@@ -717,7 +748,7 @@ function invocation(req) {
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd));
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root));
   const env = { HOME: workerDir };
   if (process.platform === "win32") env.USERPROFILE = workerDir;
   return { command, args: [...prefix, ...args], env };
