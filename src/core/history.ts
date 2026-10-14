@@ -363,7 +363,7 @@ export function workerRecord(backend: string, model: string | undefined, sinceMs
   const fits = (m: string | null) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
   const rec: WorkerRecord = { runs: 0, ok: 0, audited: 0, agreed: 0 };
   try {
-    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} GROUP BY model`).all(backend, since)) {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY model`).all(backend, since)) {
       if (!fits(r.model)) continue;
       rec.runs += r.runs ?? 0;
       rec.ok += r.ok ?? 0;
@@ -446,6 +446,8 @@ function workerRows(rows: any[], ledger: LedgerEntry[], audited: Map<string, { a
   return out;
 }
 
+/** A run in which no worker was started (its read snapshot could not be made) says nothing about the worker. */
+const ATTEMPTED = `json_extract(meta_json,'$.noAttempt') IS NULL`;
 /**
  * A run that failed on a rate limit or quota. Newer records say so (`failureKind`); older ones carry the hint
  * Pitroom adds to such an error.
@@ -461,9 +463,9 @@ export function historyStats(sinceMs?: number): Stats {
   if (!db) return empty;
   const since = sinceMs ? new Date(sinceMs).toISOString() : '';
   try {
-    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT}`).get(since);
-    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
-    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
+    const t = db.prepare(`SELECT COALESCE(SUM(${K}),0) runs, COALESCE(SUM(state='done'),0) ok, COALESCE(SUM(${LIMITED}),0) limited, COALESCE(SUM(CASE WHEN ${K} THEN seconds END),0) seconds, COALESCE(SUM(CASE WHEN ${K} THEN tokens END),0) tokens, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED}`).get(since);
+    const w = db.prepare(`SELECT backend, model, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, AVG(CASE WHEN ${K} THEN seconds END) avg_s, AVG(CASE WHEN ${K} THEN tokens END) avg_t, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY backend, model ORDER BY runs DESC LIMIT 40`).all(since);
+    const d = db.prepare(`SELECT substr(started_at,1,10) day, SUM(${K}) runs, SUM(state='done') ok, SUM(${LIMITED}) limited, COALESCE(SUM(saved),0) saved FROM runs WHERE started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY day ORDER BY day DESC LIMIT 60`).all(since);
     const audits = auditStats(db, since);
     // Savings come from the ledger, the same figures the Live page, `pitroom savings` and the status line add up,
     // so one number is never calculated two ways. The database only supplies counts and times.

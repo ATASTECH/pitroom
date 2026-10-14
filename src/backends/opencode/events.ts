@@ -2,6 +2,7 @@
 // Handles OpenCode v2 (tool "shell", no tokens.total, errors as {type, message, status})
 // and the v1 shapes (tool "bash", tokens.total, errors as {name, data.message}).
 import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const EDIT_TOOLS = new Set(['edit', 'write', 'patch', 'multiedit', 'apply_patch']);
 const DENIED = /rule which prevents you|permission denied|permission\.rejected/i;
@@ -98,17 +99,7 @@ function describeError(err: any): string {
   return tags.length ? `${message} [${tags.join(', ')}]` : message;
 }
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 const stamp = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-
-function num(v: unknown): number {
-  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
-}
-
-function oneLine(s: string, max = 80): string {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-}
 
 function describe(input: any): string {
   if (!input || typeof input !== 'object') return '';

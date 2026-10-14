@@ -30,15 +30,36 @@ export function wantSnapshot(readIn: ReadIn, root: string | undefined, dir: stri
   return readIn === 'snapshot' || secrets.length ? { secrets } : undefined;
 }
 
-/** The snapshot of the project's current state without secret-looking files; made once per state, then reused. */
-export function readSnapshot(root: string): { dir: string; tree: string; created: boolean } {
+/**
+ * The snapshot of the project's current state without secret-looking files; made once per state, then reused.
+ * With an `owner` (a run id) it is that run's own: a worker that may write in a read run (`readOnly: 'snapshot'`)
+ * never reads, or leaves its writes in, the snapshot other runs share. Its follow-ups read it too.
+ */
+export function readSnapshot(root: string, owner?: string): { dir: string; tree: string; created: boolean } {
   const drop = findSecretFilesInTree(root, root);
   const tree = snapshotTree(root, [], drop);
-  const dest = path.join(snapshotsDir(), tree);
+  const dest = path.join(snapshotsDir(), owner ? `${tree}-${owner}` : tree);
   if (fs.existsSync(path.join(dest, '.git'))) {
     touch(dest);
     return { dir: dest, tree, created: false };
   }
+  materialize(root, tree, dest);
+  prune();
+  return { dir: dest, tree, created: true };
+}
+
+/**
+ * A run's own snapshot that was pruned, made again from the same tree, so its follow-up can go on (what the worker
+ * wrote there is gone). Throws when git no longer has the tree.
+ */
+export function restoreSnapshot(root: string, dir: string, tree: string): void {
+  const rel = path.relative(snapshotsDir(), dir);
+  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) throw new Error(`not a snapshot: ${dir}`);
+  if (!fs.existsSync(path.join(dir, '.git'))) materialize(root, tree, dir);
+}
+
+/** A checkout of `tree` at `dest`, files read-only, appearing there whole (made aside, then renamed). */
+function materialize(root: string, tree: string, dest: string): void {
   const tmp = path.join(snapshotsDir(), `.tmp-${process.pid}-${crypto.randomBytes(3).toString('hex')}`);
   try {
     createIsolatedCopy(root, tree, tmp);
@@ -58,8 +79,6 @@ export function readSnapshot(root: string): { dir: string; tree: string; created
     }
     throw e;
   }
-  prune();
-  return { dir: dest, tree, created: true };
 }
 
 function touch(dir: string): void {
@@ -120,13 +139,15 @@ export function prune(now = Date.now(), maxAgeMs = PRUNE_AGE_MS, keepNewest = KE
     .filter((e): e is { n: string; dir: string; age: number } => !!e)
     .sort((x, y) => x.age - y.age); // newest first
   let removed = 0;
-  let rank = 0;
+  // shared snapshots and runs' own ones (`<tree>-<run id>`) each keep their newest few: a burst of runs with their
+  // own snapshots does not push out the one every other read run shares
+  const rank = { shared: 0, own: 0 };
   for (const e of entries) {
     if (inUse.has(path.resolve(e.dir))) continue;
     const half = e.n.startsWith('.tmp-');
     // a half-made snapshot is left alone for a day, in case a run is still making it
     const old = e.age >= (half ? KEEP_MS : maxAgeMs);
-    const surplus = !half && ++rank > keepNewest && e.age >= JUST_USED_MS;
+    const surplus = !half && ++rank[e.n.includes('-') ? 'own' : 'shared'] > keepNewest && e.age >= JUST_USED_MS;
     if (!old && !surplus) continue;
     try {
       makeWritable(e.dir);

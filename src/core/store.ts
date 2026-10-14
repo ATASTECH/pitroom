@@ -76,11 +76,13 @@ export interface RunMeta {
   /** The implementer's STATUS line. */
   taskStatus?: TaskStatus;
   /** A read run that read a clean snapshot of the project instead of the directory (see snapshot.ts). */
-  snapshot?: { dir: string; tree: string; left: string[] };
+  snapshot?: { dir: string; tree: string; left: string[]; /** this run's own snapshot, shared with nobody */ private?: boolean };
   /** `--in-place`: read the directory itself, never a snapshot. */
   inPlace?: boolean;
   /** The answer cache's key for this read run (see cache.ts). */
-  cache?: { key: string; state: string };
+  cache?: { key: string; state: string; where?: 'snapshot' | 'project' };
+  /** No worker was started (its read snapshot could not be made): the run says nothing about the worker. */
+  noAttempt?: boolean;
   /** For an audit: the audited run's id. An audit re-checks a read run's answer with another worker. */
   auditOf?: string;
   auditVerdict?: AuditVerdict;

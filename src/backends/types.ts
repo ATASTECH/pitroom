@@ -98,8 +98,12 @@ export interface DoctorCheck {
 }
 
 export interface Capabilities {
-  /** How read-only mode is enforced, shown by `pitroom doctor`. */
-  readOnly: 'permission-rules' | 'os-sandbox' | 'tool-allowlist' | 'approval-mode';
+  /**
+   * How read-only mode is enforced, shown by `pitroom doctor`. `snapshot`: the CLI's own read-only mode is not to be
+   * trusted, so the core gives its read runs a read-only snapshot of their own, never the project or a shared snapshot
+   * (run.ts readPlace; --in-place and reviews read the directory, with a warning).
+   */
+  readOnly: 'permission-rules' | 'os-sandbox' | 'tool-allowlist' | 'approval-mode' | 'snapshot';
   /** Whether `pitroom run --continue` can resume the worker's session. */
   resume: 'by-id' | 'none';
   reportsCost: boolean;
@@ -131,6 +135,8 @@ export interface Backend {
   parse(stdout: string): ParsedRun;
   /** Undefined when the run succeeded; otherwise the cause, classified for fallback. */
   failure(run: ParsedRun, stderr: string, exitCode: number | null): Failure | undefined;
+  /** What the CLI's output says the user should know about a finished run, shown with its warnings. */
+  warnings?(run: ParsedRun, stderr: string): string[];
   /** The model the CLI uses when none is given. */
   defaultModel?(): string | undefined;
   /** The model a finished session actually used. */

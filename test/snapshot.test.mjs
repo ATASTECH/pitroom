@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { sandbox } from './helpers.mjs';
 
 const real = (p) => fs.realpathSync(p);
@@ -127,4 +128,142 @@ test('snapshot: only the newest few are kept, however recent they are', () => {
   fs.appendFileSync(path.join(s.repo, 'app.txt'), 'one more\n');
   assert.equal(s.run(['run', 'last']).status, 0);
   assert.equal(snapshots(s).length, 6, 'the newest six: the fresh one and five of the old ones');
+});
+
+const AGY_MOCK = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'antigravity', 'mock', 'agy.mjs');
+
+const agyCalls = (s) => s.calls().filter((c) => c.backend === 'antigravity' && c.argv[0] === '-p');
+const SNAPSHOTS = (s) => real(path.join(s.base, 'home', 'snapshots'));
+
+test('snapshot: a worker that may write in a read run (Antigravity) reads a snapshot of its own, never the project or a shared one', () => {
+  const s = sandbox();
+  const before = s.status();
+  // agy writes in a read run despite --mode plan; its stream reports no edit, so only the snapshot shows it
+  const r = s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt' });
+  const meta = JSON.parse(r.stdout);
+  const call = agyCalls(s).at(-1);
+  assert.ok(call, r.stdout + r.stderr);
+  assert.equal(path.dirname(real(call.cwd)), SNAPSHOTS(s), 'the worker ran in a snapshot');
+  assert.ok(path.basename(call.cwd).endsWith(`-${meta.id}`), 'of its own');
+  assert.equal(meta.snapshot.private, true);
+  assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')), 'the project itself is untouched');
+  assert.equal(s.status(), before);
+  // only what it wrote: the snapshot's other files, all "added" to a checkout without a commit, are not blamed
+  assert.ok(meta.warnings.some((w) => /^READ-ONLY VIOLATION: Antigravity CLI wrote in its read-only snapshot [^:]*: stray\.txt$/.test(w)), meta.warnings.join('\n'));
+  // another worker reading a snapshot of the same state does not see the stray file
+  s.run(['run', 'where is app.txt?'], { PITROOM_READ_IN: 'snapshot' });
+  const shared = ranIn(s);
+  assert.equal(path.dirname(shared), SNAPSHOTS(s));
+  assert.notEqual(shared, real(call.cwd));
+  assert.ok(!fs.existsSync(path.join(shared, 'stray.txt')));
+  // a follow-up continues in the same snapshot of its own, and is not blamed for what its parent wrote there
+  const follow = JSON.parse(s.run(['run', '--json', '--continue', meta.id, 'and sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK }).stdout);
+  assert.equal(real(agyCalls(s).at(-1).cwd), real(call.cwd));
+  assert.ok(!follow.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION')), follow.warnings.join('\n'));
+});
+
+test('snapshot: a worker after Antigravity in the chain never reads what it wrote; a second Antigravity attempt gets a fresh snapshot', () => {
+  const s = sandbox();
+  // agy writes, then fails (no answer): the next worker reads the project as planned, not agy's snapshot
+  s.config({ worker: 'antigravity', fallback: ['opencode:mock/good-model'] });
+  const r = s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl' });
+  const meta = JSON.parse(r.stdout);
+  assert.equal(meta.ran.backend, 'opencode', r.stdout);
+  assert.equal(ranIn(s), real(s.repo), 'opencode reads the project, where it would have read without agy');
+  assert.equal(meta.snapshot, undefined);
+  assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')));
+  // two Antigravity targets: the second does not read the first one's writes
+  s.config({ worker: 'antigravity:model-a', fallback: ['antigravity:model-b'] });
+  s.run(['run', 'where is sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl' });
+  const [first, second] = agyCalls(s).slice(-2);
+  assert.notEqual(real(first.cwd), real(second.cwd));
+});
+
+test('snapshot: Antigravity as a fallback costs nothing until it runs, then reads a snapshot of its own', () => {
+  const s = sandbox();
+  s.config({ worker: 'opencode:mock/good-model', fallback: ['antigravity'] });
+  s.run(['run', 'where is app.txt?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  assert.equal(ranIn(s), real(s.repo), 'the first worker answered in place: no snapshot made for a fallback that never ran');
+  assert.ok(!fs.existsSync(path.join(s.base, 'home', 'snapshots')) || !fs.readdirSync(path.join(s.base, 'home', 'snapshots')).length);
+  s.config({ worker: 'opencode:mock/limited', fallback: ['antigravity'] });
+  const r = s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_RATE_LIMIT_MODELS: 'mock/limited' });
+  const meta = JSON.parse(r.stdout);
+  assert.equal(meta.ran.backend, 'antigravity', r.stdout);
+  assert.equal(path.dirname(real(agyCalls(s).at(-1).cwd)), SNAPSHOTS(s));
+  assert.equal(meta.cache, undefined, 'read in a snapshot, not where the cache key expected (the project): not cached under it');
+});
+
+test('snapshot: Antigravity does not run when its snapshot cannot be made; --in-place reads the project, with a warning', () => {
+  const s = sandbox();
+  fs.mkdirSync(path.join(s.base, 'home'), { recursive: true });
+  fs.writeFileSync(path.join(s.base, 'home', 'snapshots'), 'not a folder\n');
+  const r = s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt' });
+  assert.notEqual(r.status, 0);
+  assert.match(r.stdout + r.stderr, /could not make a snapshot for Antigravity CLI/);
+  assert.equal(JSON.parse(r.stdout).noAttempt, true, 'not counted against the worker in its record');
+  assert.equal(agyCalls(s).length, 0, 'agy never started');
+  assert.ok(!fs.existsSync(path.join(s.repo, 'stray.txt')));
+  const inPlace = s.run(['run', '--in-place', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  assert.equal(real(agyCalls(s).at(-1).cwd), real(s.repo));
+  assert.match(inPlace.stdout, /not in a snapshot, and Antigravity CLI does not reliably stay read-only/);
+});
+
+test('snapshot: an Antigravity answer is cached under "snapshot", and the doctor probe runs it outside the project', () => {
+  const s = sandbox();
+  const meta = JSON.parse(s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK }).stdout);
+  assert.equal(meta.cache?.where, 'snapshot');
+  s.run(['doctor', '--probe'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, PITROOM_WORKER: 'antigravity' });
+  const probe = agyCalls(s).at(-1);
+  assert.ok(probe.argv[1].includes('PONG'), 'the probe ran');
+  assert.match(path.basename(probe.cwd), /^pitroom-probe-/, 'an empty folder of its own, not the project');
+  assert.ok(!fs.existsSync(probe.cwd), 'removed afterwards');
+});
+
+test('snapshot: runs\' own snapshots keep their own quota when pruning, so they do not push out the shared ones', () => {
+  const s = sandbox();
+  const dir = path.join(s.base, 'home', 'snapshots');
+  fs.mkdirSync(dir, { recursive: true });
+  const old = (Date.now() - 3_600_000) / 1000;
+  const make = (name) => {
+    fs.mkdirSync(path.join(dir, name, '.git'), { recursive: true });
+    fs.utimesSync(path.join(dir, name), old, old);
+  };
+  make('a'.repeat(40));
+  for (let i = 0; i < 8; i++) make(`${'b'.repeat(40)}-20261014-12000${i}-abcd`);
+  // making a snapshot prunes the others
+  assert.equal(s.run(['run', 'where is app.txt?'], { PITROOM_READ_IN: 'snapshot' }).status, 0);
+  const left = fs.readdirSync(dir);
+  assert.ok(left.includes('a'.repeat(40)), 'an older shared snapshot stays');
+  assert.equal(left.filter((n) => n.includes('-')).length, 6, 'the newest few own snapshots stay');
+});
+
+test('snapshot: Antigravity after another worker in between still gets a fresh snapshot; a pruned own snapshot is made again for a follow-up', () => {
+  const s = sandbox();
+  s.config({ worker: 'antigravity:model-a', fallback: ['opencode:mock/limited', 'antigravity:model-b'] });
+  const env = { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_AGY_WRITE: 'stray.txt', MOCK_AGY_FIXTURE: 'failures/quota.stdout.jsonl', MOCK_RATE_LIMIT_MODELS: 'mock/limited' };
+  s.run(['run', 'where is sub?'], env);
+  const [a, b] = agyCalls(s).slice(-2);
+  assert.notEqual(real(a.cwd), real(b.cwd), 'model-b does not read what model-a wrote');
+  // a follow-up whose own snapshot was pruned gets it made again
+  const meta = JSON.parse(s.run(['run', '--json', '-W', 'antigravity', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK }).stdout);
+  fs.chmodSync(meta.snapshot.dir, 0o755);
+  for (const f of fs.readdirSync(meta.snapshot.dir)) if (f !== '.git') fs.chmodSync(path.join(meta.snapshot.dir, f), 0o644);
+  fs.rmSync(meta.snapshot.dir, { recursive: true, force: true });
+  const r = s.run(['run', '--json', '--continue', meta.id, 'and sub?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK });
+  const follow = JSON.parse(r.stdout);
+  assert.equal(follow.state, 'done', r.stdout + r.stderr);
+  assert.ok(follow.warnings.some((w) => /was cleaned up and has been made again/.test(w)));
+  assert.ok(fs.existsSync(path.join(meta.snapshot.dir, 'app.txt')));
+});
+
+test('snapshot: when Antigravity cannot run after a rate-limited worker, the run is that worker\'s rate limit, not a new failure', () => {
+  const s = sandbox();
+  fs.mkdirSync(path.join(s.base, 'home'), { recursive: true });
+  fs.writeFileSync(path.join(s.base, 'home', 'snapshots'), 'not a folder\n');
+  s.config({ worker: 'opencode:mock/limited', fallback: ['antigravity'] });
+  const meta = JSON.parse(s.run(['run', '--json', 'where is add?'], { PITROOM_ANTIGRAVITY_BIN: AGY_MOCK, MOCK_RATE_LIMIT_MODELS: 'mock/limited' }).stdout);
+  assert.equal(meta.state, 'failed');
+  assert.equal(meta.failureKind, 'rate-limited');
+  assert.equal(meta.noAttempt, undefined);
+  assert.match(meta.error, /then could not make a snapshot for Antigravity CLI/);
 });

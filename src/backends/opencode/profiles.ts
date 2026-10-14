@@ -64,7 +64,7 @@ const FORBIDDEN_BASH = [
   // publishing / remote side effects
   'gh *', 'npm publish*', 'pnpm publish*', 'yarn publish*', 'cargo publish*', 'twine upload*',
   // no recursive delegation
-  'opencode*', 'kilo *', 'kilocode*', 'pitroom *', '*pitroom*',
+  'opencode*', 'kilo *', 'kilocode*', 'agy *', 'pitroom *', '*pitroom*',
 ];
 
 /** The CLI's own scratch dirs must stay usable (tool output and shell sessions spill there): `app` is its folder name. */

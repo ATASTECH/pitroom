@@ -1,6 +1,7 @@
 // Registry of worker adapters. Adding a worker = implement `Backend` in
 // src/backends/<id>/ and register it here (see docs/backends.md).
 import { UserError } from '../core/errors.js';
+import { antigravity } from './antigravity/index.js';
 import { claude } from './claude/index.js';
 import { codex } from './codex/index.js';
 import { gemini } from './gemini/index.js';
@@ -9,7 +10,7 @@ import { opencode } from './opencode/index.js';
 import { qwen } from './qwen/index.js';
 import type { Backend } from './types.js';
 
-const REGISTRY = new Map<string, Backend>([opencode, codex, claude, gemini, qwen, kiloBackend].map((b) => [b.id, b]));
+const REGISTRY = new Map<string, Backend>([opencode, codex, claude, gemini, qwen, kiloBackend, antigravity].map((b) => [b.id, b]));
 
 export const DEFAULT_BACKEND = opencode.id;
 
@@ -18,6 +19,9 @@ export const DEFAULT_BACKEND = opencode.id;
 const PLANNED: string[] = ['hermes'];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
+
+/** A worker whose CLI may write in a read run (`readOnly: 'snapshot'`): it reads a snapshot of its own, never the project or a shared one. */
+export const readsOwnSnapshot = (b: Backend): boolean => b.capabilities.readOnly === 'snapshot';
 export const allBackends = (): Backend[] => [...REGISTRY.values()];
 export const isBackendId = (id: string): boolean => REGISTRY.has(id) || PLANNED.includes(id);
 

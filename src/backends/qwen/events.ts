@@ -6,6 +6,7 @@
 //   {type: user, message: {content: [tool_result {tool_use_id, is_error, content}]}}
 //   {type: result, subtype, is_error, result, usage, permission_denials, error: {message}}
 import { MAX_STEPS, type ParsedRun, type Step, type Usage } from '../types.js';
+import { clip, num, oneLine } from '../text.js';
 
 const EDIT_TOOLS = new Set(['write_file', 'edit', 'notebook_edit']);
 const SHELL = 'run_shell_command';
@@ -99,9 +100,3 @@ export function parseEvents(jsonl: string): ParsedRun {
 /** "[API Error: 429 You exceeded …]\nPossible quota …" → "429 You exceeded … Possible quota …". */
 const apiError = (text: string) => text.replace(API_ERROR, '').replace(/\](?=\s*(\n|$))/, '').replace(/\s+/g, ' ').trim() || text;
 
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
-const oneLine = (s: string, max = 80) => {
-  const t = s.replace(/\s+/g, ' ').trim();
-  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
-};

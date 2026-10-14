@@ -13,12 +13,27 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { getBackend, readsOwnSnapshot } from '../backends/index.js';
 import { effective } from './config.js';
+import { parseTarget } from './target.js';
 import type { RunOptions } from './run.js';
 import { READ_IN, type ReadIn, wantSnapshot } from './snapshot.js';
 import { readSummary } from './report.js';
 import { type RunMeta, isActive, listRunIds, readMeta } from './store.js';
 import { canonical, commitOf, repoRoot, snapshotTree } from '../vcs/git.js';
+
+/**
+ * Whether the run's preferred worker reads a snapshot of its own, whatever readIn says. A guess: tiers, ranking and
+ * the budget can change who runs; a run that then reads elsewhere is not cached under this key (run.ts finalize).
+ */
+function preferredReadsOwnSnapshot(o: RunOptions): boolean {
+  try {
+    const preferred = effective().worker.value;
+    return readsOwnSnapshot(getBackend(parseTarget(o.worker ?? preferred, preferred).backend));
+  } catch {
+    return false;
+  }
+}
 
 /** The newest runs looked at for an earlier answer (older ones are not found, even within cacheDays). */
 const SCAN = 500;
@@ -28,6 +43,8 @@ export interface CacheKey {
   key: string;
   /** The project's state: HEAD and the working tree. */
   state: string;
+  /** Where the worker was expected to read; a run that read elsewhere (a fallback did) is not cached under this key. */
+  where?: 'snapshot' | 'project';
 }
 
 /** This run's cache key: stored on it so a later identical question finds it; undefined when it is never cached. */
@@ -46,9 +63,9 @@ export function cacheKey(o: RunOptions): CacheKey | undefined {
     });
     const question = o.task.replace(/\s+/g, ' ').trim();
     const readIn = (READ_IN as string[]).includes(effective().readIn.value) ? (effective().readIn.value as ReadIn) : 'auto';
-    const where = !o.inPlace && wantSnapshot(readIn, root, dir) ? 'snapshot' : 'project';
+    const where = !o.inPlace && (preferredReadsOwnSnapshot(o) || wantSnapshot(readIn, root, dir)) ? 'snapshot' : 'project';
     const key = crypto.createHash('sha256').update(JSON.stringify([question, path.relative(root, dir), files, where])).digest('hex');
-    return { key, state: `${head}:${tree}` };
+    return { key, state: `${head}:${tree}`, where };
   } catch {
     return undefined; // an unreadable attached file, a git failure: no cache, the run goes on as usual
   }

@@ -122,6 +122,23 @@ export function createIsolatedCopy(root: string, tree: string, dest: string): vo
   must(dest, ['checkout-index', '--all', '--force']);
 }
 
+/** Paths in a checkout that differ from its index: changed, deleted, new and ignored files alike (a snapshot has none). */
+export function changedFiles(dir: string): string[] {
+  const out = must(dir, ['status', '--porcelain=v1', '-z', '--untracked-files=all', '--ignored=matching']);
+  const paths: string[] = [];
+  const parts = out.split('\0');
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i]!;
+    if (p.length < 4) continue;
+    // A checkout made with read-tree has no commit, so git calls every file "added" (`A `): only the working
+    // tree's column says whether the file differs from its index.
+    if (p[0] === 'A' && p[1] === ' ') continue;
+    paths.push(p.slice(3));
+    if (p[0] === 'R' || p[0] === 'C') i++; // a rename's second path is its origin
+  }
+  return paths;
+}
+
 export function removeIsolatedCopy(dest: string, ownedBy: string): void {
   // Only ever remove copies Pitroom created under its own home directory.
   const rel = path.relative(ownedBy, dest);
