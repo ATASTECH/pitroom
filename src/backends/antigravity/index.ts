@@ -128,11 +128,11 @@ export function workerSettings(workspace: string, workerHome: string) {
       // under their home stay usable in the sandbox (read-only), which sees only what is granted besides the system
       allow: [
         'command(*)',
-        ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${p})`),
-        ...toolchains().flatMap(both).map((p) => `read_file(${p})`),
+        ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${rulePath(p)})`),
+        ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
       ],
       deny: [
-        ...secrets.flatMap(both).map((p) => `read_file(${p})`),
+        ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         ...denyCommandRules(),
         'mcp(*)',
         // No web for agy workers: the rule is in the settings file, so --web cannot switch it on per run.
@@ -172,6 +172,12 @@ function baseSettings() {
     allowNonWorkspaceAccess: false,
   };
 }
+
+/**
+ * A path as agy compares it: agy drops backslashes from a rule, and on Windows it strips the drive letter and turns
+ * backslashes into slashes before it compares a path, so a rule is written that way too.
+ */
+const rulePath = (p: string) => p.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
 
 const HOMES_KEPT_DAYS = 14;
 

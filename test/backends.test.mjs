@@ -459,8 +459,10 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
   // read_file rules are absolute paths (a relative one breaks agy's sandbox, a regex is not read)
   const reads = deny.filter((r) => r.startsWith('read_file(')).map((r) => r.slice(10, -1));
   assert.ok(reads.every((p) => path.isAbsolute(p)), reads.join('\n'));
-  for (const f of ['.env', 'sub/.env.local', 'server.pem']) assert.ok(reads.includes(path.join(workspace, f)), f);
-  for (const f of ['README.md', 'src/env.ts']) assert.ok(!reads.includes(path.join(workspace, f)), f);
+  // as agy compares paths: on Windows without the drive letter, with slashes
+  const asAgy = (f) => path.join(workspace, f).replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
+  for (const f of ['.env', 'sub/.env.local', 'server.pem']) assert.ok(reads.includes(asAgy(f)), f);
+  for (const f of ['README.md', 'src/env.ts']) assert.ok(!reads.includes(asAgy(f)), f);
   // agy splits a pattern at spaces and drops backslashes
   assert.ok(deny.every((r) => !r.includes('\\')), 'no backslash in a rule');
   const forbidden = [

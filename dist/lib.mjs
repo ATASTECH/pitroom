@@ -564,11 +564,11 @@ function workerSettings(workspace, workerHome3) {
       // under their home stay usable in the sandbox (read-only), which sees only what is granted besides the system
       allow: [
         "command(*)",
-        ...both(path5.join(dataDir(workerHome3), "brain")).map((p) => `write_file(${p})`),
-        ...toolchains().flatMap(both).map((p) => `read_file(${p})`)
+        ...both(path5.join(dataDir(workerHome3), "brain")).map((p) => `write_file(${rulePath(p)})`),
+        ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`)
       ],
       deny: [
-        ...secrets.flatMap(both).map((p) => `read_file(${p})`),
+        ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         ...denyCommandRules(),
         "mcp(*)",
         // No web for agy workers: the rule is in the settings file, so --web cannot switch it on per run.
@@ -596,6 +596,7 @@ function baseSettings() {
     allowNonWorkspaceAccess: false
   };
 }
+var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
 function workerHome(workspace) {
   const root = path5.join(home(), "antigravity-home");
