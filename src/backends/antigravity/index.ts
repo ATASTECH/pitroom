@@ -18,7 +18,7 @@ import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { findSecretFiles } from '../../core/secrets.js';
+import { findSecretFiles, looksSecret } from '../../core/secrets.js';
 import { home } from '../../core/store.js';
 import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
@@ -104,9 +104,10 @@ export function denyCommandRules(): string[] {
  * Pitroom's settings for agy workers in one workspace. One file for every mode, since a follow-up continues its
  * conversation in the same home: what differs by mode is agy's own --mode. Deny beats allow in agy's rules.
  * `read_file` rules take absolute paths only (a relative one breaks the sandbox), so the workspace's secret files are
- * listed one by one. A denied read also denies the write.
+ * listed one by one. A denied read also denies the write. `reads` are the folders and files outside the workspace
+ * that the task names (`outsideReads`), granted read-only, minus the secret files in them.
  */
-export function workerSettings(workspace: string, workerHome: string) {
+export function workerSettings(workspace: string, workerHome: string, reads: string[] = []) {
   const real = (p: string) => {
     try {
       return fs.realpathSync(p);
@@ -116,7 +117,7 @@ export function workerSettings(workspace: string, workerHome: string) {
   };
   const both = (p: string) => [...new Set([p, real(p)])];
   const secrets = [
-    ...findSecretFiles(workspace).map((f) => path.join(workspace, f)),
+    ...[workspace, ...reads.filter((r) => isDir(r))].flatMap((d) => findSecretFiles(d).map((f) => path.join(d, f))),
     ...HOME_SECRETS.map((f) => path.join(os.homedir(), f)).filter((p) => fs.existsSync(p)),
     // the keychain link of the worker's own home
     path.join(workerHome, 'Library'),
@@ -130,6 +131,8 @@ export function workerSettings(workspace: string, workerHome: string) {
         'command(*)',
         ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${rulePath(p)})`),
         ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
+        // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
+        ...reads.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
       ],
       deny: [
         ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
@@ -164,6 +167,81 @@ function toolchains(): string[] {
  * can end the turn without an answer. command(*) grants them; the deny rules still win. Edits are approved by
  * --mode accept-edits.
  */
+const isDir = (p: string) => {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const MAX_READS = 20;
+
+/**
+ * The absolute paths (or `~/…`) a prompt names: a path starts at the start of the text, after a space, a quote, a
+ * bracket or `=`, and ends before a space, a quote, a bracket or trailing punctuation. With where each one stands.
+ */
+function pathsIn(prompt: string): { raw: string; at: number; abs: string }[] {
+  const out: { raw: string; at: number; abs: string }[] = [];
+  for (const m of prompt.matchAll(/(^|[\s"'`(\[<{=])((?:~|[A-Za-z]:)?[\\/][^\s"'`)\]>}]*)/g)) {
+    const raw = m[2]!.replace(/[.,;:!?]+$/, '');
+    const abs = raw.startsWith('~') ? path.join(os.homedir(), raw.slice(1)) : raw;
+    if (raw && path.isAbsolute(abs)) out.push({ raw, at: m.index! + m[1]!.length, abs });
+  }
+  return out;
+}
+
+const realOf = (p: string): string | undefined => {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return undefined;
+  }
+};
+
+/** A path with its links resolved as far as it exists, so a file not yet written still has a place. */
+function resolved(p: string): string {
+  let dir = path.resolve(p);
+  const rest: string[] = [];
+  for (;;) {
+    const r = realOf(dir);
+    if (r) return path.join(r, ...rest);
+    const up = path.dirname(dir);
+    if (up === dir) return path.resolve(p);
+    rest.unshift(path.basename(dir));
+    dir = up;
+  }
+}
+
+const inside = (p: string, dir: string) => {
+  const rel = path.relative(dir, p);
+  return !rel || (!rel.startsWith('..') && !path.isAbsolute(rel));
+};
+
+/**
+ * The folders and files outside the workspace that a task names by absolute path (or `~/…`) and that exist, such as
+ * "copy the components from /tmp/ui-source": agy's file tools stay in the workspace, and without a grant a headless
+ * agy cannot ask, so the read is refused and the turn ends without an answer. They are granted read-only (the
+ * sandbox mounts them read-only too). Never the root, your home itself or a folder above it, Pitroom's own state,
+ * or a secret-looking file; the secrets in your home stay denied whatever is named.
+ */
+export function outsideReads(prompt: string, workspace: string): string[] {
+  const homeDir = realOf(os.homedir()) ?? os.homedir();
+  const ws = realOf(workspace) ?? path.resolve(workspace);
+  const own = realOf(home()) ?? home();
+  const found = new Set<string>();
+  for (const { abs } of pathsIn(prompt)) {
+    const p = realOf(abs);
+    if (!p || inside(p, ws) || inside(p, own) || inside(homeDir, p)) continue;
+    // a top-level folder (/tmp, /usr) is too wide to grant
+    if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
+    if (!isDir(p) && looksSecret(path.basename(p))) continue;
+    found.add(p);
+    if (found.size >= MAX_READS) break;
+  }
+  return [...found];
+}
+
 function baseSettings() {
   return {
     enableTerminalSandbox: true,
@@ -185,12 +263,12 @@ const HOMES_KEPT_DAYS = 14;
  * The worker home for a workspace: its settings rewritten when they change, the user's sign-in linked in. Homes
  * not used for two weeks are removed (their conversations with them: a follow-up then starts a new one).
  */
-function workerHome(workspace: string): string {
+function workerHome(workspace: string, reads: string[] = []): string {
   const root = path.join(home(), 'antigravity-home');
   const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
   const dir = path.join(root, id);
   fs.mkdirSync(dataDir(dir), { recursive: true });
-  writeIfChanged(path.join(dataDir(dir), 'settings.json'), `${JSON.stringify(workerSettings(workspace, dir), null, 2)}\n`);
+  writeIfChanged(path.join(dataDir(dir), 'settings.json'), `${JSON.stringify(workerSettings(workspace, dir, reads), null, 2)}\n`);
   // macOS finds the sign-in through the login keychain under $HOME/Library/Keychains; elsewhere it is a file
   if (process.platform === 'darwin') {
     fs.mkdirSync(path.join(dir, 'Library'), { recursive: true });
@@ -217,10 +295,30 @@ function pruneHomes(root: string, keep: string): void {
   }
 }
 
+/**
+ * The prompt with the project's paths turned into the copy's: a worker in a snapshot or an isolated copy that is told
+ * about /…/project/src/a.ts reads and edits its own copy of it, not the project (which it may not read or write at
+ * all: agy would end its turn there). Paths are compared with their links resolved (/tmp and /private/tmp alike).
+ */
+export function inCopy(prompt: string, project?: WorkerRequest['project']): string {
+  if (!project || project.root === project.copy) return prompt;
+  const root = resolved(project.root);
+  let out = '';
+  let from = 0;
+  for (const { raw, at, abs } of pathsIn(prompt)) {
+    const p = resolved(abs);
+    if (!inside(p, root)) continue;
+    out += prompt.slice(from, at) + path.join(project.copy, path.relative(root, p));
+    from = at + raw.length;
+  }
+  return out + prompt.slice(from);
+}
+
 function invocation(req: WorkerRequest) {
+  const prompt = inCopy(req.prompt, req.project);
   const args = [
     // -p takes the prompt as its value; one that starts with "-" would be read as an option: a leading space keeps it a value.
-    '-p', req.prompt.startsWith('-') ? ` ${req.prompt}` : req.prompt,
+    '-p', prompt.startsWith('-') ? ` ${prompt}` : prompt,
     '--output-format', 'stream-json',
     '--mode', req.mode === 'read' ? 'plan' : 'accept-edits',
     '--sandbox',
@@ -233,7 +331,7 @@ function invocation(req: WorkerRequest) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd);
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd));
   // The worker's commands see this home too: the user's own dotfiles stay out of their reach.
   const env: Record<string, string> = { HOME: workerDir };
   if (process.platform === 'win32') env.USERPROFILE = workerDir;

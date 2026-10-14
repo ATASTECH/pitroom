@@ -561,6 +561,7 @@ function attempt(meta: RunMeta, backend: Backend, target: Target): Promise<Proce
     files: meta.files,
     web: !!meta.web,
     title: `pitroom ${meta.mode}: ${meta.task.replace(/\s+/g, ' ').slice(0, 60)}`,
+    project: meta.repoRoot && (meta.snapshot?.dir ?? meta.worktree) && meta.cwd !== meta.dir ? { root: meta.repoRoot, copy: (meta.snapshot?.dir ?? meta.worktree)! } : undefined,
   });
   return spawnWorker(inv, {
     cwd: meta.cwd,

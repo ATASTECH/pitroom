@@ -40,6 +40,8 @@ export interface WorkerRequest {
   files: string[];
   web: boolean;
   title: string;
+  /** When the worker runs in a snapshot or an isolated copy of the project: the project's root and the copy's. */
+  project?: { root: string; copy: string };
 }
 
 /** How to start the worker. The core adds its own env (git guard, recursion guard) and closes stdin. */

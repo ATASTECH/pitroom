@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Workers
+- **Antigravity: a task that names files outside the project no longer stops halfway.** agy's file tools stay in the workspace, and a headless agy cannot ask for more, so a read outside it ("copy the components from /tmp/ui-source") was refused and ended the turn without an answer. The folders and files a task names by absolute path (or `~/…`) that exist outside the workspace are now granted read-only (the sandbox mounts them read-only too), minus the secret files in them; never the root, your home itself or a folder above it, a top-level folder such as `/tmp`, Pitroom's own state, or a secret-looking file, and the secrets in your home stay denied. In a snapshot or an isolated copy the project's own paths in the task are turned into the copy's (links resolved, so `/tmp/…` and `/private/tmp/…` alike): the worker reads and edits its copy instead of being refused at the project.
+
 ## 0.24.0
 
 ### Workers

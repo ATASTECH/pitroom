@@ -518,6 +518,35 @@ test('antigravity: the parser keeps an answer after a retried error, and steps w
   assert.equal(refused.usage.denied, 1);
 });
 
+test('antigravity: what the task names outside the workspace is readable, minus its secrets; the project\'s paths point at the copy', () => {
+  const b = getBackend('antigravity');
+  const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-ws-'));
+  const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-src-'));
+  fs.mkdirSync(path.join(outside, 'lib'));
+  fs.writeFileSync(path.join(outside, 'lib', 'a.ts'), 'x');
+  fs.writeFileSync(path.join(outside, '.env'), 'SECRET=x');
+  const settingsFor = (prompt, over = {}) => {
+    const inv = b.invocation(request({ cwd: workspace, prompt, ...over }));
+    return { inv, s: JSON.parse(fs.readFileSync(path.join(inv.env.HOME, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8')) };
+  };
+  const asAgy = (p) => fs.realpathSync(p).replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
+  const { s } = settingsFor(`PROMPT-SENTINEL copy the components from ${outside}/lib, and also "${path.join(outside, 'lib', 'a.ts')}".`);
+  assert.ok(s.permissions.allow.includes(`read_file(${asAgy(path.join(outside, 'lib'))})`), s.permissions.allow.join('\n'));
+  assert.ok(s.permissions.allow.includes(`read_file(${asAgy(path.join(outside, 'lib', 'a.ts'))})`));
+  assert.ok(!s.permissions.allow.some((r) => r.startsWith('write_file(') && r.includes('agy-src-')), 'read-only');
+  // too wide, missing, a secret, or the user's home: never granted
+  const wide = settingsFor(`PROMPT-SENTINEL look in / and ${os.homedir()} and ${os.tmpdir()} and /no/such/dir and ${path.join(outside, '.env')}`).s;
+  assert.deepEqual(wide.permissions.allow.filter((r) => r.includes('agy-src-') || r === 'read_file(/)' || r === `read_file(${asAgy(os.homedir())})`), []);
+  // the secrets of a granted folder stay denied
+  const granted = settingsFor(`PROMPT-SENTINEL read ${outside}`).s;
+  assert.ok(granted.permissions.allow.includes(`read_file(${asAgy(outside)})`));
+  assert.ok(granted.permissions.deny.includes(`read_file(${asAgy(path.join(outside, '.env'))})`), granted.permissions.deny.filter((r) => r.includes('agy-src-')).join('\n'));
+  // in a snapshot or an isolated copy, the project's paths are the copy's; a longer name is another folder
+  const { inv } = settingsFor('PROMPT-SENTINEL fix /work/proj/src/a.ts, not /work/proj-old/b.ts; see /work/proj.', { project: { root: '/work/proj', copy: '/state/copy' } });
+  const prompt = inv.args[inv.args.indexOf('-p') + 1];
+  assert.match(prompt, /fix \/state\/copy\/src\/a\.ts, not \/work\/proj-old\/b\.ts; see \/state\/copy\./);
+});
+
 test('antigravity: agy 1.3.5\'s stream: a refused call ends in state ERROR, an unanswered turn is a failure, a cut-short run counts its steps\' tokens', () => {
   const b = getBackend('antigravity');
   const fixture = (f) => fs.readFileSync(path.join(FIXTURES, 'antigravity', f), 'utf8');

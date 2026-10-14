@@ -558,7 +558,7 @@ function denyCommandRules() {
     "command(eval)"
   ];
 }
-function workerSettings(workspace, workerHome3) {
+function workerSettings(workspace, workerHome3, reads = []) {
   const real = (p) => {
     try {
       return fs6.realpathSync(p);
@@ -568,7 +568,7 @@ function workerSettings(workspace, workerHome3) {
   };
   const both = (p) => [.../* @__PURE__ */ new Set([p, real(p)])];
   const secrets = [
-    ...findSecretFiles(workspace).map((f) => path5.join(workspace, f)),
+    ...[workspace, ...reads.filter((r) => isDir(r))].flatMap((d) => findSecretFiles(d).map((f) => path5.join(d, f))),
     ...HOME_SECRETS.map((f) => path5.join(os3.homedir(), f)).filter((p) => fs6.existsSync(p)),
     // the keychain link of the worker's own home
     path5.join(workerHome3, "Library")
@@ -581,7 +581,9 @@ function workerSettings(workspace, workerHome3) {
       allow: [
         "command(*)",
         ...both(path5.join(dataDir(workerHome3), "brain")).map((p) => `write_file(${rulePath(p)})`),
-        ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`)
+        ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
+        // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
+        ...reads.flatMap(both).map((p) => `read_file(${rulePath(p)})`)
       ],
       deny: [
         ...secrets.flatMap(both).map((p) => `read_file(${rulePath(p)})`),
@@ -604,6 +606,61 @@ function toolchains() {
   const install2 = (d) => path5.basename(d) === "bin" && /[\\/](versions|toolchains)[\\/]/.test(d) ? path5.dirname(d) : d;
   return [...new Set(dirs.map(install2))].filter((d) => !inHome(home()) || path5.relative(home(), d).startsWith(".."));
 }
+var isDir = (p) => {
+  try {
+    return fs6.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+var MAX_READS = 20;
+function pathsIn(prompt) {
+  const out = [];
+  for (const m of prompt.matchAll(/(^|[\s"'`(\[<{=])((?:~|[A-Za-z]:)?[\\/][^\s"'`)\]>}]*)/g)) {
+    const raw = m[2].replace(/[.,;:!?]+$/, "");
+    const abs = raw.startsWith("~") ? path5.join(os3.homedir(), raw.slice(1)) : raw;
+    if (raw && path5.isAbsolute(abs)) out.push({ raw, at: m.index + m[1].length, abs });
+  }
+  return out;
+}
+var realOf = (p) => {
+  try {
+    return fs6.realpathSync(p);
+  } catch {
+    return void 0;
+  }
+};
+function resolved(p) {
+  let dir = path5.resolve(p);
+  const rest = [];
+  for (; ; ) {
+    const r = realOf(dir);
+    if (r) return path5.join(r, ...rest);
+    const up = path5.dirname(dir);
+    if (up === dir) return path5.resolve(p);
+    rest.unshift(path5.basename(dir));
+    dir = up;
+  }
+}
+var inside = (p, dir) => {
+  const rel = path5.relative(dir, p);
+  return !rel || !rel.startsWith("..") && !path5.isAbsolute(rel);
+};
+function outsideReads(prompt, workspace) {
+  const homeDir = realOf(os3.homedir()) ?? os3.homedir();
+  const ws = realOf(workspace) ?? path5.resolve(workspace);
+  const own = realOf(home()) ?? home();
+  const found = /* @__PURE__ */ new Set();
+  for (const { abs } of pathsIn(prompt)) {
+    const p = realOf(abs);
+    if (!p || inside(p, ws) || inside(p, own) || inside(homeDir, p)) continue;
+    if (p.split(/[\\/]/).filter(Boolean).length < 2) continue;
+    if (!isDir(p) && looksSecret(path5.basename(p))) continue;
+    found.add(p);
+    if (found.size >= MAX_READS) break;
+  }
+  return [...found];
+}
 function baseSettings() {
   return {
     enableTerminalSandbox: true,
@@ -614,12 +671,12 @@ function baseSettings() {
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
-function workerHome(workspace) {
+function workerHome(workspace, reads = []) {
   const root = path5.join(home(), "antigravity-home");
   const id2 = crypto3.createHash("sha256").update(path5.resolve(workspace)).digest("hex").slice(0, 16);
   const dir = path5.join(root, id2);
   fs6.mkdirSync(dataDir(dir), { recursive: true });
-  writeIfChanged(path5.join(dataDir(dir), "settings.json"), `${JSON.stringify(workerSettings(workspace, dir), null, 2)}
+  writeIfChanged(path5.join(dataDir(dir), "settings.json"), `${JSON.stringify(workerSettings(workspace, dir, reads), null, 2)}
 `);
   if (process.platform === "darwin") {
     fs6.mkdirSync(path5.join(dir, "Library"), { recursive: true });
@@ -643,11 +700,25 @@ function pruneHomes(root, keep) {
   } catch {
   }
 }
+function inCopy(prompt, project) {
+  if (!project || project.root === project.copy) return prompt;
+  const root = resolved(project.root);
+  let out = "";
+  let from = 0;
+  for (const { raw, at, abs } of pathsIn(prompt)) {
+    const p = resolved(abs);
+    if (!inside(p, root)) continue;
+    out += prompt.slice(from, at) + path5.join(project.copy, path5.relative(root, p));
+    from = at + raw.length;
+  }
+  return out + prompt.slice(from);
+}
 function invocation(req) {
+  const prompt = inCopy(req.prompt, req.project);
   const args = [
     // -p takes the prompt as its value; one that starts with "-" would be read as an option: a leading space keeps it a value.
     "-p",
-    req.prompt.startsWith("-") ? ` ${req.prompt}` : req.prompt,
+    prompt.startsWith("-") ? ` ${prompt}` : prompt,
     "--output-format",
     "stream-json",
     "--mode",
@@ -662,7 +733,7 @@ function invocation(req) {
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd);
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd));
   const env = { HOME: workerDir };
   if (process.platform === "win32") env.USERPROFILE = workerDir;
   return { command, args: [...prefix, ...args], env };
@@ -4986,7 +5057,7 @@ function verifyRefs(refs, dirs) {
     if (!files.length) {
       if (!ref.file.includes("/") && !isFileName(ref.file)) continue;
       total++;
-      invalid.push({ ref: ref.text, reason: path26.isAbsolute(ref.file) && !inside(ref.file, roots) ? "outside the project" : "file not found" });
+      invalid.push({ ref: ref.text, reason: path26.isAbsolute(ref.file) && !inside2(ref.file, roots) ? "outside the project" : "file not found" });
       continue;
     }
     total++;
@@ -5036,16 +5107,16 @@ function indexFiles(roots) {
   return index;
 }
 function resolve(ref, roots) {
-  const candidates = path26.isAbsolute(ref) ? inside(ref, roots) ? [ref] : [] : roots.map((r) => path26.join(r, ref));
+  const candidates = path26.isAbsolute(ref) ? inside2(ref, roots) ? [ref] : [] : roots.map((r) => path26.join(r, ref));
   return candidates.find((c) => {
     try {
-      return fs30.statSync(c).isFile() && inside(c, roots);
+      return fs30.statSync(c).isFile() && inside2(c, roots);
     } catch {
       return false;
     }
   });
 }
-function inside(file2, roots) {
+function inside2(file2, roots) {
   return roots.some((r) => {
     const rel = path26.relative(r, path26.resolve(file2));
     return rel !== "" && !rel.startsWith("..") && !path26.isAbsolute(rel);
@@ -5471,7 +5542,8 @@ function attempt(meta, backend, target) {
     sessionId: meta.sessionId,
     files: meta.files,
     web: !!meta.web,
-    title: `pitroom ${meta.mode}: ${meta.task.replace(/\s+/g, " ").slice(0, 60)}`
+    title: `pitroom ${meta.mode}: ${meta.task.replace(/\s+/g, " ").slice(0, 60)}`,
+    project: meta.repoRoot && (meta.snapshot?.dir ?? meta.worktree) && meta.cwd !== meta.dir ? { root: meta.repoRoot, copy: meta.snapshot?.dir ?? meta.worktree } : void 0
   });
   return spawnWorker(inv, {
     cwd: meta.cwd,
@@ -7696,7 +7768,7 @@ function answerParts(answer) {
   const summary = s ? s[1] : text.split(/^\s*(?:DETAILS|FILES CHANGED|VERIFICATION|OPEN ISSUES):/m)[0];
   return { summary: summary.trim(), details: (d?.[1] ?? "").trim() };
 }
-function pathsIn(text) {
+function pathsIn2(text) {
   const found = text.replace(/\\/g, "/").match(/[A-Za-z0-9_.@\-/]+\.[A-Za-z0-9]{1,8}(?::\d+)?/g) ?? [];
   return [...new Set(found.map((p) => clean(p.replace(/:\d+$/, ""))))];
 }
@@ -7708,7 +7780,7 @@ function scoreAnswer(q, truth, answer, root) {
   if ("line" in truth) {
     const flat = summary.replace(/\s+/g, " ");
     if (new RegExp(`(^|[^\\w./-])\\.?/?${escape2(truth.path)}:${truth.line}(?!\\d)`).test(flat)) return { score: 1, got: `${truth.path}:${truth.line}` };
-    const named = pathsIn(flat).includes(truth.path);
+    const named = pathsIn2(flat).includes(truth.path);
     return { score: named ? 0.5 : 0, got: flat.slice(0, 120) };
   }
   if ("count" in truth) {
@@ -7716,8 +7788,8 @@ function scoreAnswer(q, truth, answer, root) {
     const got2 = n ? Number(n[0].replace(/,/g, "")) : void 0;
     return { score: got2 === truth.count ? 1 : 0, got: got2 === void 0 ? "(no number)" : String(got2) };
   }
-  let got = pathsIn(summary);
-  if (!got.length) got = pathsIn(details);
+  let got = pathsIn2(summary);
+  if (!got.length) got = pathsIn2(details);
   const hit = got.filter((p) => truth.files.includes(p)).length;
   const precision = got.length ? hit / got.length : 0;
   const recall = truth.files.length ? hit / truth.files.length : got.length ? 0 : 1;
@@ -7880,9 +7952,9 @@ function writePackage(job) {
   const root = repoRoot(job.dir);
   if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
   const name = `review-${crypto13.randomBytes(4).toString("hex")}.md`;
-  const inside2 = !path35.relative(fs40.realpathSync(root), fs40.realpathSync(g)).startsWith("..");
-  const file2 = inside2 ? path35.join(g, "pitroom", name) : path35.join(root, ".pitroom", name);
-  if (!inside2) ignoreInGit(root, "/.pitroom/");
+  const inside3 = !path35.relative(fs40.realpathSync(root), fs40.realpathSync(g)).startsWith("..");
+  const file2 = inside3 ? path35.join(g, "pitroom", name) : path35.join(root, ".pitroom", name);
+  if (!inside3) ignoreInGit(root, "/.pitroom/");
   fs40.mkdirSync(path35.dirname(file2), { recursive: true });
   fs40.writeFileSync(file2, job.package);
   return file2;
@@ -8615,9 +8687,9 @@ function doctor8(probe2) {
   section2("Worker chain");
   const chain = [];
   try {
-    const resolved = resolveChain();
-    chain.push(resolved.worker, ...resolved.fallback);
-    for (const w of resolved.warnings) add2("warn", w);
+    const resolved2 = resolveChain();
+    chain.push(resolved2.worker, ...resolved2.fallback);
+    for (const w of resolved2.warnings) add2("warn", w);
   } catch (e) {
     add2("fail", e.message);
   }
