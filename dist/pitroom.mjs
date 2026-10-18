@@ -6696,7 +6696,7 @@ var MISSING = `<!doctype html><meta charset="utf-8"><title>Pitroom</title><body 
 // src/core/dash.ts
 var DEFAULT_PORT = 7878;
 var DAY_MS = 24 * 3600 * 1e3;
-var PERIODS = { day: 1, week: 7, month: 30, half: 182 };
+var PERIODS = { day: 1, week: 7, month: 30, half: 182, all: Infinity };
 var SCAN = 400;
 var RUN_ID3 = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
 var LOCAL_HOST = /^(127\.0\.0\.1|localhost|\[::1\]):\d+$/i;
@@ -6769,7 +6769,7 @@ function dashState(opts = {}) {
   const whole = new Set(metas.slice(0, limit).flatMap((m) => m.group ? [m.group] : []));
   const runs = metas.filter((m, i) => i < limit || m.group && whole.has(m.group)).map(toRun);
   const now = Date.now();
-  const ledger = readLedger(now - PERIODS.half * DAY_MS);
+  const ledger = readLedger();
   const within = (at, days2) => !!at && Date.parse(at) >= now - days2 * DAY_MS;
   const per = (f) => Object.fromEntries(Object.entries(PERIODS).map(([p, days2]) => [p, f(days2)]));
   return {

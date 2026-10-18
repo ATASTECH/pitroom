@@ -218,7 +218,9 @@ test('dash: a crew on the edge of the limit is returned whole; the finished coun
   assert.equal(s.run(['run', 'newest and alone']).status, 0);
   // a run that ended 10 days ago counts in the month and the six months, not the week
   const old = { id: '20000101-000000-abcd', at: new Date(Date.now() - 10 * 86400e3).toISOString(), mode: 'read', state: 'done', tokens: 1000, returned: 10, workerCost: 0, saved: 2, price: 'x' };
-  fs.appendFileSync(path.join(s.base, 'home', 'ledger.jsonl'), `${JSON.stringify(old)}\n`);
+  // and one from 300 days ago only in all time
+  const older = { ...old, id: '20000101-000000-abce', at: new Date(Date.now() - 300 * 86400e3).toISOString() };
+  fs.appendFileSync(path.join(s.base, 'home', 'ledger.jsonl'), `${JSON.stringify(old)}\n${JSON.stringify(older)}\n`);
   const start = s.run(['dash', '--detach', '--port', '0']);
   assert.equal(start.status, 0, start.stderr);
   const url = start.stdout.trim();
@@ -231,7 +233,7 @@ test('dash: a crew on the edge of the limit is returned whole; the finished coun
     assert.equal(one.length, 1, 'a limit that cuts no crew still limits');
     assert.equal(one[0].group, undefined);
     // the finished runs of each period are all of them, not the ones the limit lets onto the page
-    assert.deepEqual(oneState.finished, { day: 4, week: 4, month: 5, half: 5 });
+    assert.deepEqual(oneState.finished, { day: 4, week: 4, month: 5, half: 5, all: 6 });
     assert.ok(Math.abs(oneState.saved.month - oneState.saved.week - 2) < 1e-9, 'savings per period too');
     assert.equal(JSON.parse((await get(`${url}api/state?limit=2`)).body).finished.week, 4);
     assert.equal(JSON.parse((await get(`${url}api/state?limit=1&group=edge-crew`)).body).finished.week, 3, "a group's own");

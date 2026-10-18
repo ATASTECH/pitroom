@@ -29,7 +29,7 @@ import { elapsed, kind, what, workerName, ranTarget } from './ui.js';
 export const DEFAULT_PORT = 7878;
 const DAY_MS = 24 * 3600 * 1000;
 /** The windows the page's counts can be read over, in days back from now. */
-export const PERIODS = { day: 1, week: 7, month: 30, half: 182 } as const;
+export const PERIODS = { day: 1, week: 7, month: 30, half: 182, all: Infinity } as const;
 export type Period = keyof typeof PERIODS;
 /** How many of the newest run records one request reads at most. */
 const SCAN = 400;
@@ -156,7 +156,7 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
   const whole = new Set(metas.slice(0, limit).flatMap((m) => (m.group ? [m.group] : [])));
   const runs = metas.filter((m, i) => i < limit || (m.group && whole.has(m.group))).map(toRun);
   const now = Date.now();
-  const ledger = readLedger(now - PERIODS.half * DAY_MS);
+  const ledger = readLedger();
   const within = (at: string | undefined, days: number) => !!at && Date.parse(at) >= now - days * DAY_MS;
   const per = (f: (days: number) => number) =>
     Object.fromEntries(Object.entries(PERIODS).map(([p, days]) => [p, f(days)])) as Record<Period, number>;

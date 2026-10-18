@@ -32,7 +32,7 @@ function useCount(to: number, ms = 450) {
   return v;
 }
 
-const PERIODS: Record<Period, string> = { day: '24 hours', week: '7 days', month: '30 days', half: '6 months' };
+const PERIODS: Record<Period, string> = { day: '24 hours', week: '7 days', month: '30 days', half: '6 months', all: 'All time' };
 
 /** A card's period, remembered in this browser (the week until one is picked). */
 function usePeriod(card: string) {

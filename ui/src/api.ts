@@ -27,8 +27,8 @@ export interface DashRun {
   note: string;
 }
 
-/** The windows the live page's counts can be read over: the last 24 hours, 7 days, 30 days, 6 months. */
-export type Period = 'day' | 'week' | 'month' | 'half';
+/** The windows the live page's counts can be read over: the last 24 hours, 7 days, 30 days, 6 months, or all time. */
+export type Period = 'day' | 'week' | 'month' | 'half' | 'all';
 
 export interface DashState {
   price: string;
