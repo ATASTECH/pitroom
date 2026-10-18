@@ -27,10 +27,15 @@ export interface DashRun {
   note: string;
 }
 
+/** The windows the live page's counts can be read over: the last 24 hours, 7 days, 30 days, 6 months. */
+export type Period = 'day' | 'week' | 'month' | 'half';
+
 export interface DashState {
   price: string;
   running: number;
-  saved: number;
+  /** Finished in each period (of the picked group), not just the runs on the page. */
+  finished: Record<Period, number>;
+  saved: Record<Period, number>;
   groups: string[];
   runs: DashRun[];
 }

@@ -27,7 +27,10 @@ import { describeTarget } from './target.js';
 import { elapsed, kind, what, workerName, ranTarget } from './ui.js';
 
 export const DEFAULT_PORT = 7878;
-const WEEK_MS = 7 * 24 * 3600 * 1000;
+const DAY_MS = 24 * 3600 * 1000;
+/** The windows the page's counts can be read over, in days back from now. */
+export const PERIODS = { day: 1, week: 7, month: 30, half: 182 } as const;
+export type Period = keyof typeof PERIODS;
 /** How many of the newest run records one request reads at most. */
 const SCAN = 400;
 const RUN_ID = /^\d{8}-\d{6}-[0-9a-f]{4}$/;
@@ -62,7 +65,9 @@ export interface DashState {
   /** The primary model whose list price the savings are estimated against. */
   price: string;
   running: number;
-  saved: number;
+  /** Runs finished in each period (of the group, when one is picked), not just the ones on the page: a new run never lowers it. */
+  finished: Record<Period, number>;
+  saved: Record<Period, number>;
   groups: string[];
   runs: DashRun[];
 }
@@ -127,9 +132,11 @@ function toRun(m: RunMeta): DashRun {
 }
 
 /**
- * What the page shows: the newest runs (optionally of one group), the running count, this week's savings. A group
- * that has a run among the newest is shown whole (its older runs too, within what is scanned), so a crew on the
- * edge of the limit never reads as fewer runs than it has.
+ * What the page shows: the newest runs (optionally of one group), the running count, and the finished runs and savings
+ * of each period. A group that has a run among the newest is shown whole (its older runs too, within what is scanned),
+ * so a crew on the edge of the limit never reads as fewer runs than it has. Finished runs come from the ledger (what
+ * the savings come from too), so they do not shrink as new runs push older ones off the page; a group's, which the
+ * ledger does not know, from its scanned runs. Audits are left out of both: they are overhead, not work handed off.
  */
 export function dashState(opts: { group?: string; limit?: number } = {}): DashState {
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
@@ -148,10 +155,20 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
   }
   const whole = new Set(metas.slice(0, limit).flatMap((m) => (m.group ? [m.group] : [])));
   const runs = metas.filter((m, i) => i < limit || (m.group && whole.has(m.group))).map(toRun);
+  const now = Date.now();
+  const ledger = readLedger(now - PERIODS.half * DAY_MS);
+  const within = (at: string | undefined, days: number) => !!at && Date.parse(at) >= now - days * DAY_MS;
+  const per = (f: (days: number) => number) =>
+    Object.fromEntries(Object.entries(PERIODS).map(([p, days]) => [p, f(days)])) as Record<Period, number>;
   return {
     price: primaryPrice().name,
     running: runs.filter((r) => r.state === 'running' || r.state === 'queued').length,
-    saved: totals(readLedger(Date.now() - WEEK_MS)).saved,
+    finished: per((days) =>
+      opts.group
+        ? metas.filter((m) => m.state === 'done' && !m.auditOf && within(m.endedAt, days)).length
+        : ledger.filter((e) => e.state === 'done' && within(e.at, days)).length,
+    ),
+    saved: per((days) => totals(ledger.filter((e) => within(e.at, days))).saved),
     groups: [...groups].sort(),
     runs,
   };

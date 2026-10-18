@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Dashboard
+- **"Finished" no longer goes down as you start runs.** It counted the finished runs among the ones on the page (the newest 40), so each new run pushed a finished one off and the number dropped. It now counts every finished run of the period, from the ledger the savings come from (a picked group's from its own runs); audits are left out, as in the savings.
+- **A period on the Finished and Est. saved cards**: 24 hours, 7 days (the default), 30 days or 6 months, picked on each card and remembered in the browser.
+
 ## 0.24.1
 
 ### Workers

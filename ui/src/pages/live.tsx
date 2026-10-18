@@ -1,6 +1,6 @@
 import { Search } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import { type DashRun, api } from '@/api';
+import { type DashRun, type Period, api } from '@/api';
 import { GroupCard } from '@/components/group-card';
 import { Hint } from '@/components/hint';
 import { RunCard } from '@/components/run-card';
@@ -32,10 +32,44 @@ function useCount(to: number, ms = 450) {
   return v;
 }
 
-function Stat({ label, value, tone, pulse, hint }: { label: string; value: string; tone?: string; pulse?: boolean; hint?: React.ReactNode }) {
+const PERIODS: Record<Period, string> = { day: '24 hours', week: '7 days', month: '30 days', half: '6 months' };
+
+/** A card's period, remembered in this browser (the week until one is picked). */
+function usePeriod(card: string) {
+  const key = `pitroom-period-${card}`;
+  const [period, setPeriod] = useState<Period>(() => {
+    try {
+      const v = localStorage.getItem(key);
+      if (v && v in PERIODS) return v as Period;
+    } catch { /* private mode */ }
+    return 'week';
+  });
+  const pick = (p: Period) => {
+    setPeriod(p);
+    try { localStorage.setItem(key, p); } catch { /* private mode */ }
+  };
+  return [period, pick] as const;
+}
+
+// a dash left running from an older version serves this page too (assets are re-read), with one week's savings and no finished count
+const inPeriod = (v: Record<Period, number> | number | undefined, p: Period) => (typeof v === 'number' ? v : v?.[p]);
+
+function PeriodSelect({ value, onChange }: { value: Period; onChange: (p: Period) => void }) {
+  return (
+    <Select value={value} onValueChange={(v) => v && onChange(v as Period)} items={PERIODS}>
+      <SelectTrigger size="sm" aria-label="Period" className="h-6 gap-1 px-2 text-xs text-muted-foreground"><SelectValue /></SelectTrigger>
+      <SelectContent>{(Object.keys(PERIODS) as Period[]).map((p) => <SelectItem key={p} value={p}>{PERIODS[p]}</SelectItem>)}</SelectContent>
+    </Select>
+  );
+}
+
+function Stat({ label, value, tone, pulse, hint, period }: { label: string; value: string; tone?: string; pulse?: boolean; hint?: React.ReactNode; period?: React.ReactNode }) {
   return (
     <Card className={cn('relative gap-1 overflow-hidden px-5 py-4 animate-in fade-in slide-in-from-bottom-1 duration-500 fill-mode-both', pulse && 'border-info/30')}>
-      <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}{hint && <Hint>{hint}</Hint>}</p>
+      <div className="flex min-h-6 items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}{hint && <Hint>{hint}</Hint>}</p>
+        {period}
+      </div>
       <p className={cn('flex items-center gap-2.5 text-3xl font-semibold tabular-nums tracking-tight', tone)}>
         {pulse !== undefined && <span className={cn('size-2.5 rounded-full', pulse ? 'animate-ping-slow bg-info' : 'bg-muted-foreground/40')} />}
         {value}
@@ -51,10 +85,12 @@ export function LivePage({ focus }: { focus?: string }) {
   const [filter, setFilter] = useState<'all' | 'running' | 'problem'>('all');
   const [group, setGroup] = useState('');
   const [q, setQ] = useState('');
+  const [finishedIn, setFinishedIn] = usePeriod('finished');
+  const [savedIn, setSavedIn] = usePeriod('saved');
   const { data } = usePoll(() => api.state(limit, group || undefined), 2000, [limit, group]);
   const running = useCount(data?.running ?? 0);
-  const saved = useCount(data?.saved ?? 0);
-  const finished = useCount(data?.runs.filter((r) => r.state === 'done').length ?? 0);
+  const saved = useCount(inPeriod(data?.saved, savedIn) ?? 0);
+  const finished = useCount(inPeriod(data?.finished, finishedIn) ?? data?.runs.filter((r) => r.state === 'done').length ?? 0);
 
   const shown = useMemo(
     () =>
@@ -70,8 +106,8 @@ export function LivePage({ focus }: { focus?: string }) {
     <div className="space-y-5">
       <div className="grid gap-3 sm:grid-cols-3">
         <Stat label="Running now" value={String(Math.round(running))} pulse={(data?.running ?? 0) > 0} tone={data?.running ? 'text-info' : undefined} />
-        <Stat label="Finished" value={String(Math.round(finished))} />
-        <Stat label="Est. saved this week" value={usd(saved)} tone="text-success" hint={<SavingsNote price={data?.price} />} />
+        <Stat label="Finished" value={String(Math.round(finished))} period={<PeriodSelect value={finishedIn} onChange={setFinishedIn} />} />
+        <Stat label="Est. saved" value={usd(saved)} tone="text-success" hint={<SavingsNote price={data?.price} />} period={<PeriodSelect value={savedIn} onChange={setSavedIn} />} />
       </div>
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-48 flex-1">
