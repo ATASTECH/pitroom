@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.25.0
 
 ### Dashboard
 - **"Finished" no longer goes down as you start runs.** It counted the finished runs among the ones on the page (the newest 40), so each new run pushed a finished one off and the number dropped. It now counts every finished run of the period, from the ledger the savings come from (a picked group's from its own runs); audits are left out, as in the savings.
