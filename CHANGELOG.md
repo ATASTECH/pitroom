@@ -14,6 +14,10 @@
 - **An estimated cost says so.** `pitroom history` has a COST column, and `pitroom savings --models` its cost: a cost the worker's CLI did not report (Codex, Gemini) and that was estimated from a price (your `workerPrices`, else the catalog's) reads `~$0.40`, a reported one `$0.40`, a free one `free`. `history --json` rows carry `cost` and `costEstimated`.
 - **Prices from your agent**: `pitroom_info` has a `prices` topic: the primary's price the savings are measured against and the price each worker in use gets, or the `worker` named. `pitroom prices WORKER…` does the same on the command line, and now also prints the primary's price.
 
+### Docs and tests
+- **The review benchmark measures false alarms.** 16 new packages make a change that cannot alter what the code does (a comparison mirrored, `i < n` to `n > i`, only where it is the same expression; Pitroom's own also in its committed `dist/`), looking like the planted bugs. `big-pickle` raised no false alarm in 13 reviews; `nemotron-3-ultra` raised 4 in 14 and `mimo-v2.6-flash` 2 in 13, each filing a change it called harmless as Important for style. The README's table has the new column. `test/bench-equiv.test.mjs` checks the rule: what it rejects, and that each mirrored expression gives the same value for thousands of inputs.
+- The benchmark's scorer read a review with no Critical heading (it went straight to Important) as having no findings: a few found bugs were counted as misses (`nemotron-3-ultra` 97% to 100%, `muse-spark` 93% to 97%, `longcat` 83% to 86%).
+
 ## 0.25.0
 
 ### Dashboard

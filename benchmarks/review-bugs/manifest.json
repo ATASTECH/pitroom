@@ -583,8 +583,8 @@
   "commit": "d72b85e13c458dfc7abc42399dd09049f10caa66",
   "file": "src/core/report.ts",
   "op": "boundary",
-  "before": "if (lines.length > maxLines) out.push(`\u2026 (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);",
-  "after": "if (lines.length >= maxLines) out.push(`\u2026 (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);",
+  "before": "if (lines.length > maxLines) out.push(`… (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);",
+  "after": "if (lines.length >= maxLines) out.push(`… (${lines.length - maxLines} more lines: pitroom show ${meta.id} --full)`);",
   "line": 54
  },
  {
@@ -625,5 +625,378 @@
   "before": "if (exists && !isOurLauncher(dest, root)) {",
   "after": "if (exists || !isOurLauncher(dest, root)) {",
   "line": 73
+ },
+ {
+  "id": "p49",
+  "repo": "react",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "7c6ac13e19fef500b7f669a16bbd01ecc95965ca",
+  "commit": "547fd2d09a7af3b3e5934af5d8a17b30e9fc71c6",
+  "file": "packages/react-reconciler/src/ReactFiberDuplicateViewTransitions.js",
+  "op": "mirror",
+  "before": "if (existing !== fiber && existing !== fiber.alternate) {",
+  "after": "if (fiber !== existing && existing !== fiber.alternate) {",
+  "line": 30,
+  "edits": [
+   {
+    "line": 30,
+    "before": "if (existing !== fiber && existing !== fiber.alternate) {",
+    "after": "if (fiber !== existing && existing !== fiber.alternate) {"
+   }
+  ]
+ },
+ {
+  "id": "p50",
+  "repo": "react",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "7c6ac13e19fef500b7f669a16bbd01ecc95965ca",
+  "commit": "159c0e375d09c6ce9afa18032ad63a5675fc0a06",
+  "file": "packages/react-reconciler/src/ReactFiberComponentStack.js",
+  "op": "mirror",
+  "before": "if (fiber.child !== childFiber && childFiber !== null) {",
+  "after": "if (childFiber !== fiber.child && childFiber !== null) {",
+  "line": 47,
+  "edits": [
+   {
+    "line": 47,
+    "before": "if (fiber.child !== childFiber && childFiber !== null) {",
+    "after": "if (childFiber !== fiber.child && childFiber !== null) {"
+   },
+   {
+    "line": 120,
+    "before": "if (workInProgress.tag === HostText) {",
+    "after": "if (HostText === workInProgress.tag) {"
+   }
+  ]
+ },
+ {
+  "id": "p51",
+  "repo": "react",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "7c6ac13e19fef500b7f669a16bbd01ecc95965ca",
+  "commit": "4621fcfc42744b438461d2f560d12efbdeb03c4a",
+  "file": "packages/react-reconciler/src/ReactFiberThenable.js",
+  "op": "mirror",
+  "before": "if (a === b) {",
+  "after": "if (b === a) {",
+  "line": 431,
+  "edits": [
+   {
+    "line": 431,
+    "before": "if (a === b) {",
+    "after": "if (b === a) {"
+   },
+   {
+    "line": 442,
+    "before": "if (a.tag === HostRoot && a.stateNode !== b.stateNode) {",
+    "after": "if (HostRoot === a.tag && a.stateNode !== b.stateNode) {"
+   }
+  ]
+ },
+ {
+  "id": "p52",
+  "repo": "react",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "7c6ac13e19fef500b7f669a16bbd01ecc95965ca",
+  "commit": "b875c3460bcd8ced19622d79164d679de817c74f",
+  "file": "packages/react-reconciler/src/ReactFiberLegacyContext.js",
+  "op": "mirror",
+  "before": "if (contextStackCursor.current !== emptyContextObject) {",
+  "after": "if (emptyContextObject !== contextStackCursor.current) {",
+  "line": 155,
+  "edits": [
+   {
+    "line": 155,
+    "before": "if (contextStackCursor.current !== emptyContextObject) {",
+    "after": "if (emptyContextObject !== contextStackCursor.current) {"
+   }
+  ]
+ },
+ {
+  "id": "p53",
+  "repo": "django",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "50eef95591b1e5d8c47b2e8c96066cb0c516753a",
+  "commit": "45b2720fbacfea0ec1d4c8c0117087023c128737",
+  "file": "django/utils/translation/template.py",
+  "op": "mirror",
+  "before": "if t.token_type != TokenType.COMMENT:",
+  "after": "if TokenType.COMMENT != t.token_type:",
+  "line": 162,
+  "edits": [
+   {
+    "line": 162,
+    "before": "if t.token_type != TokenType.COMMENT:",
+    "after": "if TokenType.COMMENT != t.token_type:"
+   },
+   {
+    "line": 180,
+    "before": "if t.token_type == TokenType.BLOCK:",
+    "after": "if TokenType.BLOCK == t.token_type:"
+   }
+  ]
+ },
+ {
+  "id": "p54",
+  "repo": "django",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "50eef95591b1e5d8c47b2e8c96066cb0c516753a",
+  "commit": "917841672a30b889372503ae311179bffec6aec8",
+  "file": "django/utils/timesince.py",
+  "op": "mirror",
+  "before": "if d.day > now.day or (d.day == now.day and d.time() > now.time()):",
+  "after": "if now.day < d.day or (d.day == now.day and d.time() > now.time()):",
+  "line": 84,
+  "edits": [
+   {
+    "line": 84,
+    "before": "if d.day > now.day or (d.day == now.day and d.time() > now.time()):",
+    "after": "if now.day < d.day or (d.day == now.day and d.time() > now.time()):"
+   },
+   {
+    "line": 126,
+    "before": "while i < len(TIME_STRINGS_KEYS) and current_depth < depth:",
+    "after": "while i < len(TIME_STRINGS_KEYS) and depth > current_depth:"
+   }
+  ]
+ },
+ {
+  "id": "p55",
+  "repo": "django",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "50eef95591b1e5d8c47b2e8c96066cb0c516753a",
+  "commit": "410d576f41116b6276fb6af6adb5270bf170bd32",
+  "file": "django/db/models/fields/reverse_related.py",
+  "op": "mirror",
+  "before": "if self.symmetrical and model == self.model:",
+  "after": "if self.symmetrical and self.model == model:",
+  "line": 226,
+  "edits": [
+   {
+    "line": 226,
+    "before": "if self.symmetrical and model == self.model:",
+    "after": "if self.symmetrical and self.model == model:"
+   }
+  ]
+ },
+ {
+  "id": "p56",
+  "repo": "django",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "50eef95591b1e5d8c47b2e8c96066cb0c516753a",
+  "commit": "5e6d4f4803b429d38e7e757eeaad197a45fd6b08",
+  "file": "django/db/models/sql/where.py",
+  "op": "mirror",
+  "before": "if self.connector == XOR and not connection.features.supports_logical_xor:",
+  "after": "if XOR == self.connector and not connection.features.supports_logical_xor:",
+  "line": 130,
+  "edits": [
+   {
+    "line": 130,
+    "before": "if self.connector == XOR and not connection.features.supports_logical_xor:",
+    "after": "if XOR == self.connector and not connection.features.supports_logical_xor:"
+   }
+  ]
+ },
+ {
+  "id": "p57",
+  "repo": "kubernetes",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "08147af84478f859c2e2234d71ceace8bdb412c7",
+  "commit": "ec94861c54028f9cc7d7852b62c294685401f709",
+  "file": "pkg/scheduler/backend/cache/node_tree.go",
+  "op": "mirror",
+  "before": "if nodeName == n.Name {",
+  "after": "if n.Name == nodeName {",
+  "line": 74,
+  "edits": [
+   {
+    "line": 74,
+    "before": "if nodeName == n.Name {",
+    "after": "if n.Name == nodeName {"
+   },
+   {
+    "line": 94,
+    "before": "if z == zone {",
+    "after": "if zone == z {"
+   }
+  ]
+ },
+ {
+  "id": "p58",
+  "repo": "kubernetes",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "08147af84478f859c2e2234d71ceace8bdb412c7",
+  "commit": "523e0c5e15eeea9d0b6ed39923dc6747bab85b1e",
+  "file": "pkg/scheduler/extender.go",
+  "op": "mirror",
+  "before": "if resp.StatusCode != http.StatusOK {",
+  "after": "if http.StatusOK != resp.StatusCode {",
+  "line": 421,
+  "edits": [
+   {
+    "line": 421,
+    "before": "if resp.StatusCode != http.StatusOK {",
+    "after": "if http.StatusOK != resp.StatusCode {"
+   }
+  ]
+ },
+ {
+  "id": "p59",
+  "repo": "kubernetes",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "08147af84478f859c2e2234d71ceace8bdb412c7",
+  "commit": "948b4b9f2200719737fed71ed37051bb5027806a",
+  "file": "pkg/kubelet/cm/qos_container_manager_linux.go",
+  "op": "mirror",
+  "before": "if qosClass == v1.PodQOSBurstable {",
+  "after": "if v1.PodQOSBurstable == qosClass {",
+  "line": 120,
+  "edits": [
+   {
+    "line": 120,
+    "before": "if qosClass == v1.PodQOSBurstable {",
+    "after": "if v1.PodQOSBurstable == qosClass {"
+   }
+  ]
+ },
+ {
+  "id": "p60",
+  "repo": "kubernetes",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "08147af84478f859c2e2234d71ceace8bdb412c7",
+  "commit": "6b70873d1e71e75014447fa8e87e6948389547e1",
+  "file": "pkg/kubelet/cm/cpumanager/state/checkpoint.go",
+  "op": "mirror",
+  "before": "if cp.Checksum != actualCS {",
+  "after": "if actualCS != cp.Checksum {",
+  "line": 233,
+  "edits": [
+   {
+    "line": 233,
+    "before": "if cp.Checksum != actualCS {",
+    "after": "if actualCS != cp.Checksum {"
+   },
+   {
+    "line": 259,
+    "before": "if cp.Checksum != actualCS {",
+    "after": "if actualCS != cp.Checksum {"
+   }
+  ]
+ },
+ {
+  "id": "p61",
+  "repo": "pitroom",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "d0acf5e66561833fef1e2bc0167f4103bbdb729f",
+  "commit": "ea74e7185f023cd846d96a02e1426b7e7197bd69",
+  "file": "src/core/run.ts",
+  "op": "mirror",
+  "before": "for (let i = 0; i < chain.length; i++) {",
+  "after": "for (let i = 0; chain.length > i; i++) {",
+  "line": 222,
+  "edits": [
+   {
+    "line": 222,
+    "before": "for (let i = 0; i < chain.length; i++) {",
+    "after": "for (let i = 0; chain.length > i; i++) {"
+   },
+   {
+    "line": 234,
+    "before": "for (let j = chain.length - 1; j > i; j--) {",
+    "after": "for (let j = chain.length - 1; i < j; j--) {"
+   }
+  ],
+  "generated": [
+   "dist/pitroom.mjs"
+  ]
+ },
+ {
+  "id": "p62",
+  "repo": "pitroom",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "d0acf5e66561833fef1e2bc0167f4103bbdb729f",
+  "commit": "842bdf797389ca729b08eecb94e936e2920c825b",
+  "file": "src/core/review.ts",
+  "op": "mirror",
+  "before": "const reviewed = chain.find((a) => a.id === previous.reviewOf)!;",
+  "after": "const reviewed = chain.find((a) => previous.reviewOf === a.id)!;",
+  "line": 103,
+  "edits": [
+   {
+    "line": 103,
+    "before": "const reviewed = chain.find((a) => a.id === previous.reviewOf)!;",
+    "after": "const reviewed = chain.find((a) => previous.reviewOf === a.id)!;"
+   }
+  ],
+  "generated": [
+   "dist/pitroom.mjs"
+  ]
+ },
+ {
+  "id": "p63",
+  "repo": "pitroom",
+  "kind": "equiv",
+  "difficulty": "one",
+  "base": "d0acf5e66561833fef1e2bc0167f4103bbdb729f",
+  "commit": "d3d9b7e99fe0e7d6e878a9844ad3f1acc09d2d85",
+  "file": "src/backends/claude/index.ts",
+  "op": "mirror",
+  "before": "if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });",
+  "after": "if (def && !models.some((m) => def === m.id)) models.push({ id: def, efforts: CLAUDE_EFFORTS });",
+  "line": 144,
+  "edits": [
+   {
+    "line": 144,
+    "before": "if (def && !models.some((m) => m.id === def)) models.push({ id: def, efforts: CLAUDE_EFFORTS });",
+    "after": "if (def && !models.some((m) => def === m.id)) models.push({ id: def, efforts: CLAUDE_EFFORTS });"
+   }
+  ],
+  "generated": [
+   "dist/pitroom.mjs",
+   "dist/lib.mjs"
+  ]
+ },
+ {
+  "id": "p64",
+  "repo": "pitroom",
+  "kind": "equiv",
+  "difficulty": "two",
+  "base": "d0acf5e66561833fef1e2bc0167f4103bbdb729f",
+  "commit": "7e23070dca2a7609b5f118e320fbde0776e27264",
+  "file": "src/core/models.ts",
+  "op": "mirror",
+  "before": "if (opts.backend && b.id !== opts.backend) continue;",
+  "after": "if (opts.backend && opts.backend !== b.id) continue;",
+  "line": 73,
+  "edits": [
+   {
+    "line": 73,
+    "before": "if (opts.backend && b.id !== opts.backend) continue;",
+    "after": "if (opts.backend && opts.backend !== b.id) continue;"
+   },
+   {
+    "line": 101,
+    "before": "if (known.has(key) || (opts.backend && worker !== opts.backend)) continue;",
+    "after": "if (known.has(key) || (opts.backend && opts.backend !== worker)) continue;"
+   }
+  ],
+  "generated": [
+   "dist/pitroom.mjs"
+  ]
  }
 ]

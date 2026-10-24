@@ -244,21 +244,23 @@ Only workers that ran are in the table. Models that could not answer at all (a p
 </details>
 
 <details>
-<summary>Does a review find a planted bug?</summary>
+<summary>Does a review find a planted bug, and leave a harmless change alone?</summary>
 
 **Does a review find a planted bug?** A bug was changed into real code (an inverted check, a swapped `&&`/`||`, a flipped `return`) in React, Django, Kubernetes and Pitroom itself, committed as a bare "tidy", and `pitroom review` was asked to review the commit. 29 packages (14 with the bug alone, 15 with the bug and three comment-only edits around it). A review counts as a find when a Critical or Important finding names the changed file and either cites a line within 5 or names the changed identifier or its function; "exact line" is the strict version (within 3).
 
-| Worker and model | Bug found | Exact line | Reviews | Mean time | Slowest |
-|---|---|---|---|---|---|
-| OpenCode `space-bunny-free` | 100% | 100% | 29 of 29 | 2 min 19 s | 5 min 46 s |
-| OpenCode `nemotron-3-ultra-free` | 97% | 79% | 29 of 29 | 1 min 45 s | 3 min 29 s |
-| OpenCode `longcat-2.5-preview-free` | 83% | 83% | 29 of 29 | 2 min 53 s | 8 min (1 timed out) |
-| Codex `gpt-6-sol` | 100% | 100% | 9 of 29 | 38 s | 52 s |
-| OpenCode `muse-spark-1.3-contributor-free` | 100% | 57% | 14 of 29 | 48 s | 2 min 0 s |
-| OpenCode `big-pickle` | 100% | 92% | 13 of 29 | 2 min 28 s | 5 min 27 s |
-| OpenCode `mimo-v2.6-flash-free` | 100% | 100% | 10 of 29 | 4 min 6 s | 7 min 40 s |
+**Does it leave a harmless change alone?** 16 more packages look the same (a comparison changed on one or two lines, the same "tidy" message) but cannot change what the code does: the two sides of a comparison are swapped and the operator mirrored (`i < n` becomes `n > i`), only where that is the same expression. A Critical or Important finding on one of them is a false alarm.
 
-Almost every model found almost every bug, so this test separates them on speed and precision, not on whether they can review: `muse-spark` described the right bug but often quoted a wrong line number (57% exact), and `gpt-6-sol` and `muse-spark` were the fastest by a wide margin. Only three models finished all 29: the other four are scored on the reviews that ran before a provider limit (the free tier's usage limit, and the Codex plan's, which `gpt-6-sol` reached), and the rest are left out, not counted as misses, so their rows rest on 9 to 14 reviews. Every change is only 2 to 5 lines, which is easy; there is no false-alarm rate (the comment-only "clean" packages turned out to contain comments that were really wrong, so they cannot show one); and React, Django and Kubernetes may be in a model's training data. The harness and every raw review are in [`benchmarks/review-bugs`](benchmarks/review-bugs).
+| Worker and model | Bug found | Exact line | False alarm | Reviews | Mean time | Slowest |
+|---|---|---|---|---|---|---|
+| OpenCode `nemotron-3-ultra-free` | 100% | 83% | 29% (4 of 14) | 29 + 14 | 1 min 33 s | 3 min 29 s |
+| OpenCode `space-bunny-free` | 100% | 100% | - | 29 | 2 min 19 s | 5 min 46 s |
+| Codex `gpt-6-sol` | 100% | 100% | - | 9 | 38 s | 52 s |
+| OpenCode `big-pickle` | 97% | 90% | **0% (0 of 13)** | 29 + 13 | 1 min 50 s | 6 min 16 s |
+| OpenCode `muse-spark-1.3-contributor-free` | 97% | 62% | - | 29 | 43 s | 2 min 0 s |
+| OpenCode `mimo-v2.6-flash-free` | 90% | 90% | 15% (2 of 13) | 29 + 13 (4 timed out) | 4 min 33 s | 8 min 1 s |
+| OpenCode `longcat-2.5-preview-free` | 86% | 86% | - | 29 (1 timed out) | 2 min 53 s | 8 min 0 s |
+
+Almost every model found almost every bug, so finding them does not separate the models; leaving the harmless change alone does. `big-pickle` never raised a false alarm. `nemotron-3-ultra` and `mimo-v2.6-flash` each said, in their own words, that the change altered nothing, and still filed it as Important ("a Yoda condition, inconsistent with the rest of the file"), where the review template puts style under Minor; an agent that acts on Important findings would have reverted a harmless commit. `muse-spark` described the right bug but often quoted a wrong line number (62% exact). The models with a dash were not available any more, or out of quota, when the harmless packages were added; Codex `gpt-6-sol` reached its plan's usage limit after 9 reviews, and the others' left-out reviews hit the free tier's limit, so they are not counted as misses. Every change is only 2 to 5 lines, which is easy; the harmless edits are all of one kind (a mirrored comparison); and React, Django and Kubernetes may be in a model's training data. The harness, the rule that keeps an edit harmless (and its test) and every raw review are in [`benchmarks/review-bugs`](benchmarks/review-bugs).
 
 </details>
 
