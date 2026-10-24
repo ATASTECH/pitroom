@@ -9,7 +9,7 @@ import { DeletionRefused, UserError } from '../core/errors.js';
 import { groupIds, headline, table, waitMany, watch } from '../core/group.js';
 import { install, uninstall } from '../core/install.js';
 import { installMcp, parseClients, uninstallMcp } from '../core/mcp-install.js';
-import { badgeUrl, card, compact, primaryPrice, readLedger, totals, usd, workerPrice } from '../core/receipt.js';
+import { badgeUrl, card, compact, primaryPrice, readLedger, settleLedger, totals, usd, workerPrice } from '../core/receipt.js';
 import { catalogLabel, catalogStatus, refreshCatalog } from '../core/prices.js';
 import { getBackend } from '../backends/index.js';
 import { resolveChain } from '../core/chain.js';
@@ -368,6 +368,7 @@ export function cmdHistory(p: Parsed): number {
     return 0;
   }
   importRuns(); // cheap when up to date; takes in runs from before the history existed
+  settleLedger(); // finished runs whose process died before their ledger line
   const since = sinceMs(flag(p, 'since'));
   if (sub === 'stats') {
     const s = historyStats(since);
@@ -544,6 +545,7 @@ export function cmdInit(p: Parsed): number {
 
 export function cmdSavings(p: Parsed): number {
   const since = flag(p, 'since') ?? 'all';
+  settleLedger(); // finished runs whose process died before their ledger line
   const t = totals(readLedger(sinceMs(since)));
   if (has(p, 'models')) {
     const by = new Map<string, { runs: number; tokens: number; returned: number; cost: number; saved: number }>();

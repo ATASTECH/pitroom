@@ -2821,11 +2821,16 @@ function savedUsd(usage, returnedTokens, price = primaryPrice()) {
   const readingTheReport = returnedTokens * price.input / 1e6;
   return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);
 }
+var SETTLING_MS = 10 * 6e4;
 function readLedger(sinceMs) {
   if (!fs16.existsSync(ledgerFile())) return [];
+  const seen = /* @__PURE__ */ new Set();
   return fs16.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
-      return [JSON.parse(l)];
+      const e = JSON.parse(l);
+      if (seen.has(e.id)) return [];
+      seen.add(e.id);
+      return [e];
     } catch {
       return [];
     }

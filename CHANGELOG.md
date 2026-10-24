@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Savings
+- **No finished run is missing from the savings ledger.** A run whose process was killed between its final record and its ledger line, and a worker that crashed, were never counted (about 1.5% of finished runs). `pitroom savings`, `pitroom history` and the dashboard now record the finished runs the ledger missed, each once.
+- **A done run counts even when its CLI reported no steps** (some OpenCode reviews): it answered, so it is in "Finished". Runs that failed before reaching the model stay out, as before.
+
 ## 0.25.0
 
 ### Dashboard

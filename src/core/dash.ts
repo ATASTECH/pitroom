@@ -18,7 +18,7 @@ import { fileDiffs, type FileDiffData } from './file-diff.js';
 import { MISSING, page, THEME_SCRIPT } from './dash-page.js';
 import { groupIds, headline, retryCommands, retryShell } from './group.js';
 import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
-import { primaryPrice, readLedger, totals } from './receipt.js';
+import { primaryPrice, readLedger, settleLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
 import { renameOver } from './fs-atomic.js';
 import { discardRun, stopRun } from './run.js';
@@ -140,6 +140,7 @@ function toRun(m: RunMeta): DashRun {
  */
 export function dashState(opts: { group?: string; limit?: number } = {}): DashState {
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
+  const scanned: RunMeta[] = [];
   const metas: RunMeta[] = [];
   const groups = new Set<string>();
   for (const id of listRunIds().slice(-SCAN).reverse()) {
@@ -149,6 +150,7 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
     } catch {
       continue; // a record being written right now
     }
+    scanned.push(m);
     if (m.group) groups.add(m.group);
     if (opts.group && m.group !== opts.group) continue;
     metas.push(m);
@@ -156,6 +158,7 @@ export function dashState(opts: { group?: string; limit?: number } = {}): DashSt
   const whole = new Set(metas.slice(0, limit).flatMap((m) => (m.group ? [m.group] : [])));
   const runs = metas.filter((m, i) => i < limit || (m.group && whole.has(m.group))).map(toRun);
   const now = Date.now();
+  settleLedger(scanned); // a run whose process died before its ledger line
   const ledger = readLedger();
   const within = (at: string | undefined, days: number) => !!at && Date.parse(at) >= now - days * DAY_MS;
   const per = (f: (days: number) => number) =>
@@ -525,6 +528,7 @@ export async function dashCommand(o: DashOptions): Promise<number> {
     throw new UserError('pitroom dash did not start (is the port taken? try --port 0)');
   }
   importRuns(); // runs from before the history existed
+  settleLedger(); // and finished runs the ledger missed
   const explicit = o.port !== undefined;
   let dash: Dash;
   try {

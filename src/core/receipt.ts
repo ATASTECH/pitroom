@@ -10,7 +10,7 @@ import path from 'node:path';
 import { effective } from './config.js';
 import { catalogPrice } from './prices.js';
 import type { Usage } from '../backends/types.js';
-import { ledgerFile, type RunMeta } from './store.js';
+import { type RunMeta, TERMINAL, isAlive, ledgerFile, listRunIds, readMeta } from './store.js';
 
 export interface Price {
   name: string;
@@ -95,9 +95,11 @@ export interface LedgerEntry {
   price: string;
 }
 
-export function record(meta: RunMeta): void {
+/** Adds a finished run to the ledger; false when it does not belong there. */
+export function record(meta: RunMeta): boolean {
   // Runs that never reached the model (stopped early, setup errors) would only skew the stats; an audit saved nothing.
-  if (!meta.usage?.steps || meta.auditOf) return;
+  // A run that is done answered, though its CLI reported no steps (some OpenCode reviews): it counts as finished.
+  if (meta.auditOf || (!meta.usage?.steps && meta.state !== 'done')) return false;
   const entry: LedgerEntry = {
     id: meta.id,
     at: meta.endedAt ?? new Date().toISOString(),
@@ -105,26 +107,64 @@ export function record(meta: RunMeta): void {
     state: meta.state,
     backend: (meta.ran ?? meta.worker).backend,
     model: meta.resolvedModel ?? (meta.ran ?? meta.worker).model,
-    tokens: meta.usage.total,
+    tokens: meta.usage?.total ?? 0,
     returned: meta.returnedTokens ?? 0,
     workerCost: workerCostOf(meta.usage) ?? 0,
-    ...(meta.usage.cost === undefined && meta.usage.costEstimate !== undefined ? { costEstimated: true as const, costSource: meta.usage.costSource } : {}),
+    ...(meta.usage?.cost === undefined && meta.usage?.costEstimate !== undefined ? { costEstimated: true as const, costSource: meta.usage.costSource } : {}),
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name,
   };
   fs.mkdirSync(path.dirname(ledgerFile()), { recursive: true });
   fs.appendFileSync(ledgerFile(), `${JSON.stringify(entry)}\n`);
+  return true;
+}
+
+/** How long a finished run's process may still be writing its ledger line itself. */
+const SETTLING_MS = 10 * 60_000;
+
+/**
+ * Records the finished runs the ledger missed: a process killed between its final meta.json and its ledger line, and
+ * a crashed worker that `freshMeta` marked failed. A run whose process may still be about to write its own is left
+ * to it. Safe to call again: a run already in the ledger is skipped. The number of runs recorded.
+ */
+export function settleLedger(metas?: Iterable<RunMeta>): number {
+  const known = new Set(readLedger().map((e) => e.id));
+  let n = 0;
+  for (const m of metas ?? finishedRuns()) {
+    if (known.has(m.id) || !TERMINAL.includes(m.state)) continue;
+    if (isAlive(m.pid) && (!m.endedAt || Date.now() - Date.parse(m.endedAt) < SETTLING_MS)) continue;
+    if (record(m)) {
+      known.add(m.id);
+      n++;
+    }
+  }
+  return n;
+}
+
+function* finishedRuns(): Generator<RunMeta> {
+  for (const id of listRunIds()) {
+    try {
+      yield readMeta(id);
+    } catch {
+      // a record being written right now
+    }
+  }
 }
 
 export function readLedger(sinceMs?: number): LedgerEntry[] {
   if (!fs.existsSync(ledgerFile())) return [];
+  const seen = new Set<string>();
   return fs
     .readFileSync(ledgerFile(), 'utf8')
     .split('\n')
     .filter(Boolean)
     .flatMap((l) => {
       try {
-        return [JSON.parse(l) as LedgerEntry];
+        const e = JSON.parse(l) as LedgerEntry;
+        // two processes settling the same run at once: the run counts once
+        if (seen.has(e.id)) return [];
+        seen.add(e.id);
+        return [e];
       } catch {
         return [];
       }

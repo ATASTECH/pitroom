@@ -3616,7 +3616,7 @@ function savedUsd(usage2, returnedTokens, price = primaryPrice()) {
   return Math.max(0, costAt(usage2, price) - (workerCostOf(usage2) ?? 0) - readingTheReport);
 }
 function record(meta) {
-  if (!meta.usage?.steps || meta.auditOf) return;
+  if (meta.auditOf || !meta.usage?.steps && meta.state !== "done") return false;
   const entry = {
     id: meta.id,
     at: meta.endedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
@@ -3624,22 +3624,49 @@ function record(meta) {
     state: meta.state,
     backend: (meta.ran ?? meta.worker).backend,
     model: meta.resolvedModel ?? (meta.ran ?? meta.worker).model,
-    tokens: meta.usage.total,
+    tokens: meta.usage?.total ?? 0,
     returned: meta.returnedTokens ?? 0,
     workerCost: workerCostOf(meta.usage) ?? 0,
-    ...meta.usage.cost === void 0 && meta.usage.costEstimate !== void 0 ? { costEstimated: true, costSource: meta.usage.costSource } : {},
+    ...meta.usage?.cost === void 0 && meta.usage?.costEstimate !== void 0 ? { costEstimated: true, costSource: meta.usage.costSource } : {},
     saved: meta.savedUsd ?? 0,
     price: primaryPrice().name
   };
   fs20.mkdirSync(path19.dirname(ledgerFile()), { recursive: true });
   fs20.appendFileSync(ledgerFile(), `${JSON.stringify(entry)}
 `);
+  return true;
+}
+var SETTLING_MS = 10 * 6e4;
+function settleLedger(metas) {
+  const known = new Set(readLedger().map((e) => e.id));
+  let n = 0;
+  for (const m of metas ?? finishedRuns()) {
+    if (known.has(m.id) || !TERMINAL.includes(m.state)) continue;
+    if (isAlive(m.pid) && (!m.endedAt || Date.now() - Date.parse(m.endedAt) < SETTLING_MS)) continue;
+    if (record(m)) {
+      known.add(m.id);
+      n++;
+    }
+  }
+  return n;
+}
+function* finishedRuns() {
+  for (const id2 of listRunIds()) {
+    try {
+      yield readMeta(id2);
+    } catch {
+    }
+  }
 }
 function readLedger(sinceMs2) {
   if (!fs20.existsSync(ledgerFile())) return [];
+  const seen = /* @__PURE__ */ new Set();
   return fs20.readFileSync(ledgerFile(), "utf8").split("\n").filter(Boolean).flatMap((l) => {
     try {
-      return [JSON.parse(l)];
+      const e = JSON.parse(l);
+      if (seen.has(e.id)) return [];
+      seen.add(e.id);
+      return [e];
     } catch {
       return [];
     }
@@ -6753,6 +6780,7 @@ function toRun(m) {
 }
 function dashState(opts = {}) {
   const limit = Math.min(Math.max(opts.limit ?? 40, 1), 200);
+  const scanned = [];
   const metas = [];
   const groups = /* @__PURE__ */ new Set();
   for (const id2 of listRunIds().slice(-SCAN).reverse()) {
@@ -6762,6 +6790,7 @@ function dashState(opts = {}) {
     } catch {
       continue;
     }
+    scanned.push(m);
     if (m.group) groups.add(m.group);
     if (opts.group && m.group !== opts.group) continue;
     metas.push(m);
@@ -6769,6 +6798,7 @@ function dashState(opts = {}) {
   const whole = new Set(metas.slice(0, limit).flatMap((m) => m.group ? [m.group] : []));
   const runs = metas.filter((m, i) => i < limit || m.group && whole.has(m.group)).map(toRun);
   const now = Date.now();
+  settleLedger(scanned);
   const ledger = readLedger();
   const within = (at, days2) => !!at && Date.parse(at) >= now - days2 * DAY_MS;
   const per = (f) => Object.fromEntries(Object.entries(PERIODS).map(([p, days2]) => [p, f(days2)]));
@@ -7058,6 +7088,7 @@ async function dashCommand(o) {
     throw new UserError("pitroom dash did not start (is the port taken? try --port 0)");
   }
   importRuns();
+  settleLedger();
   const explicit = o.port !== void 0;
   let dash;
   try {
@@ -8405,6 +8436,7 @@ function cmdHistory(p) {
     return 0;
   }
   importRuns();
+  settleLedger();
   const since2 = sinceMs(flag(p, "since"));
   if (sub === "stats") {
     const s = historyStats(since2);
@@ -8556,6 +8588,7 @@ function cmdInit(p) {
 }
 function cmdSavings(p) {
   const since2 = flag(p, "since") ?? "all";
+  settleLedger();
   const t = totals(readLedger(sinceMs(since2)));
   if (has(p, "models")) {
     const by = /* @__PURE__ */ new Map();
