@@ -213,14 +213,17 @@ test('Windows: git.cmd started by PowerShell hands the arguments over as written
   const args = ['show', 'HEAD^', '--grep=a^^b', '--format=%cd%n', '50%', 'two words', '--author=%USERNAME%', '%PATH%'];
   const script = path.join(s.base, 'call.ps1');
   fs.writeFileSync(script, `& git ${args.map((a) => `'${a}'`).join(' ')}\r\nexit $LASTEXITCODE\r\n`);
+  let ran = 0;
   for (const shell of ['powershell', 'pwsh']) {
     if (spawnSync(shell, ['-NoProfile', '-Command', 'exit 0']).status !== 0) continue;
+    ran++;
     const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
       cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fake.replace(/\\/g, '/') }, encoding: 'utf8', timeout: 30000,
     });
     assert.equal(r.status, 0, `${shell}: ${r.stderr}\n${r.stdout}`);
     assert.deepEqual(r.stdout.trim().split(/\r?\n/), args.map((a) => `[${a}]`), `${shell} passed them as written`);
   }
+  assert.ok(ran > 0, 'no PowerShell to start git.cmd with');
 });
 
 test('Windows: git.cmd from a cmd /d /s /c line (Node\'s shell) still blocks and passes through', { skip: windowsOnly }, () => {
