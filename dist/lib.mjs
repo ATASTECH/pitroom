@@ -2754,7 +2754,7 @@ function scoreOf(r) {
   return r.audited >= MIN_AUDITS ? ok * (r.agreed / r.audited) : ok;
 }
 var pct = (x) => `${Math.round(x * 100)}%`;
-function rankChain(chain, recordOf) {
+function rankChain(chain, recordOf, work) {
   const scored = chain.map((t, i) => ({ t, i, score: scoreOf(recordOf(t)) }));
   const slots = scored.filter((s) => s.score !== void 0);
   if (slots.length < 2) return { chain };
@@ -2765,7 +2765,7 @@ function rankChain(chain, recordOf) {
   const by = (t) => scored.find((s) => s.t === t).score;
   return {
     chain: out,
-    note: `ranked by record ("rankWorkers"): ${describeTarget(out[0])} (${pct(by(out[0]))}) goes before ${describeTarget(chain[0])} (${pct(by(chain[0]))})`
+    note: `ranked by record${work ? ` on ${work}` : ""} ("rankWorkers"): ${describeTarget(out[0])} (${pct(by(out[0]))}) goes before ${describeTarget(chain[0])} (${pct(by(chain[0]))})`
   };
 }
 

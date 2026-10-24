@@ -4229,17 +4229,31 @@ function auditStats(db, since2) {
   }
   return { total, byWorker };
 }
-function workerRecord(backend, model, sinceMs2) {
+var WORK_SQL = { research: "kind = 'research'", change: "kind LIKE 'change%'", review: "kind LIKE '%review'" };
+function workerRecord(backend, model, sinceMs2, work) {
   const db = openDb();
   if (!db) return void 0;
   const since2 = new Date(sinceMs2).toISOString();
   const fits = (m) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
   const rec = { runs: 0, ok: 0, audited: 0, agreed: 0 };
   try {
-    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY model`).all(backend, since2)) {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} AND ${work ? WORK_SQL[work] : "1"} GROUP BY model`).all(backend, since2)) {
       if (!fits(r.model)) continue;
       rec.runs += r.runs ?? 0;
       rec.ok += r.ok ?? 0;
+    }
+    if (work === "review") return rec;
+    if (work === "change") {
+      const reviews = db.prepare(`SELECT r.model, json_extract(v.meta_json, '$.verdict.spec') spec, json_extract(v.meta_json, '$.verdict.quality') quality, COUNT(*) n
+        FROM runs v JOIN runs r ON r.id = v.review_of
+        WHERE r.backend = ? AND v.started_at >= ? AND v.state = 'done' AND r.kind LIKE 'change%' AND json_extract(v.meta_json, '$.reviewOf') IS NOT NULL
+        GROUP BY r.model, spec, quality`).all(backend, since2);
+      for (const r of reviews) {
+        if (!fits(r.model) || !["approved", "needs-fixes"].includes(r.quality)) continue;
+        rec.audited += r.n;
+        if (r.spec === "pass" && r.quality === "approved") rec.agreed += r.n;
+      }
+      return rec;
     }
     const audits = db.prepare(`SELECT r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
       FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
@@ -4386,7 +4400,7 @@ function scoreOf(r) {
   return r.audited >= MIN_AUDITS ? ok * (r.agreed / r.audited) : ok;
 }
 var pct = (x) => `${Math.round(x * 100)}%`;
-function rankChain(chain, recordOf) {
+function rankChain(chain, recordOf, work) {
   const scored = chain.map((t, i) => ({ t, i, score: scoreOf(recordOf(t)) }));
   const slots = scored.filter((s) => s.score !== void 0);
   if (slots.length < 2) return { chain };
@@ -4397,7 +4411,7 @@ function rankChain(chain, recordOf) {
   const by = (t) => scored.find((s) => s.t === t).score;
   return {
     chain: out,
-    note: `ranked by record ("rankWorkers"): ${describeTarget(out[0])} (${pct(by(out[0]))}) goes before ${describeTarget(chain[0])} (${pct(by(chain[0]))})`
+    note: `ranked by record${work ? ` on ${work}` : ""} ("rankWorkers"): ${describeTarget(out[0])} (${pct(by(out[0]))}) goes before ${describeTarget(chain[0])} (${pct(by(chain[0]))})`
   };
 }
 
@@ -5313,7 +5327,8 @@ function prepareRun(o) {
     warnings2.push(...chain.warnings);
     if (effective().rankWorkers.value && !o.worker && !o.model && !work.tier && fallback.length) {
       const since2 = Date.now() - 30 * 864e5;
-      const ranked = rankChain([worker, ...fallback], (t) => workerRecord(t.backend, t.model, since2));
+      const work2 = o.review ? "review" : o.mode === "read" ? "research" : "change";
+      const ranked = rankChain([worker, ...fallback], (t) => workerRecord(t.backend, t.model, since2, work2), work2 === "change" ? "changes" : work2);
       [worker, ...fallback] = ranked.chain;
       if (ranked.note) warnings2.push(ranked.note);
     }
@@ -5531,7 +5546,7 @@ function autoAudit(meta) {
     let rate2 = auditRate(meta);
     if (meta.auditRate === void 0 && effective().auditFocus.value) {
       const ran = meta.ran ?? meta.worker;
-      const focus = focusedRate(rate2, meta.task, workerRecord(ran.backend, meta.resolvedModel ?? ran.model, Date.now() - 30 * 864e5));
+      const focus = focusedRate(rate2, meta.task, workerRecord(ran.backend, meta.resolvedModel ?? ran.model, Date.now() - 30 * 864e5, "research"));
       rate2 = focus.rate;
       if (focus.why.length) {
         meta.auditFocus = { rate: rate2, why: focus.why };

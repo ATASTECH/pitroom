@@ -7,6 +7,7 @@
 - **Audits have fallbacks.** An audit ran on one auditor only, and lost the audit when that one was rate-limited. It now falls back to the other auditors (the audit and cheap tiers, the fallbacks, the worker), never to the worker it audits, at any effort level.
 - **Cooldowns last as long as the limit.** "try again at 8:56 PM" and "resets 7:40pm (Europe/Istanbul)" are read as times of day (in the zone named, else the machine's), so an exhausted model is not tried again every 20 minutes until then. A used-up allowance with no time given (OpenCode's free usage limit) waits an hour instead of 20 minutes.
 - **"usage limit" and "session limit" count as limits on every worker** (they did on Claude Code and Codex only).
+- **`rankWorkers` ranks by the same kind of work.** A worker's record mixed its answers and its changes, though they part ways: in one machine's month of runs, `muse-spark` finished all 61 of its questions and 15 of its 19 changes, `space-bunny` 25 of 26 and 7 of 9. The chain is now ordered by the record of the run's kind (a question, a change or a review), and a change's record counts the reviews of it as its checks (spec met and nothing to fix), as an answer's counts its audits. The note says which record it used (`ranked by record on changes`).
 
 ### Windows
 - **Git from Scoop gets the git shim.** Scoop's `shims\git.exe` is a launcher far from Git for Windows' `sh.exe`, so the shim (layer 1) was left out and only git's own config guarded the worker. Pitroom now follows the launcher's `git.shim` to the real git.

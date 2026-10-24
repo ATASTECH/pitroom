@@ -48,7 +48,53 @@ test('rank: with rankWorkers on, a worker that keeps failing goes after one that
   const m = meta(ranked);
   assert.equal(m.worker.model, 'mock/other');
   assert.deepEqual(m.fallback.map((x) => x.model), ['mock/good-model']);
-  assert.match(ranked.stdout, /ranked by record \("rankWorkers"\): opencode:mock\/other \(100%\) goes before opencode:mock\/good-model \(\d+%\)/);
+  assert.match(ranked.stdout, /ranked by record on research \("rankWorkers"\): opencode:mock\/other \(100%\) goes before opencode:mock\/good-model \(\d+%\)/);
   const named = s.run(['run', '-W', 'opencode:mock/good-model', 'named one']);
   assert.equal(meta(named).worker.model, 'mock/good-model', 'a worker you name is the one that runs');
+});
+
+test('rank: the record is of the same kind of work: a worker that answers well but fails changes goes first only for answers', () => {
+  const s = sandbox();
+  const conf = { worker: 'opencode:mock/a', fallback: ['opencode:mock/b'] };
+  s.config(conf);
+  const as = (model, fails) => ({ MOCK_EXPORT_MODEL: model, ...(fails ? { MOCK_FAIL_MODELS: model } : {}) });
+  for (let i = 0; i < 5; i++) {
+    assert.equal(s.run(['run', '-W', 'opencode:mock/a', `answer ${i}`], as('mock/a')).status, 0);
+    assert.equal(s.run(['run', '-i', '-W', 'opencode:mock/a', '--no-fallback', `change ${i}`], as('mock/a', true)).status, 1);
+    assert.equal(s.run(['run', '-i', '-W', 'opencode:mock/b', `change b ${i}`], as('mock/b')).status, 0);
+    assert.equal(s.run(['run', '-W', 'opencode:mock/b', '--no-fallback', `answer b ${i}`], as('mock/b', true)).status, 1);
+  }
+  s.config({ ...conf, rankWorkers: true });
+  const meta = (r) => JSON.parse(fs.readFileSync(path.join(s.base, 'home', 'runs', RUN_ID.exec(r.stdout)[0], 'meta.json'), 'utf8'));
+  const read = s.run(['run', 'a question'], as('mock/a'));
+  assert.equal(meta(read).worker.model, 'mock/a', 'answers: a answered all its questions');
+  assert.doesNotMatch(read.stdout, /ranked by record/);
+  const change = s.run(['run', '-i', 'a change'], as('mock/b'));
+  assert.equal(change.status, 0, change.stderr);
+  assert.equal(meta(change).worker.model, 'mock/b', 'changes: b finished all of its');
+  assert.match(change.stdout, /ranked by record on changes \("rankWorkers"\): opencode:mock\/b \(100%\) goes before opencode:mock\/a \(0%\)/);
+});
+
+test('rank: for changes, reviews are the check: a worker whose finished changes reviews send back goes after one they approve', () => {
+  const s = sandbox();
+  const conf = { worker: 'opencode:mock/a', fallback: ['opencode:mock/b'] };
+  s.config(conf);
+  const verdict = (spec, quality) => `answer:SUMMARY: SPEC: ${spec} · QUALITY: ${quality} · ISSUES: critical=0 important=${quality === 'APPROVED' ? 0 : 1} minor=0`;
+  const ids = { a: [], b: [] };
+  for (const m of ['a', 'b']) {
+    for (let i = 0; i < 5; i++) {
+      const r = s.run(['run', '-i', '-W', `opencode:mock/${m}`, `change ${m} ${i}`], { MOCK_EXPORT_MODEL: `mock/${m}`, MOCK_ACTIONS: `write:app.txt:${m}${i};answer:SUMMARY: done` });
+      assert.equal(r.status, 0, r.stderr);
+      ids[m].push(RUN_ID.exec(r.stdout)[0]);
+    }
+  }
+  for (const id of ids.a.slice(0, 3)) assert.equal(s.run(['review', id], { MOCK_ACTIONS: verdict('FAIL', 'NEEDS_FIXES') }).status, 0);
+  for (const id of ids.b.slice(0, 3)) assert.equal(s.run(['review', id], { MOCK_ACTIONS: verdict('PASS', 'APPROVED') }).status, 0);
+  s.config({ ...conf, rankWorkers: true });
+  const change = s.run(['run', '-i', 'a change'], { MOCK_EXPORT_MODEL: 'mock/b' });
+  assert.equal(change.status, 0, change.stderr);
+  assert.match(change.stdout, /ranked by record on changes \("rankWorkers"\): opencode:mock\/b \(100%\) goes before opencode:mock\/a \(0%\)/);
+  // answers have no reviews and both answered nothing yet: the config's order
+  const read = s.run(['run', 'a question'], { MOCK_EXPORT_MODEL: 'mock/a' });
+  assert.equal(JSON.parse(fs.readFileSync(path.join(s.base, 'home', 'runs', RUN_ID.exec(read.stdout)[0], 'meta.json'), 'utf8')).worker.model, 'mock/a');
 });

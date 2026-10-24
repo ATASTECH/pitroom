@@ -16,7 +16,7 @@ import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { READ_IN, type ReadIn, backToProject, readSnapshot, restoreSnapshot, wantSnapshot } from './snapshot.js';
 import { auditRate, auditTask, auditable, auditors, fixTask, focusedRate, sampled, wantsFix } from './audit.js';
-import { workerRecord } from './history.js';
+import { type WorkKind, workerRecord } from './history.js';
 import { withinBudget } from './budget.js';
 import { rankChain } from './rank.js';
 import { notifyEnded } from './notify.js';
@@ -123,7 +123,9 @@ export function prepareRun(o: RunOptions): RunMeta {
     // a worker you named (-W, -m, a tier, a plan task's tier, an audit's) is not reordered
     if (effective().rankWorkers.value && !o.worker && !o.model && !work.tier && fallback.length) {
       const since = Date.now() - 30 * 86_400_000;
-      const ranked = rankChain([worker, ...fallback], (t) => workerRecord(t.backend, t.model, since));
+      // by the record of the same kind of work: an answer, a change or a review
+      const work: WorkKind = o.review ? 'review' : o.mode === 'read' ? 'research' : 'change';
+      const ranked = rankChain([worker, ...fallback], (t) => workerRecord(t.backend, t.model, since, work), work === 'change' ? 'changes' : work);
       [worker, ...fallback] = ranked.chain as [Target, ...Target[]];
       if (ranked.note) warnings.push(ranked.note);
     }
@@ -366,7 +368,7 @@ function autoAudit(meta: RunMeta): void {
     let rate = auditRate(meta);
     if (meta.auditRate === undefined && effective().auditFocus.value) {
       const ran = meta.ran ?? meta.worker;
-      const focus = focusedRate(rate, meta.task, workerRecord(ran.backend, meta.resolvedModel ?? ran.model, Date.now() - 30 * 86_400_000));
+      const focus = focusedRate(rate, meta.task, workerRecord(ran.backend, meta.resolvedModel ?? ran.model, Date.now() - 30 * 86_400_000, 'research'));
       rate = focus.rate;
       if (focus.why.length) {
         meta.auditFocus = { rate, why: focus.why };

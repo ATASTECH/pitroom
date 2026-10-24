@@ -349,7 +349,11 @@ function auditStats(db: Db, since: string): { total: Stats['audits']; byWorker: 
   return { total, byWorker };
 }
 
-/** What one worker (and model) did lately: its runs (rate limits left out), how many ended well, and its audited answers. */
+/**
+ * What one worker (and model) did lately: its runs (rate limits left out), how many ended well, and how many of them
+ * another worker checked (`audited`) and found right (`agreed`): an audit's AGREE for an answer, a review's
+ * SPEC PASS and QUALITY APPROVED for a change.
+ */
 export interface WorkerRecord {
   runs: number;
   ok: number;
@@ -358,21 +362,42 @@ export interface WorkerRecord {
 }
 
 /**
- * A worker's record since `sinceMs`, for the audit focus and the chain order. A target without a model matches all of
- * the backend's models; one with a model matches it with or without its provider (`mock/x` for `x`). Undefined
- * without a history.
+ * The kind of work a record is about. A worker can answer questions well and still leave changes unfinished (or the
+ * other way round), so each kind has a record of its own.
  */
-export function workerRecord(backend: string, model: string | undefined, sinceMs: number): WorkerRecord | undefined {
+export type WorkKind = 'research' | 'change' | 'review';
+const WORK_SQL: Record<WorkKind, string> = { research: "kind = 'research'", change: "kind LIKE 'change%'", review: "kind LIKE '%review'" };
+
+/**
+ * A worker's record since `sinceMs`, for the audit focus and the chain order: of one kind of work when `work` names it,
+ * else of all. A target without a model matches all of the backend's models; one with a model matches it with or
+ * without its provider (`mock/x` for `x`). Undefined without a history.
+ */
+export function workerRecord(backend: string, model: string | undefined, sinceMs: number, work?: WorkKind): WorkerRecord | undefined {
   const db = openDb();
   if (!db) return undefined;
   const since = new Date(sinceMs).toISOString();
   const fits = (m: string | null) => !model || m === model || !!m?.endsWith(`/${model}`) || model.endsWith(`/${m}`);
   const rec: WorkerRecord = { runs: 0, ok: 0, audited: 0, agreed: 0 };
   try {
-    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} GROUP BY model`).all(backend, since)) {
+    for (const r of db.prepare(`SELECT model, SUM(NOT ${LIMITED}) runs, SUM(state='done') ok FROM runs WHERE backend = ? AND started_at >= ? AND ${NOT_AUDIT} AND ${ATTEMPTED} AND ${work ? WORK_SQL[work] : '1'} GROUP BY model`).all(backend, since)) {
       if (!fits(r.model)) continue;
       rec.runs += r.runs ?? 0;
       rec.ok += r.ok ?? 0;
+    }
+    if (work === 'review') return rec; // nothing checks a review
+    if (work === 'change') {
+      // a change is checked by a review of it: right when the spec is met and nothing needs fixing
+      const reviews = db.prepare(`SELECT r.model, json_extract(v.meta_json, '$.verdict.spec') spec, json_extract(v.meta_json, '$.verdict.quality') quality, COUNT(*) n
+        FROM runs v JOIN runs r ON r.id = v.review_of
+        WHERE r.backend = ? AND v.started_at >= ? AND v.state = 'done' AND r.kind LIKE 'change%' AND json_extract(v.meta_json, '$.reviewOf') IS NOT NULL
+        GROUP BY r.model, spec, quality`).all(backend, since);
+      for (const r of reviews) {
+        if (!fits(r.model) || !['approved', 'needs-fixes'].includes(r.quality)) continue; // a verdict the reviewer did not give says nothing
+        rec.audited += r.n;
+        if (r.spec === 'pass' && r.quality === 'approved') rec.agreed += r.n;
+      }
+      return rec;
     }
     const audits = db.prepare(`SELECT r.model, json_extract(a.meta_json, '$.auditVerdict') v, COUNT(*) n
       FROM runs a JOIN runs r ON r.id = json_extract(a.meta_json, '$.auditOf')
