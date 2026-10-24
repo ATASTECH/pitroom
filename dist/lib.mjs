@@ -3236,6 +3236,15 @@ exec "$real" "$@"
 function shimDir() {
   return path18.join(home(), "shim", `v${VERSION}`);
 }
+function scoopTarget(exe) {
+  try {
+    const text = fs19.readFileSync(exe.replace(/\.exe$/i, ".shim"), "utf8");
+    const target = /^\s*path\s*=\s*"?([^"\r\n]+?)"?\s*$/m.exec(text)?.[1];
+    return target && fs19.statSync(target).isFile() ? target : void 0;
+  } catch {
+    return void 0;
+  }
+}
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
   for (const dir of (process.env.PATH ?? "").split(path18.delimiter).filter(Boolean)) {
@@ -3243,7 +3252,7 @@ function findRealGit(skip) {
     const p = path18.join(dir, WINDOWS ? "git.exe" : "git");
     try {
       fs19.accessSync(p, fs19.constants.X_OK);
-      if (fs19.statSync(p).isFile()) return p;
+      if (fs19.statSync(p).isFile()) return WINDOWS && scoopTarget(p) || p;
     } catch {
     }
   }
@@ -3262,11 +3271,28 @@ function findGitSh(realGit) {
   }
   return void 0;
 }
-var cmdShim = (sh) => `@echo off\r
-set "MSYS2_ARG_CONV_EXCL=*"\r
-"${sh}" "%~dp0git" %*\r
-exit /b %errorlevel%\r
-`;
+var cmdShim = (sh) => [
+  "@echo off",
+  "setlocal EnableExtensions DisableDelayedExpansion",
+  'set "MSYS2_ARG_CONV_EXCL=*"',
+  'set "PITROOM_SELF=%~f0"',
+  'set q=^"',
+  "setlocal EnableDelayedExpansion",
+  'set "line=!cmdcmdline!"',
+  'if not "!line: /d =!"=="!line!" goto plain',
+  'if not "!line: /s =!"=="!line!" goto plain',
+  'set "tail=!line:*/c ""%PITROOM_SELF%"=!"',
+  'if "!tail!"=="!line!" set "tail=!line:*/c "%PITROOM_SELF%=!"',
+  'if "!tail!"=="!line!" goto plain',
+  'if "!tail:~-1!"=="!q!" set "tail=!tail:~0,-1!"',
+  `"${sh}" "%~dp0git" !tail!`,
+  "exit /b !errorlevel!",
+  ":plain",
+  "endlocal",
+  `"${sh}" "%~dp0git" %*`,
+  "exit /b %errorlevel%",
+  ""
+].join("\r\n");
 var HOOK_VERSION = 1;
 var REF_HOOK = `#!/bin/sh
 # pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
@@ -3468,6 +3494,7 @@ export {
   brief,
   card,
   catalogPrice,
+  cmdShim,
   compact,
   cooldownMs,
   costAt,
@@ -3518,6 +3545,7 @@ export {
   runFile,
   runsDir,
   savedUsd,
+  scoopTarget,
   scoreAnswer,
   scoreOf,
   secretWarning,

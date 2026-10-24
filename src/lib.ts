@@ -15,7 +15,7 @@ export { rankChain, scoreOf } from './core/rank.js';
 export { retryCommands } from './core/group.js';
 export { answerParts, loadEval, pathsIn, scoreAnswer, summarize, truthOf } from './core/eval.js';
 export { brief, loadPlan, parsePlan, planName, planTask } from './core/plan.js';
-export { guardEnv, shimDir, shimReady } from './vcs/guard.js';
+export { cmdShim, guardEnv, scoopTarget, shimDir, shimReady } from './vcs/guard.js';
 export { acquireWriteLock, releaseSlot, releaseWriteLock, slotHolders, tryAcquireSlot } from './core/slots.js';
 export { findSecretFiles, findSecretFilesInTree, looksSecret, secretWarning } from './core/secrets.js';
 export { badgeUrl, card, compact, costAt, estimateTokens, parsePriceSpec, primaryPrice, readLedger, savedUsd, totals, usd, workerCostOf } from './core/receipt.js';

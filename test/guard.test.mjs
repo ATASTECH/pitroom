@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { sandbox } from './helpers.mjs';
-import { guardEnv } from '../dist/lib.mjs';
+import { sandbox, scratchDir } from './helpers.mjs';
+import { guardEnv, scoopTarget } from '../dist/lib.mjs';
 
 // The runner may itself run under a worker guard (layer-2 GIT_CONFIG_* env plus
 // a shim dir first on PATH), which would block sandbox()'s own git setup and
@@ -160,4 +160,70 @@ test('layer 2 alone: with the shim bypassed (the real git by absolute path), ref
   assert.equal(s.git('branch', '--list', 'sneaky'), '');
   assert.equal(s.git('tag', '--list'), '');
   assert.equal(fs.readdirSync(path.join(remote, 'refs', 'heads')).length, 0, 'nothing reached the remote');
+});
+
+test('a Scoop shim is followed to the git it runs: its git.shim names it', () => {
+  const dir = scratchDir('pitroom-scoop-');
+  const real = path.join(dir, 'apps', 'git', 'current', 'cmd', 'git.exe');
+  fs.mkdirSync(path.dirname(real), { recursive: true });
+  fs.writeFileSync(real, '');
+  const shim = path.join(dir, 'shims', 'git.exe');
+  fs.mkdirSync(path.dirname(shim), { recursive: true });
+  fs.writeFileSync(shim, '');
+  assert.equal(scoopTarget(shim), undefined, 'no git.shim: not a Scoop shim');
+  fs.writeFileSync(path.join(dir, 'shims', 'git.shim'), `path = "${real}"\r\n`);
+  assert.equal(scoopTarget(shim), real);
+  fs.writeFileSync(path.join(dir, 'shims', 'git.shim'), `path = ${real}\nargs = --foo\n`);
+  assert.equal(scoopTarget(shim), real, 'unquoted, with an args line');
+  fs.writeFileSync(path.join(dir, 'shims', 'git.shim'), `path = "${path.join(dir, 'gone.exe')}"\n`);
+  assert.equal(scoopTarget(shim), undefined, 'a path that does not exist');
+});
+
+const windowsOnly = process.platform === 'win32' ? false : 'Windows only (git.cmd, Scoop)';
+
+test('Windows: behind a Scoop shim the shim is still put first, with the real git and its sh.exe', { skip: windowsOnly }, () => {
+  const real = spawnSync('where', ['git.exe'], { encoding: 'utf8' }).stdout.split(/\r?\n/).find((l) => l.trim());
+  assert.ok(real, 'git.exe on PATH');
+  const dir = scratchDir('pitroom-scoop-');
+  fs.mkdirSync(path.join(dir, 'shims'));
+  fs.writeFileSync(path.join(dir, 'shims', 'git.exe'), '');
+  fs.writeFileSync(path.join(dir, 'shims', 'git.shim'), `path = "${real.trim()}"\r\n`);
+  process.env.PITROOM_HOME = path.join(dir, 'home');
+  const saved = process.env.PATH;
+  // Scoop's shims only: Git for Windows' own folders are not on PATH, so its sh.exe is found from the git the shim names
+  process.env.PATH = [path.join(dir, 'shims'), ...saved.split(path.delimiter).filter((d) => !/\\Git\\/i.test(d))].join(path.delimiter);
+  try {
+    const env = guardEnv({ ...process.env });
+    assert.equal(env.PITROOM_REAL_GIT, real.trim().replace(/\\/g, '/'));
+    assert.ok(env.PATH.startsWith(path.join(dir, 'home', 'shim')), env.PATH.slice(0, 200));
+  } finally {
+    process.env.PATH = saved;
+  }
+});
+
+test('Windows: git.cmd started by PowerShell hands the arguments over as written (^ & | % and spaces)', { skip: windowsOnly }, () => {
+  const { s, env } = setup();
+  // a stand-in for the real git that prints what it got, one argument per line (and has no aliases)
+  const fake = path.join(s.base, 'fakegit');
+  fs.writeFileSync(fake, '#!/bin/sh\n[ "$1" = config ] && exit 1\nfor a do printf \'[%s]\\n\' "$a"; done\n');
+  const args = ['log', '--grep=a^b', 'x&y', 'p|q', '--format=%cd%n', 'a<b>c', '50%', 'two words', '--author=%USERNAME%'];
+  const script = path.join(s.base, 'call.ps1');
+  fs.writeFileSync(script, `& git ${args.map((a) => `'${a}'`).join(' ')}\r\nexit $LASTEXITCODE\r\n`);
+  for (const shell of ['powershell', 'pwsh']) {
+    if (spawnSync(shell, ['-NoProfile', '-Command', 'exit 0']).status !== 0) continue;
+    const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
+      cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fake.replace(/\\/g, '/') }, encoding: 'utf8', timeout: 30000,
+    });
+    assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+    assert.deepEqual(r.stdout.trim().split(/\r?\n/), args.map((a) => `[${a}]`), `${shell} passed them as written`);
+  }
+});
+
+test('Windows: git.cmd from a cmd /d /s /c line (Node\'s shell) still blocks and passes through', { skip: windowsOnly }, () => {
+  const { blocked, allowed, run } = setup();
+  blocked(['commit', '--allow-empty', '-m', 'x & y']);
+  allowed(['status']);
+  const r = run(['log', '-1', '--format=%s']);
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /init/);
 });

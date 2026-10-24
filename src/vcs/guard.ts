@@ -95,6 +95,21 @@ export function shimDir(): string {
   return path.join(home(), 'shim', `v${VERSION}`);
 }
 
+/**
+ * What a Scoop shim runs: Scoop puts a small `git.exe` in `~/scoop/shims` and the real one's path in `git.shim` beside it
+ * (`path = "C:\Users\me\scoop\apps\git\current\cmd\git.exe"`). Undefined when there is no such file or it names nothing
+ * that exists.
+ */
+export function scoopTarget(exe: string): string | undefined {
+  try {
+    const text = fs.readFileSync(exe.replace(/\.exe$/i, '.shim'), 'utf8');
+    const target = /^\s*path\s*=\s*"?([^"\r\n]+?)"?\s*$/m.exec(text)?.[1];
+    return target && fs.statSync(target).isFile() ? target : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 function findRealGit(skip: string): string | undefined {
   const same = (a: string, b: string) => (WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b);
   for (const dir of (process.env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
@@ -102,7 +117,8 @@ function findRealGit(skip: string): string | undefined {
     const p = path.join(dir, WINDOWS ? 'git.exe' : 'git');
     try {
       fs.accessSync(p, fs.constants.X_OK);
-      if (fs.statSync(p).isFile()) return p;
+      // a Scoop shim is a launcher far from Git for Windows' sh.exe: the git it runs is the real one
+      if (fs.statSync(p).isFile()) return (WINDOWS && scoopTarget(p)) || p;
     } catch {
       /* not here */
     }
@@ -127,7 +143,37 @@ function findGitSh(realGit: string): string | undefined {
 }
 
 // `MSYS2_ARG_CONV_EXCL`: the arguments reached cmd.exe already in Windows form, so sh must not "convert" them again.
-const cmdShim = (sh: string) => `@echo off\r\nset "MSYS2_ARG_CONV_EXCL=*"\r\n"${sh}" "%~dp0git" %*\r\nexit /b %errorlevel%\r\n`;
+//
+// A batch file's `%*` is the arguments after cmd.exe has read them, twice: once on the `cmd /c` line Windows starts a
+// batch file with, once on the line that uses `%*`. An unquoted `^ & | < >` or a `%name%` in an argument changes on the
+// way (`--grep=a^b` arrives as `--grep=ab`, `--format=%cd%n` with the current directory in it), where git.exe would
+// have got it as written. When Windows started this file itself (PowerShell running `git`, which is
+// `cmd.exe /c ""<this file>" <arguments>"`), the arguments are taken from that raw line instead, through delayed
+// expansion, which cmd does not read again; sh.exe then splits them as git.exe would. Anything else (a `cmd /d /s /c`
+// line that may hold more commands than this one, as Node's shell gives) keeps `%*`.
+export const cmdShim = (sh: string) =>
+  [
+    '@echo off',
+    'setlocal EnableExtensions DisableDelayedExpansion',
+    'set "MSYS2_ARG_CONV_EXCL=*"',
+    'set "PITROOM_SELF=%~f0"',
+    'set q=^"',
+    'setlocal EnableDelayedExpansion',
+    'set "line=!cmdcmdline!"',
+    'if not "!line: /d =!"=="!line!" goto plain',
+    'if not "!line: /s =!"=="!line!" goto plain',
+    'set "tail=!line:*/c ""%PITROOM_SELF%"=!"',
+    'if "!tail!"=="!line!" set "tail=!line:*/c "%PITROOM_SELF%=!"',
+    'if "!tail!"=="!line!" goto plain',
+    'if "!tail:~-1!"=="!q!" set "tail=!tail:~0,-1!"',
+    `"${sh}" "%~dp0git" !tail!`,
+    'exit /b !errorlevel!',
+    ':plain',
+    'endlocal',
+    `"${sh}" "%~dp0git" %*`,
+    'exit /b %errorlevel%',
+    '',
+  ].join('\r\n');
 
 // Second layer, carried in environment variables so it survives what PATH does not:
 // login shells (macOS path_helper and ~/.zprofile reorder PATH; Codex runs commands
