@@ -10,7 +10,7 @@
 
 ### Windows
 - **Git from Scoop gets the git shim.** Scoop's `shims\git.exe` is a launcher far from Git for Windows' `sh.exe`, so the shim (layer 1) was left out and only git's own config guarded the worker. Pitroom now follows the launcher's `git.shim` to the real git.
-- **PowerShell's arguments reach git as written.** `git.cmd` passed `%*`, which cmd.exe reads again: an unquoted `^ & | < >` or a `%name%` changed (`--grep=a^b` became `--grep=ab`, `%cd%` the current folder) where git.exe would have got it as written. When Windows starts `git.cmd` itself (PowerShell running `git`), the shim takes the arguments from the raw command line; a `cmd /d /s /c` line, which may hold more than one command, keeps `%*`.
+- **`HEAD^` from PowerShell is `HEAD^` again.** Windows starts a batch file such as `git.cmd` through a `cmd /c` line, which removes a `^` and fills in a `%name%` that names a variable before the batch file runs: from PowerShell, `git show HEAD^` showed `HEAD`, and `--format=%cd%n` got the current folder, where git.exe would have got them as written. When Windows starts `git.cmd` itself, the shim now takes the arguments from that raw line; a `cmd /d /s /c` line, which may hold more than one command, keeps `%*`. An unquoted `& | < >` is still acted on by that `cmd /c` line, as for any batch file.
 
 ### Savings
 - **No finished run is missing from the savings ledger.** A run whose process was killed between its final record and its ledger line, and a worker that crashed, were never counted (about 1.5% of finished runs). `pitroom savings`, `pitroom history` and the dashboard now record the finished runs the ledger missed, each once.

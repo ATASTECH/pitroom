@@ -194,19 +194,23 @@ test('Windows: behind a Scoop shim the shim is still put first, with the real gi
   process.env.PATH = [path.join(dir, 'shims'), ...saved.split(path.delimiter).filter((d) => !/\\Git\\/i.test(d))].join(path.delimiter);
   try {
     const env = guardEnv({ ...process.env });
+    const key = Object.keys(env).find((k) => k.toLowerCase() === 'path');
     assert.equal(env.PITROOM_REAL_GIT, real.trim().replace(/\\/g, '/'));
-    assert.ok(env.PATH.startsWith(path.join(dir, 'home', 'shim')), env.PATH.slice(0, 200));
+    assert.ok(env[key].startsWith(path.join(dir, 'home', 'shim')), env[key].slice(0, 200));
   } finally {
     process.env.PATH = saved;
   }
 });
 
-test('Windows: git.cmd started by PowerShell hands the arguments over as written (^ & | % and spaces)', { skip: windowsOnly }, () => {
+// Windows starts a batch file through `cmd.exe /c "<line>"`, which removes a `^` (`HEAD^` became `HEAD`) and fills in a
+// `%name%` that names a variable (`%cd%`) before git.cmd runs; git.cmd takes the raw line instead. An unquoted `& | < >`
+// is acted on by that same cmd.exe, which no batch file can undo, so it is not tried here.
+test('Windows: git.cmd started by PowerShell hands the arguments over as written (^, %name% and spaces)', { skip: windowsOnly }, () => {
   const { s, env } = setup();
   // a stand-in for the real git that prints what it got, one argument per line (and has no aliases)
   const fake = path.join(s.base, 'fakegit');
   fs.writeFileSync(fake, '#!/bin/sh\n[ "$1" = config ] && exit 1\nfor a do printf \'[%s]\\n\' "$a"; done\n');
-  const args = ['log', '--grep=a^b', 'x&y', 'p|q', '--format=%cd%n', 'a<b>c', '50%', 'two words', '--author=%USERNAME%'];
+  const args = ['show', 'HEAD^', '--grep=a^^b', '--format=%cd%n', '50%', 'two words', '--author=%USERNAME%', '%PATH%'];
   const script = path.join(s.base, 'call.ps1');
   fs.writeFileSync(script, `& git ${args.map((a) => `'${a}'`).join(' ')}\r\nexit $LASTEXITCODE\r\n`);
   for (const shell of ['powershell', 'pwsh']) {
@@ -214,7 +218,7 @@ test('Windows: git.cmd started by PowerShell hands the arguments over as written
     const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
       cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fake.replace(/\\/g, '/') }, encoding: 'utf8', timeout: 30000,
     });
-    assert.equal(r.status, 0, `${shell}: ${r.stderr}`);
+    assert.equal(r.status, 0, `${shell}: ${r.stderr}\n${r.stdout}`);
     assert.deepEqual(r.stdout.trim().split(/\r?\n/), args.map((a) => `[${a}]`), `${shell} passed them as written`);
   }
 });
