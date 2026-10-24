@@ -253,6 +253,9 @@ export interface HistoryRow {
   seconds?: number;
   steps?: number;
   tokens?: number;
+  /** What the worker cost (USD): as its CLI reported it, else estimated from a price, which `costEstimated` says. */
+  cost?: number;
+  costEstimated?: true;
   saved?: number;
   files: number;
   applied: boolean;
@@ -272,6 +275,9 @@ export interface HistoryQuery {
 
 /** SQL: the run finished, but its --verify command failed. */
 const VERIFY_FAILED = "(r.state = 'done' AND json_extract(r.meta_json, '$.verifyResult.ok') = 0)";
+
+/** SQL: the CLI reported no cost; the run's is estimated from a price (the user's `workerPrices`, else the catalog's). */
+const COST_ESTIMATED = "(json_extract(r.meta_json, '$.usage.cost') IS NULL AND json_extract(r.meta_json, '$.usage.costEstimate') IS NOT NULL)";
 
 /** FTS5 query from free text: every word a prefix match, so "login bu" finds "login bug". */
 const ftsQuery = (text: string) => text.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"*`).join(' ');
@@ -295,7 +301,7 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base}`).get(...args).n as number;
     const page = q.beforeId ? `${base ? `${base} AND` : 'WHERE'} r.id < ?` : base;
-    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed, ${COST_ESTIMATED} AS cost_estimated FROM runs r ${page} ORDER BY r.id DESC LIMIT ?`).all(...args, ...(q.beforeId ? [q.beforeId] : []), Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r: any) => ({
@@ -305,7 +311,7 @@ export function listHistory(q: HistoryQuery = {}): { rows: HistoryRow[]; total: 
         audit: auditBadge({ audit: r.audit_state ? { id: '', state: r.audit_state, verdict: r.audit_verdict ?? undefined } : undefined }),
         verifyFailed: r.verify_failed ? true : undefined,
         seconds: r.seconds ?? undefined, steps: r.steps ?? undefined,
-        tokens: r.tokens ?? undefined, saved: r.saved ?? undefined, files: r.files_changed ?? 0, applied: !!r.applied,
+        tokens: r.tokens ?? undefined, cost: r.cost ?? undefined, ...(r.cost_estimated ? { costEstimated: true as const } : {}), saved: r.saved ?? undefined, files: r.files_changed ?? 0, applied: !!r.applied,
       })),
     };
   } catch {

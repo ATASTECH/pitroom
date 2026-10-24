@@ -387,8 +387,10 @@ export function cmdHistory(p: Parsed): number {
   const { rows, total } = listHistory({ text: p.positional.join(' '), model: flag(p, 'model'), state: flag(p, 'state'), group: flag(p, 'group'), sinceMs: since, limit });
   if (has(p, 'json')) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
   if (!rows.length) return console.log(total ? 'nothing on this page' : 'no matching runs'), 0;
-  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? 'verify failed' : r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
-  const head = ['RUN', 'WHEN', 'STATE', 'WORKER', 'TIME', 'TASK'];
+  // an estimated cost (the CLI reported none) is marked, so it is never read as what the provider billed
+  const cost = (r: (typeof rows)[number]) => (r.cost === undefined ? '-' : r.cost === 0 ? 'free' : `${r.costEstimated ? '~' : ''}${usd(r.cost)}`);
+  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? 'verify failed' : r.state, `${r.backend}${r.model ? ` (${r.model.split('/').pop()})` : ''}`, secs(r.seconds), cost(r), r.task.length > 60 ? `${r.task.slice(0, 59)}…` : r.task]);
+  const head = ['RUN', 'WHEN', 'STATE', 'WORKER', 'TIME', 'COST', 'TASK'];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i]!.length)));
   const fmt = (r: string[], header = false) =>
     r.map((c, i) => {
@@ -396,6 +398,7 @@ export function cmdHistory(p: Parsed): number {
       return header ? dim(cell) : i === 2 ? stateColour(r[2]!, cell) : cell;
     }).join('  ');
   console.log([fmt(head, true), ...body.map((r) => fmt(r))].join('\n'));
+  if (rows.some((r) => r.costEstimated)) console.log(dim('\n~ estimated from a price: the worker\'s CLI reported no cost'));
   if (total > rows.length) console.log(`\n${rows.length} of ${total} · --limit N for more · pitroom show <run> for one`);
   return 0;
 }
@@ -548,17 +551,18 @@ export function cmdSavings(p: Parsed): number {
   settleLedger(); // finished runs whose process died before their ledger line
   const t = totals(readLedger(sinceMs(since)));
   if (has(p, 'models')) {
-    const by = new Map<string, { runs: number; tokens: number; returned: number; cost: number; saved: number }>();
+    const by = new Map<string, { runs: number; tokens: number; returned: number; cost: number; estimated: boolean; saved: number }>();
     for (const e of readLedger(sinceMs(since))) {
       const key = `${e.backend ?? '?'}  ${e.model ?? '(default model)'}`;
-      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, saved: 0 };
-      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, saved: a.saved + e.saved });
+      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, estimated: false, saved: 0 };
+      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, estimated: a.estimated || !!e.costEstimated, saved: a.saved + e.saved });
     }
     const width = Math.max(12, ...[...by.keys()].map((k) => k.length));
     console.log(`${'worker  model'.padEnd(width)}  ${'runs'.padStart(5)} ${'processed'.padStart(10)} ${'returned'.padStart(9)} ${'cost'.padStart(8)} ${'saved'.padStart(8)}`);
     for (const [key, a] of [...by].sort((x, y) => y[1].runs - x[1].runs)) {
-      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${usd(a.cost).padStart(8)} ${usd(a.saved).padStart(8)}`);
+      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${`${a.estimated ? '~' : ''}${usd(a.cost)}`.padStart(8)} ${usd(a.saved).padStart(8)}`);
     }
+    if ([...by.values()].some((a) => a.estimated)) console.log(dim('\n~ the cost is estimated from a price, in part or in all: the worker\'s CLI reported none'));
     return 0;
   }
   const period = since === 'all' ? 'all time' : `last ${since.replace('d', ' days')}`;

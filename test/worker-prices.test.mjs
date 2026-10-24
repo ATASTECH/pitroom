@@ -2,6 +2,7 @@
 // run's cost is "n/a" and counts as free in the savings; with one it is estimated, and said to be.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { test } from 'node:test';
 import { costAt, parsePriceSpec, workerCostOf } from '../dist/lib.mjs';
@@ -85,4 +86,40 @@ test('workerPrices: a target that names no model gets the backend alone as the s
   s.config({ worker: 'gemini' });
   const doctor = s.run(['doctor'], { PITROOM_GEMINI_BIN: GEMINI_MOCK, GEMINI_API_KEY: 'test-key' }).stdout;
   assert.match(doctor, /! gemini reports no cost, so its runs count as free in the savings: give its price in the config, "workerPrices": \{"gemini": /);
+});
+
+const hasSqlite = (() => {
+  try {
+    createRequire(import.meta.url)('node:sqlite');
+    return true;
+  } catch {
+    return false;
+  }
+})();
+
+test('workerPrices: the history marks an estimated cost; a reported one and an unknown one are told apart', { skip: !hasSqlite && 'node:sqlite needs Node.js 22.13+' }, () => {
+  const s = sandbox();
+  const plain = ask(s, {});
+  const priced = ask(s, { workerPrices: { 'gemini:gemini-2.5-flash': '2,10,0.5' } });
+  s.config({});
+  const reported = RUN.exec(s.run(['run', '--fresh', 'list the files']).stdout)[0]; // the OpenCode mock reports cost 0
+
+  const rows = JSON.parse(s.run(['history', '--json']).stdout).rows;
+  const row = (id) => rows.find((r) => r.id === id);
+  assert.equal(row(priced.id).costEstimated, true);
+  assert.ok(Math.abs(row(priced.id).cost - meta(s, priced.id).usage.costEstimate) < 1e-12);
+  assert.equal(row(plain.id).cost, undefined, 'no price, no cost');
+  assert.equal(row(plain.id).costEstimated, undefined);
+  assert.equal(row(reported).cost, 0);
+  assert.equal(row(reported).costEstimated, undefined, 'a cost the CLI reported is not an estimate');
+
+  const table = s.run(['history']).stdout;
+  assert.match(table, /COST/);
+  assert.match(table.split('\n').find((l) => l.startsWith(priced.id)), /~\$[\d.]+/);
+  assert.match(table.split('\n').find((l) => l.startsWith(reported)), / free /);
+  assert.match(table, /~ estimated from a price/);
+
+  const models = s.run(['savings', '--models']).stdout;
+  assert.match(models.split('\n').find((l) => l.startsWith('gemini')), /~\$[\d.]+/);
+  assert.match(models, /~ the cost is estimated from a price/);
 });

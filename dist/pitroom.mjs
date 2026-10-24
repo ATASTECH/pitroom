@@ -4063,6 +4063,7 @@ function archivedId(ref) {
   }
 }
 var VERIFY_FAILED = "(r.state = 'done' AND json_extract(r.meta_json, '$.verifyResult.ok') = 0)";
+var COST_ESTIMATED = "(json_extract(r.meta_json, '$.usage.cost') IS NULL AND json_extract(r.meta_json, '$.usage.costEstimate') IS NOT NULL)";
 var ftsQuery = (text) => text.split(/\s+/).filter(Boolean).map((w) => `"${w.replace(/"/g, '""')}"*`).join(" ");
 function listHistory(q = {}) {
   const db = openDb();
@@ -4097,7 +4098,7 @@ function listHistory(q = {}) {
   try {
     const total = db.prepare(`SELECT COUNT(*) AS n FROM runs r ${base2}`).get(...args).n;
     const page2 = q.beforeId ? `${base2 ? `${base2} AND` : "WHERE"} r.id < ?` : base2;
-    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed FROM runs r ${page2} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
+    const rows = db.prepare(`SELECT r.*, json_extract(r.meta_json, '$.audit.state') AS audit_state, json_extract(r.meta_json, '$.audit.verdict') AS audit_verdict, ${VERIFY_FAILED} AS verify_failed, ${COST_ESTIMATED} AS cost_estimated FROM runs r ${page2} ORDER BY r.id DESC LIMIT ?`).all(...args, ...q.beforeId ? [q.beforeId] : [], Math.min(Math.max(q.limit ?? 30, 1), 200));
     return {
       total,
       rows: rows.map((r) => ({
@@ -4115,6 +4116,8 @@ function listHistory(q = {}) {
         seconds: r.seconds ?? void 0,
         steps: r.steps ?? void 0,
         tokens: r.tokens ?? void 0,
+        cost: r.cost ?? void 0,
+        ...r.cost_estimated ? { costEstimated: true } : {},
         saved: r.saved ?? void 0,
         files: r.files_changed ?? 0,
         applied: !!r.applied
@@ -8456,14 +8459,16 @@ ${[fmt2(head2), ...rows2.map(fmt2)].join("\n")}`);
   const { rows, total } = listHistory({ text: p.positional.join(" "), model: flag(p, "model"), state: flag(p, "state"), group: flag(p, "group"), sinceMs: since2, limit });
   if (has(p, "json")) return console.log(JSON.stringify({ total, rows }, null, 2)), 0;
   if (!rows.length) return console.log(total ? "nothing on this page" : "no matching runs"), 0;
-  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? "verify failed" : r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
-  const head = ["RUN", "WHEN", "STATE", "WORKER", "TIME", "TASK"];
+  const cost = (r) => r.cost === void 0 ? "-" : r.cost === 0 ? "free" : `${r.costEstimated ? "~" : ""}${usd(r.cost)}`;
+  const body = rows.map((r) => [r.id, when(r.startedAt), r.verifyFailed ? "verify failed" : r.state, `${r.backend}${r.model ? ` (${r.model.split("/").pop()})` : ""}`, secs(r.seconds), cost(r), r.task.length > 60 ? `${r.task.slice(0, 59)}\u2026` : r.task]);
+  const head = ["RUN", "WHEN", "STATE", "WORKER", "TIME", "COST", "TASK"];
   const widths = head.map((h, i) => Math.max(h.length, ...body.map((r) => r[i].length)));
   const fmt = (r, header = false) => r.map((c, i) => {
     const cell2 = i === r.length - 1 ? c : c.padEnd(widths[i]);
     return header ? dim(cell2) : i === 2 ? stateColour(r[2], cell2) : cell2;
   }).join("  ");
   console.log([fmt(head, true), ...body.map((r) => fmt(r))].join("\n"));
+  if (rows.some((r) => r.costEstimated)) console.log(dim("\n~ estimated from a price: the worker's CLI reported no cost"));
   if (total > rows.length) console.log(`
 ${rows.length} of ${total} \xB7 --limit N for more \xB7 pitroom show <run> for one`);
   return 0;
@@ -8594,14 +8599,15 @@ function cmdSavings(p) {
     const by = /* @__PURE__ */ new Map();
     for (const e of readLedger(sinceMs(since2))) {
       const key = `${e.backend ?? "?"}  ${e.model ?? "(default model)"}`;
-      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, saved: 0 };
-      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, saved: a.saved + e.saved });
+      const a = by.get(key) ?? { runs: 0, tokens: 0, returned: 0, cost: 0, estimated: false, saved: 0 };
+      by.set(key, { runs: a.runs + 1, tokens: a.tokens + e.tokens, returned: a.returned + e.returned, cost: a.cost + e.workerCost, estimated: a.estimated || !!e.costEstimated, saved: a.saved + e.saved });
     }
     const width = Math.max(12, ...[...by.keys()].map((k) => k.length));
     console.log(`${"worker  model".padEnd(width)}  ${"runs".padStart(5)} ${"processed".padStart(10)} ${"returned".padStart(9)} ${"cost".padStart(8)} ${"saved".padStart(8)}`);
     for (const [key, a] of [...by].sort((x, y) => y[1].runs - x[1].runs)) {
-      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${usd(a.cost).padStart(8)} ${usd(a.saved).padStart(8)}`);
+      console.log(`${key.padEnd(width)}  ${String(a.runs).padStart(5)} ${compact(a.tokens).padStart(10)} ${compact(a.returned).padStart(9)} ${`${a.estimated ? "~" : ""}${usd(a.cost)}`.padStart(8)} ${usd(a.saved).padStart(8)}`);
     }
+    if ([...by.values()].some((a) => a.estimated)) console.log(dim("\n~ the cost is estimated from a price, in part or in all: the worker's CLI reported none"));
     return 0;
   }
   const period = since2 === "all" ? "all time" : `last ${since2.replace("d", " days")}`;
