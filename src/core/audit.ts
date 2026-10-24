@@ -67,12 +67,28 @@ export function focusedRate(base: number, task: string, record?: { audited: numb
  * the first that is not the target that gave the answer. Undefined when there is none (one worker only).
  */
 export function pickAuditor(meta: RunMeta): string | undefined {
+  return auditors(meta)[0];
+}
+
+/**
+ * Who may audit a run, in order: the audit tier, the cheap tier, the fallbacks, the worker; never the worker that gave
+ * the answer (at any effort level). The first audits; the others are its fallbacks, so an auditor whose quota ran out
+ * does not lose the audit.
+ */
+export function auditors(meta: RunMeta): string[] {
   const eff = effective();
   const tiers = eff.tiers.value;
   const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
   const ran = meta.ran ?? meta.worker;
+  const bare = (t: { backend: string; model?: string }) => ({ backend: t.backend, model: t.model?.split('#')[0] || undefined });
   const candidates = [tiers.audit, tiers.cheap, ...eff.fallback.value, eff.worker.value].filter((s): s is string => !!s);
-  return candidates.find((c) => !sameTarget(parseTarget(c, def), ran));
+  const out: string[] = [];
+  for (const c of candidates) {
+    const t = bare(parseTarget(c, def));
+    if (sameTarget(t, bare(ran)) || out.some((o) => sameTarget(bare(parseTarget(o, def)), t))) continue;
+    out.push(c);
+  }
+  return out;
 }
 
 /**

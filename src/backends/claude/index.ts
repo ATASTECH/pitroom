@@ -76,7 +76,7 @@ export function classify(message: string): FailureKind {
   if (/authentication_failed|failed to authenticate|oauth|not logged in|\/login|invalid api key|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return 'auth';
   }
-  if (/rate.?limit|too many requests|\b429\b|\b529\b|overloaded|usage limit|limit reached|quota|capacity/i.test(message)) return 'rate-limited';
+  if (/usage limit|session limit|limit reached|rate.?limit|too many requests|\b429\b|\b529\b|overloaded|quota|capacity/i.test(message)) return 'rate-limited';
   if (/model[^.]*(not found|does not exist|invalid|not available)|invalid model|not_found_error/i.test(message)) return 'model-unavailable';
   return 'other';
 }

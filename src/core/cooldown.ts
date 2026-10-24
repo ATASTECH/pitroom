@@ -20,6 +20,7 @@ export interface Cooldown {
 
 const MAX_MS = 24 * 3_600_000;
 const OVERLOAD_MS = 20 * 60_000;
+const USAGE_MS = 3_600_000;
 const DAILY_MS = 4 * 3_600_000;
 
 const file = () => path.join(home(), 'cooldowns.json');
@@ -43,11 +44,54 @@ export function retryAfterMs(message: string): number | undefined {
   return ms > 0 ? ms : undefined;
 }
 
+/** The wall clock in a time zone (the machine's when none) at an instant, as if it were UTC, in ms. */
+function wallClock(at: number, timeZone: string | undefined): number {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat('en-US', { timeZone, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' })
+      .formatToParts(at)
+      .map((x) => [x.type, Number(x.value)]),
+  );
+  return Date.UTC(p.year!, p.month! - 1, p.day!, p.hour!, p.minute!, p.second!);
+}
+
+/**
+ * How long until the time a provider's message names ("try again at 8:56 PM", "resets 7:40pm (Europe/Istanbul)",
+ * "resets 9pm"), in ms: the next such time, in the zone it names, else the machine's own.
+ */
+export function retryAtMs(message: string, now = Date.now()): number | undefined {
+  const m = /(?:try again at|resets?(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message)
+    ?? /(?:try again at|resets?(?: at)?)\s+(\d{1,2}):(\d{2})()(?!\d)(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message);
+  if (!m) return undefined;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] ?? 0);
+  const half = m[3]?.toLowerCase();
+  if (minute > 59 || (half ? hour < 1 || hour > 12 : hour > 23)) return undefined;
+  if (half === 'p' && hour < 12) hour += 12;
+  if (half === 'a' && hour === 12) hour = 0;
+  let zone: string | undefined = m[4];
+  try {
+    if (zone) new Intl.DateTimeFormat('en-US', { timeZone: zone });
+  } catch {
+    zone = undefined; // a zone this Node does not know: the machine's clock
+  }
+  // the instant whose wall clock in the zone is today's (else tomorrow's) hour:minute
+  const wall = wallClock(now, zone);
+  for (const day of [0, 1]) {
+    const d = new Date(wall);
+    const target = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + day, hour, minute);
+    const at = target - (wallClock(target, zone) - target);
+    if (at > now) return at - now;
+  }
+  return undefined;
+}
+
 /** How long to leave a model alone after this failure message. */
-export function cooldownMs(message: string): number {
-  const told = retryAfterMs(message);
+export function cooldownMs(message: string, now = Date.now()): number {
+  const told = retryAfterMs(message) ?? retryAtMs(message, now);
   if (told !== undefined) return Math.min(Math.max(told, 60_000), MAX_MS);
-  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
+  if (/daily|per.?day|per day|exhausted your/i.test(message)) return DAILY_MS;
+  // a used-up allowance (a plan's usage limit, a free quota) does not come back in minutes the way an overload does
+  return /usage limit|session limit|quota|FreeUsageLimit/i.test(message) ? USAGE_MS : OVERLOAD_MS;
 }
 
 function read(): Record<string, Cooldown> {
@@ -77,7 +121,7 @@ export const activeCooldown = (key: string, now = Date.now()): Cooldown | undefi
 export function recordCooldown(key: string, targetName: string, message: string, now = Date.now()): void {
   try {
     const all = activeCooldowns(now);
-    all[key] = { until: new Date(now + cooldownMs(message)).toISOString(), reason: message.replace(/\s+/g, ' ').trim().slice(0, 160), target: targetName };
+    all[key] = { until: new Date(now + cooldownMs(message, now)).toISOString(), reason: message.replace(/\s+/g, ' ').trim().slice(0, 160), target: targetName };
     write(all);
   } catch {
     // not remembered

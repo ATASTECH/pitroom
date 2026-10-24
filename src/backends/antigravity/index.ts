@@ -395,7 +395,7 @@ function invocation(req: WorkerRequest) {
 }
 
 export function classify(message: string): FailureKind {
-  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return 'rate-limited';
+  if (/usage limit|session limit|RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return 'rate-limited';
   if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|authenticat|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
     return 'auth';
   }

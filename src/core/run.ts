@@ -15,7 +15,7 @@ import { spawnWorker, type ProcessResult } from './process.js';
 import { parseAudit, parseStatus, parseVerdict } from './answers.js';
 import { activeCooldown, cooldownKey, recordCooldown, untilText } from './cooldown.js';
 import { READ_IN, type ReadIn, backToProject, readSnapshot, restoreSnapshot, wantSnapshot } from './snapshot.js';
-import { auditRate, auditTask, auditable, fixTask, focusedRate, pickAuditor, sampled, wantsFix } from './audit.js';
+import { auditRate, auditTask, auditable, auditors, fixTask, focusedRate, sampled, wantsFix } from './audit.js';
 import { workerRecord } from './history.js';
 import { withinBudget } from './budget.js';
 import { rankChain } from './rank.js';
@@ -25,7 +25,7 @@ import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
-import { costAt, estimateTokens, record, savedUsd, workerPrice } from './receipt.js';
+import { addUsage, costAt, estimateTokens, record, savedUsd, workerPrice } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
@@ -55,6 +55,8 @@ export interface RunOptions {
   allowNonGit: boolean;
   web: boolean;
   noFallback: boolean;
+  /** Fallbacks of its own instead of the config's (an audit's: every other auditor). */
+  fallbackTo?: string[];
   group?: string;
   /** `--in-place`: a read run reads the directory itself, never a clean snapshot (see snapshot.ts). */
   inPlace?: boolean;
@@ -114,8 +116,9 @@ export function prepareRun(o: RunOptions): RunMeta {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback || !!o.fallbackTo });
     ({ worker, fallback } = chain);
+    if (o.fallbackTo && !o.noFallback) fallback = o.fallbackTo.map((w) => resolveChain({ worker: w, noFallback: true }).worker);
     warnings.push(...chain.warnings);
     // a worker you named (-W, -m, a tier, a plan task's tier, an audit's) is not reordered
     if (effective().rankWorkers.value && !o.worker && !o.model && !work.tier && fallback.length) {
@@ -334,7 +337,8 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
         }
       }
       if (i === chain.length - 1) break;
-      (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
+      if (why.partial) handOver(meta, backend, target);
+      (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message, ...(why.partial ? { partial: true as const } : {}) });
       for (const f of ['events.jsonl', 'stderr.log']) {
         const from = runFile(meta.id, f);
         if (fs.existsSync(from)) fs.renameSync(from, runFile(meta.id, f.replace('.', `.attempt-${i + 1}.`)));
@@ -378,11 +382,11 @@ function autoAudit(meta: RunMeta): void {
 
 /**
  * Starts an audit of a finished read run in the background: another worker re-checks the answer. `worker` names it
- * (else `pickAuditor`); undefined when no other worker is configured to do it.
+ * (else `auditors`, the others its fallbacks); undefined when no other worker is configured to do it.
  */
 export function startAudit(meta: RunMeta, worker?: string): RunMeta | undefined {
   const answer = read(runFile(meta.id, 'summary.md'));
-  const auditor = worker ?? pickAuditor(meta);
+  const [auditor, ...others] = worker ? [worker] : auditors(meta);
   if (!auditor) return undefined;
   const a = prepareRun({
     mode: 'read',
@@ -394,8 +398,9 @@ export function startAudit(meta: RunMeta, worker?: string): RunMeta | undefined 
     timeoutSec: Math.min(meta.timeoutSec, 15 * 60),
     allowNonGit: true,
     web: false,
-    // never fall back to the worker being audited
-    noFallback: true,
+    // the other auditors, never the worker being audited; one you named has none
+    noFallback: !!worker,
+    fallbackTo: others,
     group: meta.group,
     audit: { of: meta.id },
   });
@@ -554,7 +559,7 @@ function sharedSnapshot(meta: RunMeta, root: string): void {
 function attempt(meta: RunMeta, backend: Backend, target: Target): Promise<ProcessResult> {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: buildPrompt(meta.mode, meta.task, !!meta.parent, !!meta.auditOf),
+    prompt: buildPrompt(meta.mode, meta.handoff ? `${meta.task}\n\n${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
     model: target.model,
     sessionId: meta.sessionId,
@@ -573,12 +578,43 @@ function attempt(meta: RunMeta, backend: Backend, target: Target): Promise<Proce
 
 const read = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
 
-/** Worth retrying on the next target: the worker did no work and the cause is the model/provider. */
-function retryableFailure(meta: RunMeta, backend: Backend, res: ProcessResult): Failure | undefined {
+/**
+ * Worth retrying on the next target: the cause is the model/provider, and the worker did no work yet. A limit
+ * (a used-up quota, a plan's session limit) can also come part way, after work: then the next worker takes the
+ * task over (`partial`), since waiting hours for the limit to reset helps no one.
+ */
+function retryableFailure(meta: RunMeta, backend: Backend, res: ProcessResult): (Failure & { partial?: true }) | undefined {
   const run = backend.parse(read(runFile(meta.id, 'events.jsonl')));
-  if (run.usage.steps > 0) return undefined;
   const f = backend.failure(run, read(runFile(meta.id, 'stderr.log')), res.code);
-  return f && f.kind !== 'other' ? f : undefined;
+  if (!f || f.kind === 'other') return undefined;
+  if (run.usage.steps === 0) return f;
+  return f.kind === 'rate-limited' ? { ...f, partial: true } : undefined;
+}
+
+/**
+ * A worker that hit a limit part way hands the task over: what it used stays part of the run's cost, and the next
+ * one is told what it already changed (a read run's next worker starts over: its answer was not written yet).
+ */
+function handOver(meta: RunMeta, backend: Backend, target: Target): void {
+  const run = backend.parse(read(runFile(meta.id, 'events.jsonl')));
+  const used = { ...run.usage };
+  if (used.cost === undefined) {
+    const price = workerPrice(target.backend, run.model, target.model);
+    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? 'config' });
+  }
+  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+  if (meta.mode === 'read') return;
+  let changed: string[] = [];
+  try {
+    const root = meta.mode === 'isolate' ? meta.worktree! : meta.repoRoot!;
+    if (meta.baseTree) changed = diffTrees(root, meta.baseTree, snapshotTree(root, meta.mode === 'isolate' ? meta.link : [])).changes.map((c) => c.path);
+  } catch {
+    // the list is a help: the next worker still sees the files
+  }
+  const list = changed.length ? `: ${changed.slice(0, 30).join(', ')}${changed.length > 30 ? `, and ${changed.length - 30} more` : ''}` : '';
+  meta.handoff =
+    `Another worker started this task and stopped part way, at its usage limit. Its edits are already in the files${list}. ` +
+    'Do not start over: check what it changed against the task, keep what is right, fix what is not, and finish the task.';
 }
 
 const HINTS: Record<Failure['kind'], string> = {
@@ -653,6 +689,8 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
       meta.usage.costSource = price.source ?? 'config';
     }
   }
+  // the workers a limit stopped part way cost too
+  if (meta.priorUsage && meta.usage) meta.usage = addUsage(meta.priorUsage, meta.usage);
   meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
   // An audit is overhead, not a delegation that saved anything.
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);

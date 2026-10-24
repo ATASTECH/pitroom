@@ -44,7 +44,10 @@ interface Backend {
 ```
 
 `failure().kind` is `model-unavailable`, `rate-limited`, `auth` or `other`. Anything
-but `other`, when the worker did no work, makes the core try the next target.
+but `other`, when the worker did no work, makes the core try the next target. A
+`rate-limited` failure does so even after work: the next target takes the task over (an edit
+in the same tree, told what was already changed). So classify a plan's usage limit or a
+used-up quota as `rate-limited`, and a context-length error as `other`.
 
 ## Mapping Pitroom's modes
 

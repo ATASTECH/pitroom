@@ -51,7 +51,7 @@ export function formatReport(meta: RunMeta, finalText = readSummary(meta), maxLi
     const status = meta.taskStatus ? ` · STATUS ${meta.taskStatus}` : '';
     out.push(`plan: ${planName(meta.plan.file)} · Task ${meta.plan.step}: ${meta.plan.title}${status}`);
   }
-  for (const a of meta.attempts ?? []) out.push(a.skipped ? `skipped: ${a.target} (${a.error.slice(0, 160)})` : `fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
+  for (const a of meta.attempts ?? []) out.push(a.skipped ? `skipped: ${a.target} (${a.error.slice(0, 160)})` : a.partial ? `fallback: ${a.target} hit a limit part way and handed the task over (${a.error.slice(0, 160)})` : `fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
   if (meta.state === 'timeout') {

@@ -56,7 +56,7 @@ export function classify(message: string): FailureKind {
   if (/not supported|model[^.]*(not found|does not exist|unknown|unavailable)|unsupported model|no such model/i.test(message)) {
     return 'model-unavailable';
   }
-  if (/rate.?limit|too many requests|\b429\b|usage limit|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return 'rate-limited';
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return 'rate-limited';
   if (/unauthori[sz]ed|\b40[13]\b|not logged in|log ?in|api.?key|credits?\b|billing|subscription/i.test(message)) return 'auth';
   return 'other';
 }

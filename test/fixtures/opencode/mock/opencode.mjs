@@ -10,6 +10,8 @@
 // MOCK_FAIL_MODELS=a,b     fail with "Model not found" when --model is one of these
 //                          ("default" = no --model given)
 // MOCK_RATE_LIMIT_MODELS=a,b  fail with a daily-quota error ("retry in 2h") when --model is one of these
+// MOCK_LIMIT_PART_WAY_MODELS=a,b  for these models: do MOCK_ACTIONS but the answer (a step each), then fail with a
+//                          plan's usage limit ("try again at 8:56 PM") instead of answering
 // MOCK_COST=0.5           the cost each step reports (default 0, a free model)
 // MOCK_EXPORT_MODEL=p/m    the model `session export` says ran (default mock/good-model)
 // Every invocation is appended to $MOCK_LOG as JSON (argv, cwd, config, stdin type).
@@ -98,8 +100,10 @@ const inline = /\[\[mock:([\s\S]*?)\]\]/.exec(argv[argv.length - 1] ?? '')?.[1];
 const actions = (inline ?? process.env.MOCK_ACTIONS ?? 'answer:SUMMARY: mock answer')
   .split(/;(?=(?:answer|append|write|sleep|fail|exec):)/)
   .filter(Boolean);
+const partWay = (process.env.MOCK_LIMIT_PART_WAY_MODELS ?? '').split(',').includes(model);
 for (const a of actions) {
   const [kind, ...rest] = a.split(':');
+  if (partWay && kind === 'answer') continue;
   if (kind === 'sleep') await new Promise((r) => setTimeout(r, Number(rest[0]) * 1000));
   if (kind === 'fail') {
     console.log(JSON.stringify({ type: 'error', sessionID: session, error: { type: 'unknown', message: rest.join(':') } }));
@@ -127,4 +131,8 @@ for (const a of actions) {
     fs.appendFileSync(process.env.MOCK_LOG, JSON.stringify({ exec: command, code: r.status, output: `${r.stdout}${r.stderr}` }) + '\n');
     step((m) => emit('tool_use', { messageID: m, tool: 'shell', state: { status: 'completed', input: { command }, output: r.stdout } }));
   }
+}
+if (partWay) {
+  console.log(JSON.stringify({ type: 'error', sessionID: session, error: { type: 'provider.rate', message: "You've hit your usage limit. Upgrade to Pro or try again at 8:56 PM." } }));
+  process.exit(1);
 }

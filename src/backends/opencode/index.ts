@@ -63,7 +63,7 @@ export function majorVersion(output: string): number | undefined {
 
 export function classify(message: string): FailureKind {
   if (/model not found|ModelNotFound|unknown model|no such model|deprecated/i.test(message)) return 'model-unavailable';
-  if (/rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return 'rate-limited';
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return 'rate-limited';
   // v2: "provider.auth" / HTTP 403 FreeTierError ("free tier can only be used from within OpenCode").
   if (/provider\.auth|FreeTierError|free tier|unauthori[sz]ed|\b40[13]\b|api.?key|insufficient|credits?\b|billing|payment/i.test(message)) {
     return 'auth';

@@ -29,8 +29,15 @@ export interface RunMeta {
   fallback: Target[]; // tried in order on model/provider failures
   ran?: Target; // the target of the final attempt
   resolvedModel?: string; // what the worker CLI actually used
-  /** Targets that did not give the answer: failed, or (skipped) left out while cooling down. */
-  attempts?: { target: string; error: string; skipped?: boolean }[];
+  /**
+   * Targets that did not give the answer: failed, or (skipped) left out while cooling down. `partial`: it hit a limit
+   * after it had started working, and the next worker took the task over.
+   */
+  attempts?: { target: string; error: string; skipped?: boolean; partial?: true }[];
+  /** What the workers that hit a limit part way used before the last one took over; in `usage` once the run ends. */
+  priorUsage?: Usage;
+  /** For the worker that takes over an edit part way: what the one before it already changed. */
+  handoff?: string;
   /** Why the last worker failed, as its backend classified it (a rate limit is about the provider, not the work). */
   failureKind?: 'model-unavailable' | 'rate-limited' | 'auth' | 'other';
   parent?: string;

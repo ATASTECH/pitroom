@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Workers
+- **A limit part way no longer fails the run.** A worker that hit a plan's usage limit or a used-up quota after it had started (a Codex or Claude session limit, an Antigravity quota) failed the run, fallbacks or not: about a third of the runs that failed on a limit had a fallback that was never tried. Now the next worker takes the task over. An edit carries on in the same tree, told which files were already changed and to finish rather than start over; a read starts over. The run's cost is what both used, and the run's notes say who handed over.
+- **Audits have fallbacks.** An audit ran on one auditor only, and lost the audit when that one was rate-limited. It now falls back to the other auditors (the audit and cheap tiers, the fallbacks, the worker), never to the worker it audits, at any effort level.
+- **Cooldowns last as long as the limit.** "try again at 8:56 PM" and "resets 7:40pm (Europe/Istanbul)" are read as times of day (in the zone named, else the machine's), so an exhausted model is not tried again every 20 minutes until then. A used-up allowance with no time given (OpenCode's free usage limit) waits an hour instead of 20 minutes.
+- **"usage limit" and "session limit" count as limits on every worker** (they did on Claude Code and Codex only).
+
 ### Savings
 - **No finished run is missing from the savings ledger.** A run whose process was killed between its final record and its ledger line, and a worker that crashed, were never counted (about 1.5% of finished runs). `pitroom savings`, `pitroom history` and the dashboard now record the finished runs the ledger missed, each once.
 - **A done run counts even when its CLI reported no steps** (some OpenCode reviews): it answered, so it is in "Finished". Runs that failed before reaching the model stay out, as before.

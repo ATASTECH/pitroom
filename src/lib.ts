@@ -8,7 +8,7 @@ export type * from './backends/types.js';
 export { describeTarget, formatTarget, parseTarget } from './core/target.js';
 export { extractRefs, verifyRefs } from './core/refs.js';
 export { fill, loadTemplate } from './core/templates.js';
-export { cooldownMs, retryAfterMs } from './core/cooldown.js';
+export { cooldownMs, retryAfterMs, retryAtMs } from './core/cooldown.js';
 export { parseAudit, parseStatus, parseVerdict } from './core/answers.js';
 export { ASKS_FOR_LIST, fixTask, focusedRate } from './core/audit.js';
 export { rankChain, scoreOf } from './core/rank.js';

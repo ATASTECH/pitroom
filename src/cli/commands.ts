@@ -17,7 +17,7 @@ import { resolveChain } from '../core/chain.js';
 import { parseTarget } from '../core/target.js';
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
-import { auditTask, pickAuditor } from '../core/audit.js';
+import { auditTask, auditors } from '../core/audit.js';
 import { cacheKey, cachedNote, findCached } from '../core/cache.js';
 import { type EvalRow, formatEval, loadEval, scoreAnswer, summarize, truthOf } from '../core/eval.js';
 import { repoRoot } from '../vcs/git.js';
@@ -117,7 +117,9 @@ export async function cmdAudit(p: Parsed): Promise<number> {
   if (m.mode !== 'read') throw new UserError(`run ${m.id} changed files; an audit re-checks a read run's answer: pitroom review ${m.id} judges a change`);
   const answer = readSummary(m);
   if (!answer.trim()) throw new UserError(`run ${m.id} gave no answer to audit`);
-  const worker = flag(p, 'worker') ?? (flag(p, 'tier') ? undefined : pickAuditor(m));
+  // a worker or tier you name has no fallback; else the first auditor, with the others as its fallbacks
+  const named = flag(p, 'worker') ?? flag(p, 'tier');
+  const [worker, ...others]: (string | undefined)[] = named ? [flag(p, 'worker')] : auditors(m);
   if (!worker && !flag(p, 'tier')) {
     throw new UserError('no other worker to audit with: name one with -W, or configure tiers "audit" or "cheap", or fallback workers, that differ from the one that answered', 3);
   }
@@ -127,7 +129,8 @@ export async function cmdAudit(p: Parsed): Promise<number> {
     dir: m.dir,
     worker,
     group: flag(p, 'group') ?? m.group,
-    noFallback: true,
+    noFallback: !!named,
+    fallbackTo: others as string[],
     audit: { of: m.id },
     auditRate: undefined,
   });

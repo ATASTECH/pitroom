@@ -71,7 +71,7 @@ function invocation(req: WorkerRequest) {
 
 export function classify(message: string): FailureKind {
   if (/\b40[13]\b|incorrect api key|invalid api key|unauthori[sz]ed|authenticat|not logged in|no auth/i.test(message)) return 'auth';
-  if (/\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return 'rate-limited';
+  if (/usage limit|session limit|\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return 'rate-limited';
   if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return 'model-unavailable';
   return 'other';
 }

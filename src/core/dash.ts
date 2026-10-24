@@ -190,7 +190,7 @@ export interface RunDetail {
   patch?: string;
   fileDiffs: FileDiffData[];
   info: Record<string, string | number | undefined>;
-  attempts: { target: string; error: string; skipped?: boolean }[];
+  attempts: { target: string; error: string; skipped?: boolean; partial?: true }[];
   warnings: string[];
   refs?: { valid: number; total: number; invalid: string[] };
   verify?: { command: string; ok: boolean; tail: string };

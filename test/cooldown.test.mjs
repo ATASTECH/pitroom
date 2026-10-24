@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { cooldownMs, retryAfterMs } from '../dist/lib.mjs';
+import { cooldownMs, retryAfterMs, retryAtMs } from '../dist/lib.mjs';
 import { sandbox } from './helpers.mjs';
 
 const MIN = 60_000;
@@ -21,6 +21,23 @@ test('cooldown: the wait comes from the provider\'s message, else from the kind 
   assert.equal(cooldownMs('retry in 9d'), 24 * HOUR, 'at most a day');
   assert.equal(cooldownMs('Rate limit exceeded: free-models-per-day'), 4 * HOUR, 'a daily quota: hours');
   assert.equal(cooldownMs('the model is overloaded'), 20 * MIN, 'overload: minutes');
+  assert.equal(cooldownMs('Free usage limit reached. [provider.quota, FreeUsageLimitError, HTTP 429]'), HOUR, 'a used-up allowance with no time: an hour');
+  assert.equal(cooldownMs("You've hit your usage limit."), HOUR);
+});
+
+test('cooldown: a time of day in the message ("try again at 8:56 PM", "resets 7:40pm (Europe/Istanbul)") is the next such time', () => {
+  // 09:30 UTC: 12:30 in Istanbul (UTC+3, no daylight saving), 05:30 in New York (UTC-4 in October)
+  const now = Date.parse('2026-10-21T09:30:00Z');
+  assert.equal(retryAtMs("You've hit your session limit · resets 7:40pm (Europe/Istanbul) [rate_limit]", now), 7 * HOUR + 10 * MIN);
+  assert.equal(retryAtMs('resets 9pm (Europe/Istanbul)', now), 8.5 * HOUR);
+  assert.equal(retryAtMs('resets 10am (America/New_York)', now), 4.5 * HOUR);
+  assert.equal(retryAtMs('resets 14:30 (Europe/Istanbul)', now), 2 * HOUR, 'a 24-hour clock');
+  assert.equal(retryAtMs('resets 11am (Europe/Istanbul)', now), 22.5 * HOUR, 'already past today: tomorrow');
+  assert.equal(retryAtMs('resets 12am (UTC)', now), 14.5 * HOUR, 'midnight');
+  assert.ok(retryAtMs('or try again at 8:56 PM.', now) > 0, "the machine's own clock when no zone is named");
+  assert.ok(retryAtMs('resets 9pm (Mars/Base)', now) > 0, 'a zone Node does not know: the machine\'s clock');
+  for (const m of ['resets 13 widgets', 'resets 25:00', 'try again at 13pm', 'Resets in 149h11m18s.', 'nothing']) assert.equal(retryAtMs(m, now), undefined, m);
+  assert.equal(cooldownMs("You've hit your session limit · resets 7:40pm (Europe/Istanbul)", now), 7 * HOUR + 10 * MIN, 'not the hour of a bare usage limit');
 });
 
 test('cooldown: a rate-limited model is remembered, skipped by the next run, tried again once its time is up', () => {

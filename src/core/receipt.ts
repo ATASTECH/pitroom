@@ -73,6 +73,20 @@ export const costAt = (usage: Usage, price: Price): number =>
 /** The worker's cost: as its CLI reported it, else as estimated from a price (the user's `workerPrices`, else the catalog's); undefined when neither. */
 export const workerCostOf = (usage: Usage | undefined): number | undefined => usage?.cost ?? usage?.costEstimate;
 
+/**
+ * Two workers' usage as one (a run a limit moved to another worker part way): tokens add up, and so does the cost,
+ * which stays "reported" only when both were; a part with no cost at all counts as free, as it does alone.
+ */
+export function addUsage(a: Usage, b: Usage): Usage {
+  const sum = (k: 'input' | 'output' | 'reasoning' | 'cacheRead' | 'cacheWrite' | 'total' | 'steps' | 'toolCalls' | 'denied') => (a[k] ?? 0) + (b[k] ?? 0);
+  const out: Usage = { input: sum('input'), output: sum('output'), reasoning: sum('reasoning'), cacheRead: sum('cacheRead'), cacheWrite: sum('cacheWrite'), total: sum('total'), steps: sum('steps'), toolCalls: sum('toolCalls'), denied: sum('denied') };
+  const ca = workerCostOf(a);
+  const cb = workerCostOf(b);
+  if (ca === undefined && cb === undefined) return out;
+  if (a.cost !== undefined && b.cost !== undefined) return { ...out, cost: a.cost + b.cost };
+  return { ...out, costEstimate: (ca ?? 0) + (cb ?? 0), costSource: a.costSource ?? b.costSource };
+}
+
 export function savedUsd(usage: Usage, returnedTokens: number, price = primaryPrice()): number {
   const readingTheReport = (returnedTokens * price.input) / 1e6;
   return Math.max(0, costAt(usage, price) - (workerCostOf(usage) ?? 0) - readingTheReport);

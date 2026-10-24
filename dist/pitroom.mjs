@@ -775,7 +775,7 @@ function invocation(req) {
   return { command, args: [...prefix, ...args], env };
 }
 function classify(message) {
-  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return "rate-limited";
   if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|authenticat|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
@@ -1013,7 +1013,7 @@ function classify2(message) {
   if (/authentication_failed|failed to authenticate|oauth|not logged in|\/login|invalid api key|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
-  if (/rate.?limit|too many requests|\b429\b|\b529\b|overloaded|usage limit|limit reached|quota|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|limit reached|rate.?limit|too many requests|\b429\b|\b529\b|overloaded|quota|capacity/i.test(message)) return "rate-limited";
   if (/model[^.]*(not found|does not exist|invalid|not available)|invalid model|not_found_error/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -1214,7 +1214,7 @@ function classify3(message) {
   if (/not supported|model[^.]*(not found|does not exist|unknown|unavailable)|unsupported model|no such model/i.test(message)) {
     return "model-unavailable";
   }
-  if (/rate.?limit|too many requests|\b429\b|usage limit|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return "rate-limited";
   if (/unauthori[sz]ed|\b40[13]\b|not logged in|log ?in|api.?key|credits?\b|billing|subscription/i.test(message)) return "auth";
   return "other";
 }
@@ -1452,7 +1452,7 @@ function classify4(message) {
   if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
-  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
   if (/model.{0,80}(not found|not available|no longer available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -1896,7 +1896,7 @@ function majorVersion(output) {
 }
 function classify5(message) {
   if (/model not found|ModelNotFound|unknown model|no such model|deprecated/i.test(message)) return "model-unavailable";
-  if (/rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
   if (/provider\.auth|FreeTierError|free tier|unauthori[sz]ed|\b40[13]\b|api.?key|insufficient|credits?\b|billing|payment/i.test(message)) {
     return "auth";
   }
@@ -2241,7 +2241,7 @@ function invocation7(req) {
 }
 function classify6(message) {
   if (/\b40[13]\b|incorrect api key|invalid api key|unauthori[sz]ed|authenticat|not logged in|no auth/i.test(message)) return "auth";
-  if (/\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
   if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -3116,6 +3116,7 @@ import fs17 from "node:fs";
 import path15 from "node:path";
 var MAX_MS = 24 * 36e5;
 var OVERLOAD_MS = 20 * 6e4;
+var USAGE_MS = 36e5;
 var DAILY_MS = 4 * 36e5;
 var file = () => path15.join(home(), "cooldowns.json");
 function cooldownKey(target, backend) {
@@ -3133,10 +3134,41 @@ function retryAfterMs(message) {
   }
   return ms > 0 ? ms : void 0;
 }
-function cooldownMs(message) {
-  const told = retryAfterMs(message);
+function wallClock(at, timeZone) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).formatToParts(at).map((x) => [x.type, Number(x.value)])
+  );
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+}
+function retryAtMs(message, now = Date.now()) {
+  const m = /(?:try again at|resets?(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message) ?? /(?:try again at|resets?(?: at)?)\s+(\d{1,2}):(\d{2})()(?!\d)(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message);
+  if (!m) return void 0;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] ?? 0);
+  const half = m[3]?.toLowerCase();
+  if (minute > 59 || (half ? hour < 1 || hour > 12 : hour > 23)) return void 0;
+  if (half === "p" && hour < 12) hour += 12;
+  if (half === "a" && hour === 12) hour = 0;
+  let zone = m[4];
+  try {
+    if (zone) new Intl.DateTimeFormat("en-US", { timeZone: zone });
+  } catch {
+    zone = void 0;
+  }
+  const wall = wallClock(now, zone);
+  for (const day of [0, 1]) {
+    const d = new Date(wall);
+    const target = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + day, hour, minute);
+    const at = target - (wallClock(target, zone) - target);
+    if (at > now) return at - now;
+  }
+  return void 0;
+}
+function cooldownMs(message, now = Date.now()) {
+  const told = retryAfterMs(message) ?? retryAtMs(message, now);
   if (told !== void 0) return Math.min(Math.max(told, 6e4), MAX_MS);
-  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
+  if (/daily|per.?day|per day|exhausted your/i.test(message)) return DAILY_MS;
+  return /usage limit|session limit|quota|FreeUsageLimit/i.test(message) ? USAGE_MS : OVERLOAD_MS;
 }
 function read() {
   try {
@@ -3160,7 +3192,7 @@ var activeCooldown = (key, now = Date.now()) => activeCooldowns(now)[key];
 function recordCooldown(key, targetName, message, now = Date.now()) {
   try {
     const all = activeCooldowns(now);
-    all[key] = { until: new Date(now + cooldownMs(message)).toISOString(), reason: message.replace(/\s+/g, " ").trim().slice(0, 160), target: targetName };
+    all[key] = { until: new Date(now + cooldownMs(message, now)).toISOString(), reason: message.replace(/\s+/g, " ").trim().slice(0, 160), target: targetName };
     write(all);
   } catch {
   }
@@ -3349,12 +3381,22 @@ function focusedRate(base2, task, record2) {
   return { rate: Math.min(rate2, 1), why };
 }
 function pickAuditor(meta) {
+  return auditors(meta)[0];
+}
+function auditors(meta) {
   const eff = effective();
   const tiers = eff.tiers.value;
   const def = parseTarget(eff.worker.value, DEFAULT_BACKEND).backend;
   const ran = meta.ran ?? meta.worker;
+  const bare = (t) => ({ backend: t.backend, model: t.model?.split("#")[0] || void 0 });
   const candidates = [tiers.audit, tiers.cheap, ...eff.fallback.value, eff.worker.value].filter((s) => !!s);
-  return candidates.find((c) => !sameTarget(parseTarget(c, def), ran));
+  const out = [];
+  for (const c of candidates) {
+    const t = bare(parseTarget(c, def));
+    if (sameTarget(t, bare(ran)) || out.some((o) => sameTarget(bare(parseTarget(o, def)), t))) continue;
+    out.push(c);
+  }
+  return out;
 }
 function relativeToAuditor(answer, meta) {
   let out = answer;
@@ -3611,6 +3653,15 @@ function workerPrice(backend, ...models) {
 }
 var costAt = (usage2, price) => (usage2.input * price.input + usage2.cacheRead * price.cachedInput + (usage2.output + usage2.reasoning) * price.output) / 1e6;
 var workerCostOf = (usage2) => usage2?.cost ?? usage2?.costEstimate;
+function addUsage(a, b) {
+  const sum = (k) => (a[k] ?? 0) + (b[k] ?? 0);
+  const out = { input: sum("input"), output: sum("output"), reasoning: sum("reasoning"), cacheRead: sum("cacheRead"), cacheWrite: sum("cacheWrite"), total: sum("total"), steps: sum("steps"), toolCalls: sum("toolCalls"), denied: sum("denied") };
+  const ca = workerCostOf(a);
+  const cb = workerCostOf(b);
+  if (ca === void 0 && cb === void 0) return out;
+  if (a.cost !== void 0 && b.cost !== void 0) return { ...out, cost: a.cost + b.cost };
+  return { ...out, costEstimate: (ca ?? 0) + (cb ?? 0), costSource: a.costSource ?? b.costSource };
+}
 function savedUsd(usage2, returnedTokens, price = primaryPrice()) {
   const readingTheReport = returnedTokens * price.input / 1e6;
   return Math.max(0, costAt(usage2, price) - (workerCostOf(usage2) ?? 0) - readingTheReport);
@@ -4481,7 +4532,7 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
     const status = meta.taskStatus ? ` \xB7 STATUS ${meta.taskStatus}` : "";
     out.push(`plan: ${planName(meta.plan.file)} \xB7 Task ${meta.plan.step}: ${meta.plan.title}${status}`);
   }
-  for (const a of meta.attempts ?? []) out.push(a.skipped ? `skipped: ${a.target} (${a.error.slice(0, 160)})` : `fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
+  for (const a of meta.attempts ?? []) out.push(a.skipped ? `skipped: ${a.target} (${a.error.slice(0, 160)})` : a.partial ? `fallback: ${a.target} hit a limit part way and handed the task over (${a.error.slice(0, 160)})` : `fallback: ${a.target} failed (${a.error.slice(0, 160)})`);
   if (meta.error) out.push(`error: ${meta.error}`);
   for (const w of meta.warnings) out.push(`warning: ${w}`);
   if (meta.state === "timeout") {
@@ -5230,8 +5281,9 @@ function prepareRun(o) {
     worker = o.model ? { ...ran, model: o.model } : ran;
     fallback = o.noFallback ? [] : parent.fallback.filter((t) => t.backend === ran.backend);
   } else {
-    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback });
+    const chain = resolveChain({ worker: o.worker, model: o.model, tier: work.tier, effort: o.effort, noFallback: o.noFallback || !!o.fallbackTo });
     ({ worker, fallback } = chain);
+    if (o.fallbackTo && !o.noFallback) fallback = o.fallbackTo.map((w) => resolveChain({ worker: w, noFallback: true }).worker);
     warnings2.push(...chain.warnings);
     if (effective().rankWorkers.value && !o.worker && !o.model && !work.tier && fallback.length) {
       const since2 = Date.now() - 30 * 864e5;
@@ -5426,7 +5478,8 @@ async function execute(meta) {
         }
       }
       if (i === chain.length - 1) break;
-      (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message });
+      if (why.partial) handOver(meta, backend, target);
+      (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message, ...why.partial ? { partial: true } : {} });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
         if (fs31.existsSync(from)) fs31.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
@@ -5466,7 +5519,7 @@ function autoAudit(meta) {
 }
 function startAudit(meta, worker) {
   const answer = read2(runFile(meta.id, "summary.md"));
-  const auditor = worker ?? pickAuditor(meta);
+  const [auditor, ...others] = worker ? [worker] : auditors(meta);
   if (!auditor) return void 0;
   const a = prepareRun({
     mode: "read",
@@ -5478,8 +5531,9 @@ function startAudit(meta, worker) {
     timeoutSec: Math.min(meta.timeoutSec, 15 * 60),
     allowNonGit: true,
     web: false,
-    // never fall back to the worker being audited
-    noFallback: true,
+    // the other auditors, never the worker being audited; one you named has none
+    noFallback: !!worker,
+    fallbackTo: others,
     group: meta.group,
     audit: { of: meta.id }
   });
@@ -5602,7 +5656,9 @@ function sharedSnapshot(meta, root) {
 function attempt(meta, backend, target) {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: buildPrompt(meta.mode, meta.task, !!meta.parent, !!meta.auditOf),
+    prompt: buildPrompt(meta.mode, meta.handoff ? `${meta.task}
+
+${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
     model: target.model,
     sessionId: meta.sessionId,
@@ -5621,9 +5677,28 @@ function attempt(meta, backend, target) {
 var read2 = (f) => fs31.existsSync(f) ? fs31.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
   const run2 = backend.parse(read2(runFile(meta.id, "events.jsonl")));
-  if (run2.usage.steps > 0) return void 0;
   const f = backend.failure(run2, read2(runFile(meta.id, "stderr.log")), res.code);
-  return f && f.kind !== "other" ? f : void 0;
+  if (!f || f.kind === "other") return void 0;
+  if (run2.usage.steps === 0) return f;
+  return f.kind === "rate-limited" ? { ...f, partial: true } : void 0;
+}
+function handOver(meta, backend, target) {
+  const run2 = backend.parse(read2(runFile(meta.id, "events.jsonl")));
+  const used = { ...run2.usage };
+  if (used.cost === void 0) {
+    const price = workerPrice(target.backend, run2.model, target.model);
+    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? "config" });
+  }
+  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+  if (meta.mode === "read") return;
+  let changed = [];
+  try {
+    const root = meta.mode === "isolate" ? meta.worktree : meta.repoRoot;
+    if (meta.baseTree) changed = diffTrees(root, meta.baseTree, snapshotTree(root, meta.mode === "isolate" ? meta.link : [])).changes.map((c) => c.path);
+  } catch {
+  }
+  const list2 = changed.length ? `: ${changed.slice(0, 30).join(", ")}${changed.length > 30 ? `, and ${changed.length - 30} more` : ""}` : "";
+  meta.handoff = `Another worker started this task and stopped part way, at its usage limit. Its edits are already in the files${list2}. Do not start over: check what it changed against the task, keep what is right, fix what is not, and finish the task.`;
 }
 var HINTS = {
   "model-unavailable": "the model is not available; fix the worker config, pass --worker/--model, or configure fallback workers (see `pitroom doctor`)",
@@ -5689,6 +5764,7 @@ function finalize(meta, res) {
       meta.usage.costSource = price.source ?? "config";
     }
   }
+  if (meta.priorUsage && meta.usage) meta.usage = addUsage(meta.priorUsage, meta.usage);
   meta.returnedTokens = estimateTokens(formatReport(meta, run2.finalText));
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
@@ -8216,7 +8292,8 @@ async function cmdAudit(p) {
   if (m.mode !== "read") throw new UserError(`run ${m.id} changed files; an audit re-checks a read run's answer: pitroom review ${m.id} judges a change`);
   const answer = readSummary(m);
   if (!answer.trim()) throw new UserError(`run ${m.id} gave no answer to audit`);
-  const worker = flag(p, "worker") ?? (flag(p, "tier") ? void 0 : pickAuditor(m));
+  const named = flag(p, "worker") ?? flag(p, "tier");
+  const [worker, ...others] = named ? [flag(p, "worker")] : auditors(m);
   if (!worker && !flag(p, "tier")) {
     throw new UserError('no other worker to audit with: name one with -W, or configure tiers "audit" or "cheap", or fallback workers, that differ from the one that answered', 3);
   }
@@ -8226,7 +8303,8 @@ async function cmdAudit(p) {
     dir: m.dir,
     worker,
     group: flag(p, "group") ?? m.group,
-    noFallback: true,
+    noFallback: !!named,
+    fallbackTo: others,
     audit: { of: m.id },
     auditRate: void 0
   });

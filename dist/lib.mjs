@@ -759,7 +759,7 @@ function invocation(req) {
   return { command, args: [...prefix, ...args], env };
 }
 function classify(message) {
-  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|capacity/i.test(message)) return "rate-limited";
   if (/not (signed|logged) in|\bsign.?in\b|\blog ?in\b|authenticat|PERMISSION_DENIED|oauth|credential|keyring|keychain|\b401\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
@@ -997,7 +997,7 @@ function classify2(message) {
   if (/authentication_failed|failed to authenticate|oauth|not logged in|\/login|invalid api key|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
-  if (/rate.?limit|too many requests|\b429\b|\b529\b|overloaded|usage limit|limit reached|quota|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|limit reached|rate.?limit|too many requests|\b429\b|\b529\b|overloaded|quota|capacity/i.test(message)) return "rate-limited";
   if (/model[^.]*(not found|does not exist|invalid|not available)|invalid model|not_found_error/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -1198,7 +1198,7 @@ function classify3(message) {
   if (/not supported|model[^.]*(not found|does not exist|unknown|unavailable)|unsupported model|no such model/i.test(message)) {
     return "model-unavailable";
   }
-  if (/rate.?limit|too many requests|\b429\b|usage limit|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|capacity/i.test(message)) return "rate-limited";
   if (/unauthori[sz]ed|\b40[13]\b|not logged in|log ?in|api.?key|credits?\b|billing|subscription/i.test(message)) return "auth";
   return "other";
 }
@@ -1436,7 +1436,7 @@ function classify4(message) {
   if (/IneligibleTier|no longer supported for Gemini|error authenticating|not logged in|please (log ?in|sign in)|credentials|api key|UNAUTHENTICATED|PERMISSION_DENIED|\b40[13]\b|unauthori[sz]ed/i.test(message)) {
     return "auth";
   }
-  if (/RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|RESOURCE_EXHAUSTED|\b429\b|quota|rate.?limit|too many requests|overloaded|\b503\b|exhausted your capacity|capacity/i.test(message)) return "rate-limited";
   if (/model.{0,80}(not found|not available|no longer available|does not exist|unsupported|invalid)|\b404\b|NOT_FOUND|invalid model|is not supported/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -1880,7 +1880,7 @@ function majorVersion(output) {
 }
 function classify5(message) {
   if (/model not found|ModelNotFound|unknown model|no such model|deprecated/i.test(message)) return "model-unavailable";
-  if (/rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|rate.?limit|too many requests|\b429\b|quota|overloaded|\b50[23]\b|unavailable|capacity/i.test(message)) return "rate-limited";
   if (/provider\.auth|FreeTierError|free tier|unauthori[sz]ed|\b40[13]\b|api.?key|insufficient|credits?\b|billing|payment/i.test(message)) {
     return "auth";
   }
@@ -2225,7 +2225,7 @@ function invocation7(req) {
 }
 function classify6(message) {
   if (/\b40[13]\b|incorrect api key|invalid api key|unauthori[sz]ed|authenticat|not logged in|no auth/i.test(message)) return "auth";
-  if (/\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
+  if (/usage limit|session limit|\b429\b|rate.?limit|too many requests|quota|capacity|overloaded|\b529\b/i.test(message)) return "rate-limited";
   if (/model[^.]*(not found|does not exist|not available|not supported)|invalid model|model_not_found|\b404\b/i.test(message)) return "model-unavailable";
   return "other";
 }
@@ -2493,6 +2493,7 @@ function fill(template, values) {
 // src/core/cooldown.ts
 var MAX_MS = 24 * 36e5;
 var OVERLOAD_MS = 20 * 6e4;
+var USAGE_MS = 36e5;
 var DAILY_MS = 4 * 36e5;
 function retryAfterMs(message) {
   const compact2 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
@@ -2505,10 +2506,41 @@ function retryAfterMs(message) {
   }
   return ms > 0 ? ms : void 0;
 }
-function cooldownMs(message) {
-  const told = retryAfterMs(message);
+function wallClock(at, timeZone) {
+  const p = Object.fromEntries(
+    new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "numeric", day: "numeric", hour: "numeric", minute: "numeric", second: "numeric" }).formatToParts(at).map((x) => [x.type, Number(x.value)])
+  );
+  return Date.UTC(p.year, p.month - 1, p.day, p.hour, p.minute, p.second);
+}
+function retryAtMs(message, now = Date.now()) {
+  const m = /(?:try again at|resets?(?: at)?)\s+(\d{1,2})(?::(\d{2}))?\s*([ap])\.?m\b\.?(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message) ?? /(?:try again at|resets?(?: at)?)\s+(\d{1,2}):(\d{2})()(?!\d)(?:\s*\(([A-Za-z_]+(?:\/[A-Za-z0-9_+-]+)*)\))?/i.exec(message);
+  if (!m) return void 0;
+  let hour = Number(m[1]);
+  const minute = Number(m[2] ?? 0);
+  const half = m[3]?.toLowerCase();
+  if (minute > 59 || (half ? hour < 1 || hour > 12 : hour > 23)) return void 0;
+  if (half === "p" && hour < 12) hour += 12;
+  if (half === "a" && hour === 12) hour = 0;
+  let zone = m[4];
+  try {
+    if (zone) new Intl.DateTimeFormat("en-US", { timeZone: zone });
+  } catch {
+    zone = void 0;
+  }
+  const wall = wallClock(now, zone);
+  for (const day of [0, 1]) {
+    const d = new Date(wall);
+    const target = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + day, hour, minute);
+    const at = target - (wallClock(target, zone) - target);
+    if (at > now) return at - now;
+  }
+  return void 0;
+}
+function cooldownMs(message, now = Date.now()) {
+  const told = retryAfterMs(message) ?? retryAtMs(message, now);
   if (told !== void 0) return Math.min(Math.max(told, 6e4), MAX_MS);
-  return /daily|per.?day|per day|exhausted your/i.test(message) ? DAILY_MS : OVERLOAD_MS;
+  if (/daily|per.?day|per day|exhausted your/i.test(message)) return DAILY_MS;
+  return /usage limit|session limit|quota|FreeUsageLimit/i.test(message) ? USAGE_MS : OVERLOAD_MS;
 }
 
 // src/core/answers.ts
@@ -3480,6 +3512,7 @@ export {
   requestStop,
   resolveRun,
   retryAfterMs,
+  retryAtMs,
   retryCommands,
   runDir,
   runFile,
