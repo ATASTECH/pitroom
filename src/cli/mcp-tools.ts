@@ -28,6 +28,7 @@ const TOPICS: Record<string, string[]> = {
   stats: ['since'],
   savings: ['since', 'perModel'],
   models: ['worker', 'all'],
+  prices: ['worker'],
   cooldown: [],
   config: [],
   doctor: [],
@@ -55,6 +56,8 @@ function infoArgs(topic: string, a: Json): { args: string[]; timeoutMs?: number 
       return { args: ['history', 'stats', ...since(a)] };
     case 'savings':
       return { args: ['savings', ...since(a), ...(bool(a, 'perModel') ? ['--models'] : [])] };
+    case 'prices':
+      return { args: ['prices', ...(worker ? ['--', worker] : [])] };
     case 'models':
       return { args: ['models', ...(worker ? [worker] : []), ...(bool(a, 'all') ? ['--all'] : [])] };
     case 'doctor':
@@ -141,7 +144,7 @@ export const TOOLS: Tool[] = [
     name: 'pitroom_info',
     title: 'Pitroom information',
     description:
-      'Reports, changing nothing. topic: runs (latest runs; running, group), history (search earlier answers before asking again; text, state, model, since, limit), stats (success rate, time, tokens, audits per worker; since), savings (since, perModel), models (a backend\'s models and costs; worker, all), cooldown (rate-limited models being skipped), config, doctor (setup check).',
+      'Reports, changing nothing. topic: runs (latest runs; running, group), history (search earlier answers before asking again; text, state, model, since, limit), stats (success rate, time, tokens, audits per worker; since), savings (since, perModel), models (a backend\'s models and costs; worker, all), prices (USD per 1M tokens: the primary the savings are measured against, and each worker in use or the one named; worker), cooldown (rate-limited models being skipped), config, doctor (setup check).',
     inputSchema: {
       type: 'object',
       properties: {

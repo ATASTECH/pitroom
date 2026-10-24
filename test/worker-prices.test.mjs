@@ -123,3 +123,21 @@ test('workerPrices: the history marks an estimated cost; a reported one and an u
   assert.match(models.split('\n').find((l) => l.startsWith('gemini')), /~\$[\d.]+/);
   assert.match(models, /~ the cost is estimated from a price/);
 });
+
+test('workerPrices: pitroom prices names the price a worker gets, the ones in use or the ones asked about, and the primary', () => {
+  const s = sandbox();
+  s.config({ worker: 'gemini:gemini-3.8-flash', fallback: ['opencode'], workerPrices: { 'gemini:gemini-2.5-flash': '2,10,0.5' } });
+  const inUse = JSON.parse(s.run(['prices', '--json']).stdout);
+  assert.deepEqual(inUse.workers.map((w) => w.worker), ['gemini:gemini-3.8-flash', 'opencode']);
+  assert.equal(inUse.workers[0].price, undefined, 'the price is for the model that ran, not this one');
+  assert.equal(inUse.workers[1].reportsCost, true);
+  assert.equal(inUse.primary.name, 'Claude Sonnet');
+
+  const asked = JSON.parse(s.run(['prices', 'gemini:gemini-2.5-flash', 'codex:gpt-6.1-sol', '--json']).stdout);
+  assert.deepEqual(asked.workers.map((w) => w.worker), ['gemini:gemini-2.5-flash', 'codex:gpt-6.1-sol']);
+  assert.deepEqual(asked.workers[0].price, { name: 'gemini:gemini-2.5-flash', source: 'config', input: 2, output: 10, cachedInput: 0.5 });
+  assert.equal(asked.workers[1].price, undefined, 'no price of yours and the feed is off: none');
+  const text = s.run(['prices', 'gemini:gemini-2.5-flash']).stdout;
+  assert.match(text, /primary: +Claude Sonnet: in 3 · out 15/);
+  assert.match(text, /the workers asked about:\n +gemini:gemini-2\.5-flash +in 2 · out 10 · cached 0\.5 USD\/1M +\(your workerPrices\)/);
+});

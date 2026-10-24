@@ -6133,6 +6133,7 @@ var TOPICS = {
   stats: ["since"],
   savings: ["since", "perModel"],
   models: ["worker", "all"],
+  prices: ["worker"],
   cooldown: [],
   config: [],
   doctor: []
@@ -6158,6 +6159,8 @@ function infoArgs(topic, a) {
       return { args: ["history", "stats", ...since(a)] };
     case "savings":
       return { args: ["savings", ...since(a), ...bool(a, "perModel") ? ["--models"] : []] };
+    case "prices":
+      return { args: ["prices", ...worker ? ["--", worker] : []] };
     case "models":
       return { args: ["models", ...worker ? [worker] : [], ...bool(a, "all") ? ["--all"] : []] };
     case "doctor":
@@ -6240,7 +6243,7 @@ var TOOLS2 = [
   {
     name: "pitroom_info",
     title: "Pitroom information",
-    description: "Reports, changing nothing. topic: runs (latest runs; running, group), history (search earlier answers before asking again; text, state, model, since, limit), stats (success rate, time, tokens, audits per worker; since), savings (since, perModel), models (a backend's models and costs; worker, all), cooldown (rate-limited models being skipped), config, doctor (setup check).",
+    description: "Reports, changing nothing. topic: runs (latest runs; running, group), history (search earlier answers before asking again; text, state, model, since, limit), stats (success rate, time, tokens, audits per worker; since), savings (since, perModel), models (a backend's models and costs; worker, all), prices (USD per 1M tokens: the primary the savings are measured against, and each worker in use or the one named; worker), cooldown (rate-limited models being skipped), config, doctor (setup check).",
     inputSchema: {
       type: "object",
       properties: {
@@ -8241,33 +8244,37 @@ async function cmdPrices(p) {
     if (!has(p, "quiet")) console.log(`price catalog updated: ${r.models} priced models`);
   }
   const st = catalogStatus();
-  const used = (() => {
+  const priced = (t) => {
+    const backend = getBackend(t.backend);
+    const model = (t.model ?? "").split("#")[0];
+    const price = workerPrice(t.backend, model);
+    return {
+      worker: model ? `${t.backend}:${model}` : t.backend,
+      reportsCost: backend.capabilities.reportsCost,
+      price: price ? { name: price.name, source: price.source, input: price.input, output: price.output, cachedInput: price.cachedInput } : void 0
+    };
+  };
+  const asked = p.positional.length > 0;
+  const used = asked ? p.positional.map((spec) => priced(parseTarget(spec, resolveChain().worker.backend))) : (() => {
     try {
       const chain = resolveChain();
-      return [chain.worker, ...chain.fallback].map((t) => {
-        const backend = getBackend(t.backend);
-        const model = (t.model ?? "").split("#")[0];
-        const price = workerPrice(t.backend, model);
-        return {
-          worker: model ? `${t.backend}:${model}` : t.backend,
-          reportsCost: backend.capabilities.reportsCost,
-          price: price ? { name: price.name, source: price.source, input: price.input, output: price.output, cachedInput: price.cachedInput } : void 0
-        };
-      });
+      return [chain.worker, ...chain.fallback].map(priced);
     } catch {
       return [];
     }
   })();
-  if (has(p, "json")) return console.log(JSON.stringify({ ...st, workers: used }, null, 2)), 0;
+  const primary = primaryPrice();
+  if (has(p, "json")) return console.log(JSON.stringify({ ...st, primary, workers: used }, null, 2)), 0;
   console.log(`price feed: ${st.enabled ? "on" : 'off ("priceFeed": true in the config turns it on: Pitroom then fetches one public file, see PRIVACY.md)'}`);
   console.log(`source:     ${st.url}${st.enabled ? `, refreshed after a run when older than ${st.hours} h` : ""}`);
   console.log(st.models ? `catalog:    ${st.models} priced models, updated ${st.ageHours < 1 ? "within the hour" : `${st.ageHours.toFixed(1)} h ago`}` : "catalog:    none yet (pitroom prices --refresh fetches it)");
   if (st.lastFailure) console.log(`last try:   failed: ${st.lastFailure.replace(/^\S+ /, "")}`);
+  console.log(`primary:    ${primary.name}: in ${primary.input} \xB7 out ${primary.output} \xB7 cached ${primary.cachedInput} USD/1M  (what the savings are measured against)`);
   if (used.length) {
-    console.log("\nthe workers in use:");
+    console.log(asked ? "\nthe workers asked about:" : "\nthe workers in use:");
     for (const u of used) {
       const what2 = u.reportsCost ? "reports its own cost" : u.price ? `in ${u.price.input} \xB7 out ${u.price.output} \xB7 cached ${u.price.cachedInput} USD/1M  (${u.price.source === "catalog" ? `price catalog ${catalogLabel()}` : "your workerPrices"})` : "no price: its runs count as free in the savings";
-      console.log(`  ${u.worker.padEnd(36)} ${what2}`);
+      console.log(`  ${u.worker.padEnd(Math.max(36, ...used.map((x) => x.worker.length)))} ${what2}`);
     }
   }
   return 0;
@@ -9100,7 +9107,7 @@ Usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
-  pitroom prices [--refresh] [--json]   the price catalog (config "priceFeed") and the price each worker in use gets
+  pitroom prices [WORKER\u2026] [--refresh] [--json]   the price catalog (config "priceFeed"), the primary's price and the price each worker in use (or named) gets
   pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
                                         --clear tries them again
   pitroom mcp [-d DIR] [--http [--port N]]

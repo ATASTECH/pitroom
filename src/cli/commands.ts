@@ -12,7 +12,9 @@ import { installMcp, parseClients, uninstallMcp } from '../core/mcp-install.js';
 import { badgeUrl, card, compact, primaryPrice, readLedger, settleLedger, totals, usd, workerPrice } from '../core/receipt.js';
 import { catalogLabel, catalogStatus, refreshCatalog } from '../core/prices.js';
 import { getBackend } from '../backends/index.js';
+import type { Target } from '../backends/types.js';
 import { resolveChain } from '../core/chain.js';
+import { parseTarget } from '../core/target.js';
 import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, pickAuditor } from '../core/audit.js';
@@ -145,33 +147,40 @@ export async function cmdPrices(p: Parsed): Promise<number> {
     if (!has(p, 'quiet')) console.log(`price catalog updated: ${r.models} priced models`);
   }
   const st = catalogStatus();
-  const used = (() => {
-    try {
-      const chain = resolveChain();
-      return [chain.worker, ...chain.fallback].map((t) => {
-        const backend = getBackend(t.backend);
-        const model = (t.model ?? '').split('#')[0];
-        const price = workerPrice(t.backend, model);
-        return {
-          worker: model ? `${t.backend}:${model}` : t.backend,
-          reportsCost: backend.capabilities.reportsCost,
-          price: price ? { name: price.name, source: price.source, input: price.input, output: price.output, cachedInput: price.cachedInput } : undefined,
-        };
-      });
-    } catch {
-      return [];
-    }
-  })();
-  if (has(p, 'json')) return console.log(JSON.stringify({ ...st, workers: used }, null, 2)), 0;
+  const priced = (t: Target) => {
+    const backend = getBackend(t.backend);
+    const model = (t.model ?? '').split('#')[0];
+    const price = workerPrice(t.backend, model);
+    return {
+      worker: model ? `${t.backend}:${model}` : t.backend,
+      reportsCost: backend.capabilities.reportsCost,
+      price: price ? { name: price.name, source: price.source, input: price.input, output: price.output, cachedInput: price.cachedInput } : undefined,
+    };
+  };
+  // the workers named, else the ones in use (the worker and its fallbacks)
+  const asked = p.positional.length > 0;
+  const used = asked
+    ? p.positional.map((spec) => priced(parseTarget(spec, resolveChain().worker.backend)))
+    : (() => {
+        try {
+          const chain = resolveChain();
+          return [chain.worker, ...chain.fallback].map(priced);
+        } catch {
+          return [];
+        }
+      })();
+  const primary = primaryPrice();
+  if (has(p, 'json')) return console.log(JSON.stringify({ ...st, primary, workers: used }, null, 2)), 0;
   console.log(`price feed: ${st.enabled ? 'on' : 'off ("priceFeed": true in the config turns it on: Pitroom then fetches one public file, see PRIVACY.md)'}`);
   console.log(`source:     ${st.url}${st.enabled ? `, refreshed after a run when older than ${st.hours} h` : ''}`);
   console.log(st.models ? `catalog:    ${st.models} priced models, updated ${st.ageHours! < 1 ? 'within the hour' : `${st.ageHours!.toFixed(1)} h ago`}` : 'catalog:    none yet (pitroom prices --refresh fetches it)');
   if (st.lastFailure) console.log(`last try:   failed: ${st.lastFailure.replace(/^\S+ /, '')}`);
+  console.log(`primary:    ${primary.name}: in ${primary.input} · out ${primary.output} · cached ${primary.cachedInput} USD/1M  (what the savings are measured against)`);
   if (used.length) {
-    console.log('\nthe workers in use:');
+    console.log(asked ? '\nthe workers asked about:' : '\nthe workers in use:');
     for (const u of used) {
       const what = u.reportsCost ? 'reports its own cost' : u.price ? `in ${u.price.input} · out ${u.price.output} · cached ${u.price.cachedInput} USD/1M  (${u.price.source === 'catalog' ? `price catalog ${catalogLabel()}` : 'your workerPrices'})` : 'no price: its runs count as free in the savings';
-      console.log(`  ${u.worker.padEnd(36)} ${what}`);
+      console.log(`  ${u.worker.padEnd(Math.max(36, ...used.map((x) => x.worker.length)))} ${what}`);
     }
   }
   return 0;

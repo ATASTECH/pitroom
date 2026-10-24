@@ -57,7 +57,7 @@ Usage
   pitroom statusline [--then CMD]       status-bar line: running workers, savings this week (after CMD's)
   pitroom hook-card                     PostToolUse hook: a card after each Bash \`pitroom\` command
   pitroom hook-start                    SessionStart hook: introduces Pitroom to the agent (Codex; Claude Code uses its plugin)
-  pitroom prices [--refresh] [--json]   the price catalog (config "priceFeed") and the price each worker in use gets
+  pitroom prices [WORKER…] [--refresh] [--json]   the price catalog (config "priceFeed"), the primary's price and the price each worker in use (or named) gets
   pitroom cooldown [--clear]            models that said "rate limited" and are skipped for a while (a quota used up);
                                         --clear tries them again
   pitroom mcp [-d DIR] [--http [--port N]]

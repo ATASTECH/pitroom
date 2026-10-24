@@ -6,6 +6,7 @@
 - **No finished run is missing from the savings ledger.** A run whose process was killed between its final record and its ledger line, and a worker that crashed, were never counted (about 1.5% of finished runs). `pitroom savings`, `pitroom history` and the dashboard now record the finished runs the ledger missed, each once.
 - **A done run counts even when its CLI reported no steps** (some OpenCode reviews): it answered, so it is in "Finished". Runs that failed before reaching the model stay out, as before.
 - **An estimated cost says so.** `pitroom history` has a COST column, and `pitroom savings --models` its cost: a cost the worker's CLI did not report (Codex, Gemini) and that was estimated from a price (your `workerPrices`, else the catalog's) reads `~$0.40`, a reported one `$0.40`, a free one `free`. `history --json` rows carry `cost` and `costEstimated`.
+- **Prices from your agent**: `pitroom_info` has a `prices` topic: the primary's price the savings are measured against and the price each worker in use gets, or the `worker` named. `pitroom prices WORKER…` does the same on the command line, and now also prints the primary's price.
 
 ## 0.25.0
 

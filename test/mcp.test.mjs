@@ -418,6 +418,10 @@ test('mcp: pitroom_info shows what the CLI shows, a follow-up continues a run, a
     assert.equal((await info({ topic: 'savings', since: '30d', perModel: true })).isError, false);
     assert.equal((await info({ topic: 'models' })).isError, false);
     assert.equal((await info({ topic: 'models', worker: 'opencode', all: true })).isError, false);
+    assert.match((await info({ topic: 'prices' })).text, /primary: +Claude Sonnet[\s\S]*the workers in use/);
+    assert.match((await info({ topic: 'prices', worker: 'opencode' })).text, /the workers asked about:\n +opencode +reports its own cost/);
+    assert.match((await info({ topic: 'prices', worker: '--refresh' })).text, /the workers asked about/, 'a worker is never read as a flag');
+    assert.match((await info({ topic: 'prices', since: '7d' })).text, /"since" does not go with topic "prices" \(it takes worker\)/);
     assert.match((await info({ topic: 'history', state: 'done', since: '7d' })).text, new RegExp(id));
     assert.match((await info({ topic: 'history', state: 'failed' })).text, /no matching runs/);
     assert.match((await info({ topic: 'runs', group: 'nope' })).text, /no runs in group "nope"/);
