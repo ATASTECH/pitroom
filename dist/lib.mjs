@@ -812,9 +812,10 @@ function doctor({ models, hasFallback }) {
   }
   const checks = [
     { level: "ok", message: `Antigravity CLI ${version.out.trim().split("\n")[0]} at ${binary()}` },
-    {
+    // checked on macOS (agy 1.4.7, scripts/check-worker.mjs); Linux and Windows not run yet
+    process.platform === "darwin" ? { level: "ok", message: "agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes" } : {
       level: "warn",
-      message: "the Antigravity worker is in beta (checked against agy 1.4.7 on macOS). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes"
+      message: `the Antigravity worker is in beta on ${process.platform === "win32" ? "Windows" : "Linux"} (checked on macOS only; node scripts/check-worker.mjs antigravity tries it here). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes`
     }
   ];
   if (process.platform === "win32") {
