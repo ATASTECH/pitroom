@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.26.0
 
 ### Workers
 - **A limit part way no longer fails the run.** A worker that hit a plan's usage limit or a used-up quota after it had started (a Codex or Claude session limit, an Antigravity quota) failed the run, fallbacks or not: about a third of the runs that failed on a limit had a fallback that was never tried. Now the next worker takes the task over. An edit carries on in the same tree, told which files were already changed and to finish rather than start over; a read starts over. The run's cost is what both used, and the run's notes say who handed over.
