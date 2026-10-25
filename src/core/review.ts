@@ -11,7 +11,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DEFAULT_BACKEND } from '../backends/index.js';
 import type { Target } from '../backends/types.js';
-import { commitOf, git, gitDir, rangeDiff, repoRoot, reviewDiff } from '../vcs/git.js';
+import { NUMBERED, commitOf, git, gitDir, numberDiff, rangeDiff, repoRoot, reviewDiff } from '../vcs/git.js';
 import { effective } from './config.js';
 import { UserError } from './errors.js';
 import { loadPlan, planName } from './plan.js';
@@ -38,6 +38,8 @@ export interface ReviewJob {
 export const TEMPLATE: Record<ReviewKind, TemplateName> = { task: 'task-reviewer', fix: 're-review', range: 'code-reviewer' };
 
 const section = (title: string, body: string) => `## ${title}\n\n${body.trim() || '(empty)'}\n`;
+// a saved patch (the isolated copy is gone) comes unnumbered; one already numbered is left as it is
+const numbered = (diff: string) => (diff.trim() ? `${NUMBERED}\n\n${/^[+ -]\s*\d+\| /m.test(diff) ? diff : numberDiff(diff)}` : diff);
 
 /** Parent, grandparent, … of a follow-up run. */
 function ancestors(m: RunMeta): RunMeta[] {
@@ -96,7 +98,7 @@ export function runReview(id: string): ReviewJob {
     return {
       ...job,
       kind: 'task',
-      package: [`# Review package · ${title}\n`, section('BRIEF', briefOf(m)), section('REPORT', readSummary(m)), section('DIFF', diffOf(m))].join('\n'),
+      package: [`# Review package · ${title}\n`, section('BRIEF', briefOf(m)), section('REPORT', readSummary(m)), section('DIFF', numbered(diffOf(m)))].join('\n'),
     };
   }
   // A follow-up: every round since the reviewed one, judged against the previous
@@ -111,7 +113,7 @@ export function runReview(id: string): ReviewJob {
       section('BRIEF', briefOf(m)),
       section('PREVIOUS FINDINGS', readSummary(previous)),
       section('FIX REPORT', readSummary(m)),
-      section('FIX DIFF', diffOf(m, from)),
+      section('FIX DIFF', numbered(diffOf(m, from))),
     ].join('\n'),
   };
 }

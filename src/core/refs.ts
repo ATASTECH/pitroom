@@ -29,6 +29,9 @@ const FILE_EXTENSIONS = new Set(
 );
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'out', '.next', '.nuxt', 'target', 'vendor', '.venv', 'venv', '__pycache__', 'coverage', '.turbo', '.cache']);
 const MAX_INDEXED = 60_000;
+// The folders left out above, searched only for a reference the project's own files do not have: an answer about a
+// dependency names its files (`streamableHttp.d.ts:73`), and those are as checkable as the project's.
+const MAX_SKIPPED = 300_000;
 
 const EXTENSIONLESS = 'Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE';
 // Not preceded by a word char, "/" or ":" (rules out URLs like https://host:8080).
@@ -104,16 +107,22 @@ export function verifyRefs(refs: Ref[], dirs: string[]): RefCheck {
     return lineCache.get(file)!;
   };
 
-  // A worker often writes `ipc.ts:218` or `src/main/ipc.ts:218` for `apps/desktop/src/main/ipc.ts`: when the
-  // path does not resolve as written, any file of the project that ends with it is a candidate.
+  // A worker often writes `ipc.ts:218` or `src/main/ipc.ts:218` for `apps/desktop/src/main/ipc.ts`, or leaves a
+  // folder out (`api-contracts/integrations.ts` for `packages/api-contracts/src/integrations.ts`): when the path does
+  // not resolve as written, a file of the project with that name whose folders include the ones written, in order,
+  // is a candidate. Its lines and symbol are still checked, so a file that only shares the name does not pass.
   let index: Map<string, string[]> | undefined;
+  let skipped: Map<string, string[]> | undefined;
   const byName = () => (index ??= indexFiles(roots));
+  const inSkipped = () => (skipped ??= indexFiles(roots, true));
   const candidates = (ref: Ref): string[] => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
     if (path.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, '');
-    return (byName().get(path.basename(wanted)) ?? []).filter((f) => f.split(path.sep).join('/').endsWith(`/${wanted}`) || path.basename(f) === wanted).slice(0, 20);
+    const fits = (f: string) => path.basename(f) === wanted || foldersInOrder(f.split(path.sep).join('/'), wanted);
+    const own = (byName().get(path.basename(wanted)) ?? []).filter(fits);
+    return (own.length || !isFileName(wanted) ? own : (inSkipped().get(path.basename(wanted)) ?? []).filter(fits)).slice(0, 20);
   };
   // Why a candidate does not hold up, or undefined when it does.
   const check = (file: string, ref: Ref): string | undefined => {
@@ -161,11 +170,29 @@ const isFileName = (name: string) => {
   return !base.includes('.') || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split('.').pop()!.toLowerCase());
 };
 
-/** Basename → absolute paths of the project's files (heavy and generated directories skipped, capped). */
-function indexFiles(roots: string[]): Map<string, string[]> {
+/** The path ends with the wanted file, and the wanted folders appear in it in the same order (others may sit between). */
+function foldersInOrder(file: string, wanted: string): boolean {
+  const want = wanted.split('/');
+  const have = file.split('/');
+  if (have.at(-1) !== want.at(-1)) return false;
+  let i = have.length - 2;
+  for (let j = want.length - 2; j >= 0; j--) {
+    while (i >= 0 && have[i] !== want[j]) i--;
+    if (i < 0) return false;
+    i--;
+  }
+  return true;
+}
+
+/**
+ * Basename → absolute paths of the project's files (heavy and generated directories skipped, capped); with `skipped`,
+ * of the files in those directories only (dependencies, build output), with a cap of their own. `.git` is never read.
+ */
+function indexFiles(roots: string[], skipped = false): Map<string, string[]> {
   const index = new Map<string, string[]>();
+  const cap = skipped ? MAX_SKIPPED : MAX_INDEXED;
   let count = 0;
-  const walk = (dir: string) => {
+  const walk = (dir: string, within: boolean) => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
@@ -173,10 +200,12 @@ function indexFiles(roots: string[]): Map<string, string[]> {
       return;
     }
     for (const e of entries) {
-      if (count >= MAX_INDEXED) return;
+      if (count >= cap) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS.has(e.name)) walk(path.join(dir, e.name));
-      } else if (e.isFile()) {
+        if (e.name === '.git') continue;
+        const skip = SKIP_DIRS.has(e.name);
+        if (skipped || !skip) walk(path.join(dir, e.name), within || skip);
+      } else if (e.isFile() && within === skipped) {
         count++;
         const list = index.get(e.name);
         if (list) list.push(path.join(dir, e.name));
@@ -184,7 +213,7 @@ function indexFiles(roots: string[]): Map<string, string[]> {
       }
     }
   };
-  for (const r of roots) walk(r);
+  for (const r of roots) walk(r, false);
   return index;
 }
 

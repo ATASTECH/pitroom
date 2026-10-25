@@ -10,7 +10,7 @@ One file holds everything; read it once: {{PACKAGE_FILE}}
 It contains, in order:
 1. BRIEF: what was requested (for a plan task: the plan's context, its global constraints and the task).
 2. REPORT: what the implementer claims it built, with its test evidence.
-3. DIFF: the change under review, with 10 lines of context.
+3. DIFF: the change under review, with 10 lines of context, each line led by its line number in the file after the change.
 
 Your working directory contains the code after this change. The diff's context lines are your view of the changed files: open a changed file only when a hunk you must judge is cut off mid-function, and say so. Do not crawl the codebase: look outside the diff only to check a concrete risk you can name (a changed contract, lock order, shared mutable state: then check its call sites), one focused check per named risk, and name both the risk and the check.
 
@@ -43,7 +43,7 @@ If the brief lists several files each with its own change, check that every list
 - Tests verify real behaviour (not mocks) and cover the task's edge cases.
 - Each file has one clear responsibility; the plan's file structure is followed; the change does not create files that are already large or grow existing files much (pre-existing size is not a finding).
 
-Cite file:line for every finding, and for every check you would otherwise answer with a bare "yes". A file:line is the project file's path and its line number after the change (from the diff's hunk headers), never a line of the package file.
+Cite file:line for every finding, and for every check you would otherwise answer with a bare "yes". A file:line is the project file's path and the line number in front of the line in the DIFF (the file after the change), never a line of the package file.
 
 ## Calibration
 

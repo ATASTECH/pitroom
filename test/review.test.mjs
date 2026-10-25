@@ -1,5 +1,6 @@
 // `pitroom review`: the package, the reviewer's backend, scoped re-reviews, ranges, refusals.
 import assert from 'node:assert/strict';
+import { numberDiff } from '../dist/lib.mjs';
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -38,7 +39,7 @@ test('review <run>: one package (brief, report, diff) for a read-only reviewer o
   const pkg = pkgOf(s, rid);
   assert.match(pkg, /## BRIEF\n\nadd one/);
   assert.match(pkg, /## REPORT\n\nSUMMARY: added one/);
-  assert.match(pkg, /## DIFF\n\n[\s\S]*^\+one$/m);
+  assert.match(pkg, /## DIFF\n\nEach line of a hunk starts with its line number in the file after the change[\s\S]*^ 1\| line1\n\+2\| one$/m, 'numbered as the file after the change');
   assert.match(r.stdout, new RegExp(`review of ${impl} \\(task\\) · SPEC PASS · QUALITY NEEDS-FIXES · critical 0 · important 1 · minor 2`));
   assert.deepEqual(meta(s, rid).verdict, { spec: 'pass', quality: 'needs-fixes', critical: 0, important: 1, minor: 2 });
   assert.equal(meta(s, rid).reviewKind, 'task');
@@ -70,8 +71,8 @@ test('review of a follow-up is a scoped re-review: previous findings, fix report
   assert.match(pkg, /## PREVIOUS FINDINGS\n\n[\s\S]*FINDING-XYZ/);
   assert.match(pkg, /## FIX REPORT\n\nSUMMARY: added two/);
   const fixDiff = pkg.split('## FIX DIFF')[1];
-  assert.match(fixDiff, /^\+two$/m);
-  assert.doesNotMatch(fixDiff, /^\+one$/m, 'only this round, not the whole task');
+  assert.match(fixDiff, /^\+3\| two$/m);
+  assert.doesNotMatch(fixDiff, /^\+\d+\| one$/m, 'only this round, not the whole task');
   assert.match(re.stdout, new RegExp(`review of ${fix} \\(fix\\) · SPEC PASS · QUALITY APPROVED`));
 });
 
@@ -89,9 +90,9 @@ test('review of a second follow-up shows every round since the reviewed one', ()
   const pkg = pkgOf(s, runId(re));
   assert.match(pkg, /## PREVIOUS FINDINGS\n\n[\s\S]*FINDING-XYZ/);
   const fixDiff = pkg.split('## FIX DIFF')[1];
-  assert.match(fixDiff, /^\+two$/m, 'the skipped round is still shown');
-  assert.match(fixDiff, /^\+three$/m);
-  assert.doesNotMatch(fixDiff, /^\+one$/m, 'nothing from before the reviewed run');
+  assert.match(fixDiff, /^\+\d+\| two$/m, 'the skipped round is still shown');
+  assert.match(fixDiff, /^\+\d+\| three$/m);
+  assert.doesNotMatch(fixDiff, /^\+\d+\| one$/m, 'nothing from before the reviewed run');
   assert.match(re.stdout, new RegExp(`review of ${fix} \\(fix\\) · SPEC PASS · QUALITY APPROVED`));
 });
 
@@ -106,7 +107,7 @@ test('review --range: commits, stat and diff for the whole-branch rubric', () =>
   const pkg = pkgOf(s, runId(r));
   assert.match(pkg, /## COMMITS\n\n\w+ feat: line2/);
   assert.doesNotMatch(pkg, /\bwip\b/);
-  assert.match(pkg, /^\+line2$/m);
+  assert.match(pkg, /^\+\s*\d+\| line2$/m);
   assert.match(lastPrompt(s), /You are a senior code reviewer/);
   assert.match(r.stdout, /review of HEAD~1\.\.HEAD \(range\) · SPEC PASS · QUALITY APPROVED · critical 0 · important 0 · minor 1/);
 });
@@ -185,4 +186,9 @@ test('review --range shows the branch\'s own change even when the base moved on 
   const pkg = pkgOf(s, runId(r));
   assert.match(pkg, /feature\.txt/);
   assert.doesNotMatch(pkg, /later\.txt/, 'the base\'s newer commit is not shown as undone');
+});
+
+test('numberDiff: each line of a hunk leads with its number in the file after the change; removed lines and headers have none', () => {
+  const diff = ['diff --git a/x.ts b/x.ts', '--- a/x.ts', '+++ b/x.ts', '@@ -8,4 +98,5 @@ function f() {', ' keep', '-old', '+new', '+added', ' tail', '\\ No newline at end of file', 'diff --git a/y.ts b/y.ts', '--- /dev/null', '+++ b/y.ts', '@@ -0,0 +1 @@', '+only', ''].join('\n');
+  assert.equal(numberDiff(diff), ['diff --git a/x.ts b/x.ts', '--- a/x.ts', '+++ b/x.ts', '@@ -8,4 +98,5 @@ function f() {', '  98| keep', '-   | old', '+ 99| new', '+100| added', ' 101| tail', '\\ No newline at end of file', 'diff --git a/y.ts b/y.ts', '--- /dev/null', '+++ b/y.ts', '@@ -0,0 +1 @@', '+1| only', ''].join('\n'));
 });

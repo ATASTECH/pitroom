@@ -11,7 +11,7 @@ It contains, in order:
 1. BRIEF: the task that was requested.
 2. PREVIOUS FINDINGS: the previous review; its Critical and Important findings and spec gaps are under verification.
 3. FIX REPORT: what the implementer says it changed, with the tests it re-ran.
-4. FIX DIFF: only this fix round's changes, with 10 lines of context.
+4. FIX DIFF: only this fix round's changes, with 10 lines of context, each line led by its line number in the file after the change.
 
 Your working directory contains the code after the fix. You are read-only: do not change files, the index, HEAD or branches.
 
@@ -38,4 +38,4 @@ In DETAILS, in this order:
 - FINDING VERDICTS: for each finding, in order, the finding in one line, then ADDRESSED or NOT ADDRESSED with file:line evidence. "Attempted" is not addressed: the specific defect must no longer exist.
 - NEW BREAKAGE: problems the fix introduced, with severity and file:line, or "none".
 - OUT OF SCOPE: issues entirely outside the fix diff, or "none".
-A file:line is the project file's path and its line number after the change (from the diff's hunk headers), never a line of the package file. No preamble and no closing summary.
+A file:line is the project file's path and the line number in front of the line in the FIX DIFF (the file after the change), never a line of the package file. No preamble and no closing summary.

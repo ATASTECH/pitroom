@@ -2318,6 +2318,7 @@ var FILE_EXTENSIONS = new Set(
 );
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_INDEXED = 6e4;
+var MAX_SKIPPED = 3e5;
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
   String.raw`(?<![\w/:.-])(\.{0,2}/?(?:[\w@.+-]+/)*(?:[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}|${EXTENSIONLESS})):(\d+)(?:[-–](\d+))?`,
@@ -2376,13 +2377,17 @@ function verifyRefs(refs, dirs) {
     return lineCache.get(file);
   };
   let index;
+  let skipped;
   const byName = () => index ??= indexFiles(roots);
+  const inSkipped = () => skipped ??= indexFiles(roots, true);
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
     if (path12.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path12.basename(wanted)) ?? []).filter((f) => f.split(path12.sep).join("/").endsWith(`/${wanted}`) || path12.basename(f) === wanted).slice(0, 20);
+    const fits = (f) => path12.basename(f) === wanted || foldersInOrder(f.split(path12.sep).join("/"), wanted);
+    const own = (byName().get(path12.basename(wanted)) ?? []).filter(fits);
+    return (own.length || !isFileName(wanted) ? own : (inSkipped().get(path12.basename(wanted)) ?? []).filter(fits)).slice(0, 20);
   };
   const check = (file, ref) => {
     const lines = load(file);
@@ -2421,10 +2426,23 @@ var isFileName = (name) => {
   const base = path12.basename(name);
   return !base.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base) || FILE_EXTENSIONS.has(base.split(".").pop().toLowerCase());
 };
-function indexFiles(roots) {
+function foldersInOrder(file, wanted) {
+  const want = wanted.split("/");
+  const have = file.split("/");
+  if (have.at(-1) !== want.at(-1)) return false;
+  let i = have.length - 2;
+  for (let j = want.length - 2; j >= 0; j--) {
+    while (i >= 0 && have[i] !== want[j]) i--;
+    if (i < 0) return false;
+    i--;
+  }
+  return true;
+}
+function indexFiles(roots, skipped = false) {
   const index = /* @__PURE__ */ new Map();
+  const cap = skipped ? MAX_SKIPPED : MAX_INDEXED;
   let count = 0;
-  const walk = (dir) => {
+  const walk = (dir, within) => {
     let entries;
     try {
       entries = fs12.readdirSync(dir, { withFileTypes: true });
@@ -2432,10 +2450,12 @@ function indexFiles(roots) {
       return;
     }
     for (const e of entries) {
-      if (count >= MAX_INDEXED) return;
+      if (count >= cap) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path12.join(dir, e.name));
-      } else if (e.isFile()) {
+        if (e.name === ".git") continue;
+        const skip = SKIP_DIRS2.has(e.name);
+        if (skipped || !skip) walk(path12.join(dir, e.name), within || skip);
+      } else if (e.isFile() && within === skipped) {
         count++;
         const list2 = index.get(e.name);
         if (list2) list2.push(path12.join(dir, e.name));
@@ -2443,7 +2463,7 @@ function indexFiles(roots) {
       }
     }
   };
-  for (const r of roots) walk(r);
+  for (const r of roots) walk(r, false);
   return index;
 }
 function resolve(ref, roots) {
@@ -3424,6 +3444,29 @@ function shimReady() {
   return Boolean(env[pathKey(env)]?.startsWith(shimDir()));
 }
 
+// src/vcs/git.ts
+function numberDiff(diff) {
+  let next = 0;
+  let width = 0;
+  let inHunk = false;
+  return diff.split("\n").map((l) => {
+    if (l.startsWith("diff --git")) {
+      inHunk = false;
+      return l;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l);
+    if (hunk) {
+      inHunk = true;
+      next = Number(hunk[1]);
+      width = String(next + Number(hunk[2] ?? 1)).length;
+      return l;
+    }
+    if (!inHunk || !l || !"+- ".includes(l[0])) return l;
+    if (l[0] === "-") return `-${" ".repeat(width)}| ${l.slice(1)}`;
+    return `${l[0]}${String(next++).padStart(width)}| ${l.slice(1)}`;
+  }).join("\n");
+}
+
 // src/core/slots.ts
 import crypto4 from "node:crypto";
 import fs20 from "node:fs";
@@ -3584,6 +3627,7 @@ export {
   loadTemplate,
   looksSecret,
   newRunId,
+  numberDiff,
   parseAudit,
   parsePlan,
   parsePriceSpec,

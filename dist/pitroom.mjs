@@ -2777,7 +2777,29 @@ function applyPatch(root, patchFile, reverse) {
 function reviewDiff(root, a, b) {
   return `${must(root, [...DIFF, "--stat", a, b]).trim()}
 
-${must(root, [...DIFF, "-U10", a, b])}`;
+${numberDiff(must(root, [...DIFF, "-U10", a, b]))}`;
+}
+var NUMBERED = "Each line of a hunk starts with its line number in the file after the change (a removed line has none): cite those.";
+function numberDiff(diff) {
+  let next = 0;
+  let width = 0;
+  let inHunk = false;
+  return diff.split("\n").map((l) => {
+    if (l.startsWith("diff --git")) {
+      inHunk = false;
+      return l;
+    }
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l);
+    if (hunk) {
+      inHunk = true;
+      next = Number(hunk[1]);
+      width = String(next + Number(hunk[2] ?? 1)).length;
+      return l;
+    }
+    if (!inHunk || !l || !"+- ".includes(l[0])) return l;
+    if (l[0] === "-") return `-${" ".repeat(width)}| ${l.slice(1)}`;
+    return `${l[0]}${String(next++).padStart(width)}| ${l.slice(1)}`;
+  }).join("\n");
 }
 function rangeDiff(root, a, b) {
   const range = `${a}..${b}`;
@@ -2792,7 +2814,9 @@ ${log2 || "(none)"}`,
 ${must(root, [...DIFF, "--stat", since2]).trim() || "(none)"}`,
     `## DIFF
 
-${must(root, [...DIFF, "-U10", since2])}`
+${NUMBERED}
+
+${numberDiff(must(root, [...DIFF, "-U10", since2]))}`
   ].join("\n\n");
 }
 function commitOf(root, ref) {
@@ -5237,6 +5261,7 @@ var FILE_EXTENSIONS = new Set(
 );
 var SKIP_DIRS2 = /* @__PURE__ */ new Set(["node_modules", ".git", "dist", "build", "out", ".next", ".nuxt", "target", "vendor", ".venv", "venv", "__pycache__", "coverage", ".turbo", ".cache"]);
 var MAX_INDEXED = 6e4;
+var MAX_SKIPPED = 3e5;
 var EXTENSIONLESS = "Makefile|Dockerfile|Containerfile|Gemfile|Rakefile|Procfile|Justfile|Vagrantfile|BUILD|WORKSPACE";
 var REF = new RegExp(
   String.raw`(?<![\w/:.-])(\.{0,2}/?(?:[\w@.+-]+/)*(?:[\w@+-][\w@.+-]*\.[A-Za-z][A-Za-z0-9]{0,7}|${EXTENSIONLESS})):(\d+)(?:[-–](\d+))?`,
@@ -5295,13 +5320,17 @@ function verifyRefs(refs, dirs) {
     return lineCache.get(file2);
   };
   let index;
+  let skipped;
   const byName = () => index ??= indexFiles(roots);
+  const inSkipped = () => skipped ??= indexFiles(roots, true);
   const candidates = (ref) => {
     const direct = resolve(ref.file, roots);
     if (direct) return [direct];
     if (path27.isAbsolute(ref.file)) return [];
     const wanted = ref.file.replace(/^(\.{1,2}\/)+/, "");
-    return (byName().get(path27.basename(wanted)) ?? []).filter((f) => f.split(path27.sep).join("/").endsWith(`/${wanted}`) || path27.basename(f) === wanted).slice(0, 20);
+    const fits = (f) => path27.basename(f) === wanted || foldersInOrder(f.split(path27.sep).join("/"), wanted);
+    const own = (byName().get(path27.basename(wanted)) ?? []).filter(fits);
+    return (own.length || !isFileName(wanted) ? own : (inSkipped().get(path27.basename(wanted)) ?? []).filter(fits)).slice(0, 20);
   };
   const check = (file2, ref) => {
     const lines = load(file2);
@@ -5340,10 +5369,23 @@ var isFileName = (name) => {
   const base2 = path27.basename(name);
   return !base2.includes(".") || new RegExp(`^(${EXTENSIONLESS})$`).test(base2) || FILE_EXTENSIONS.has(base2.split(".").pop().toLowerCase());
 };
-function indexFiles(roots) {
+function foldersInOrder(file2, wanted) {
+  const want = wanted.split("/");
+  const have = file2.split("/");
+  if (have.at(-1) !== want.at(-1)) return false;
+  let i = have.length - 2;
+  for (let j = want.length - 2; j >= 0; j--) {
+    while (i >= 0 && have[i] !== want[j]) i--;
+    if (i < 0) return false;
+    i--;
+  }
+  return true;
+}
+function indexFiles(roots, skipped = false) {
   const index = /* @__PURE__ */ new Map();
+  const cap = skipped ? MAX_SKIPPED : MAX_INDEXED;
   let count = 0;
-  const walk = (dir) => {
+  const walk = (dir, within) => {
     let entries;
     try {
       entries = fs31.readdirSync(dir, { withFileTypes: true });
@@ -5351,10 +5393,12 @@ function indexFiles(roots) {
       return;
     }
     for (const e of entries) {
-      if (count >= MAX_INDEXED) return;
+      if (count >= cap) return;
       if (e.isDirectory()) {
-        if (!SKIP_DIRS2.has(e.name)) walk(path27.join(dir, e.name));
-      } else if (e.isFile()) {
+        if (e.name === ".git") continue;
+        const skip = SKIP_DIRS2.has(e.name);
+        if (skipped || !skip) walk(path27.join(dir, e.name), within || skip);
+      } else if (e.isFile() && within === skipped) {
         count++;
         const list2 = index.get(e.name);
         if (list2) list2.push(path27.join(dir, e.name));
@@ -5362,7 +5406,7 @@ function indexFiles(roots) {
       }
     }
   };
-  for (const r of roots) walk(r);
+  for (const r of roots) walk(r, false);
   return index;
 }
 function resolve(ref, roots) {
@@ -8136,6 +8180,9 @@ var section = (title, body) => `## ${title}
 
 ${body.trim() || "(empty)"}
 `;
+var numbered = (diff) => diff.trim() ? `${NUMBERED}
+
+${/^[+ -]\s*\d+\| /m.test(diff) ? diff : numberDiff(diff)}` : diff;
 function ancestors(m) {
   const out = [];
   for (let id2 = m.parent; id2; ) {
@@ -8184,7 +8231,7 @@ function runReview(id2) {
       ...job,
       kind: "task",
       package: [`# Review package \xB7 ${title}
-`, section("BRIEF", briefOf(m)), section("REPORT", readSummary(m)), section("DIFF", diffOf(m))].join("\n")
+`, section("BRIEF", briefOf(m)), section("REPORT", readSummary(m)), section("DIFF", numbered(diffOf(m)))].join("\n")
     };
   }
   const reviewed = chain.find((a) => a.id === previous.reviewOf);
@@ -8198,7 +8245,7 @@ function runReview(id2) {
       section("BRIEF", briefOf(m)),
       section("PREVIOUS FINDINGS", readSummary(previous)),
       section("FIX REPORT", readSummary(m)),
-      section("FIX DIFF", diffOf(m, from))
+      section("FIX DIFF", numbered(diffOf(m, from)))
     ].join("\n")
   };
 }

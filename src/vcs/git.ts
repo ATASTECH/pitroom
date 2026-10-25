@@ -170,7 +170,40 @@ export function applyPatch(root: string, patchFile: string, reverse: boolean): {
 
 /** Stat plus a unified diff with 10 lines of context, for a reviewer. */
 export function reviewDiff(root: string, a: string, b: string): string {
-  return `${must(root, [...DIFF, '--stat', a, b]).trim()}\n\n${must(root, [...DIFF, '-U10', a, b])}`;
+  return `${must(root, [...DIFF, '--stat', a, b]).trim()}\n\n${numberDiff(must(root, [...DIFF, '-U10', a, b]))}`;
+}
+
+/** Says what the numbers in front of a numbered diff's lines are. */
+export const NUMBERED = "Each line of a hunk starts with its line number in the file after the change (a removed line has none): cite those.";
+
+/**
+ * A unified diff with each line of a hunk led by its line number in the file after the change, `+  42| text`, a removed
+ * line by none. A reviewer quotes the number it sees, and a tool that shows a file with line numbers shows the
+ * package's own, which are not the project file's: Claude cited those in a third of its reviews.
+ */
+export function numberDiff(diff: string): string {
+  let next = 0;
+  let width = 0;
+  let inHunk = false;
+  return diff
+    .split('\n')
+    .map((l) => {
+      if (l.startsWith('diff --git')) {
+        inHunk = false;
+        return l;
+      }
+      const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/.exec(l);
+      if (hunk) {
+        inHunk = true;
+        next = Number(hunk[1]);
+        width = String(next + Number(hunk[2] ?? 1)).length;
+        return l;
+      }
+      if (!inHunk || !l || !'+- '.includes(l[0]!)) return l; // a file header, "\ No newline at end of file", the end
+      if (l[0] === '-') return `-${' '.repeat(width)}| ${l.slice(1)}`;
+      return `${l[0]}${String(next++).padStart(width)}| ${l.slice(1)}`;
+    })
+    .join('\n');
 }
 
 /** The commits in a..b, and the stat and wide-context diff of B since it left A (as a pull request shows them), for a reviewer. */
@@ -183,7 +216,7 @@ export function rangeDiff(root: string, a: string, b: string): string {
   return [
     `## COMMITS\n\n${log || '(none)'}`,
     `## FILES CHANGED\n\n${must(root, [...DIFF, '--stat', since]).trim() || '(none)'}`,
-    `## DIFF\n\n${must(root, [...DIFF, '-U10', since])}`,
+    `## DIFF\n\n${NUMBERED}\n\n${numberDiff(must(root, [...DIFF, '-U10', since]))}`,
   ].join('\n\n');
 }
 
