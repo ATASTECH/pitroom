@@ -694,7 +694,16 @@ function baseSettings() {
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
 var SHARED_CACHES = { darwin: ["Library/pnpm"], linux: [".local/share/pnpm"] };
+var NO_LONGER_SHARED = { darwin: ["Library/Caches"], linux: [".cache"] };
 var SHARED = "_shared";
+function unshare(home2, shared, rel) {
+  try {
+    const at = path5.join(home2, rel);
+    if (fs6.lstatSync(at, { throwIfNoEntry: false })?.isSymbolicLink() && fs6.readlinkSync(at) === path5.join(shared, rel)) fs6.unlinkSync(at);
+    fs6.rmSync(path5.join(shared, rel), { recursive: true, force: true });
+  } catch {
+  }
+}
 function shareCache(home2, shared, rel) {
   const at = path5.join(home2, rel);
   const to = path5.join(shared, rel);
@@ -710,9 +719,7 @@ function shareCache(home2, shared, rel) {
     const realHome = fs6.realpathSync(home2);
     const realParent = fs6.realpathSync(path5.dirname(at));
     if (realParent !== realHome && !realParent.startsWith(realHome + path5.sep)) return;
-    const st = fs6.lstatSync(at, { throwIfNoEntry: false });
-    if (st?.isSymbolicLink() && fs6.readlinkSync(at) === to) return;
-    if (st) fs6.rmSync(at, { recursive: true, force: true });
+    if (fs6.lstatSync(at, { throwIfNoEntry: false })) return;
     fs6.symlinkSync(to, at);
   } catch {
   }
@@ -732,6 +739,7 @@ function workerHome(workspace, reads = [], writes = false) {
   }
   const shared = path5.join(root, SHARED);
   for (const rel of SHARED_CACHES[process.platform] ?? []) shareCache(dir, shared, rel);
+  for (const rel of NO_LONGER_SHARED[process.platform] ?? []) unshare(dir, shared, rel);
   const now = /* @__PURE__ */ new Date();
   fs6.utimesSync(dir, now, now);
   if (fs6.existsSync(shared)) fs6.utimesSync(shared, now, now);

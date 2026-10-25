@@ -326,14 +326,28 @@ const HOMES_KEPT_DAYS = 14;
  * stay per home. Windows needs none: agy gets its own USERPROFILE there, but pnpm's store follows LOCALAPPDATA.
  */
 const SHARED_CACHES: Record<string, string[]> = { darwin: ['Library/pnpm'], linux: ['.local/share/pnpm'] };
+// shared by an unreleased build for a day: their links into the shared folder are undone
+const NO_LONGER_SHARED: Record<string, string[]> = { darwin: ['Library/Caches'], linux: ['.cache'] };
 const SHARED = '_shared';
 
 /**
- * Points `rel` in a worker home at the shared folder. A real folder there (a home from before) is only a cache: it
- * goes. The worker can write in its home, so the folders on the way may be links it made (`Library` pointing at the
- * user's own): nothing is removed or linked unless every one of them is a real folder inside the home. Best effort:
- * without the link the worker still runs, with a store of its own.
+ * Points `rel` in a worker home at the shared folder, when nothing is there yet. A real folder there (a home from
+ * before) stays: the home goes with it after two weeks unused, and Pitroom removes nothing inside a home, where a
+ * worker could swap a folder on the way for a link between a check and the removal. The folders on the way may be
+ * links the worker made (`Library` pointing at the user's own): nothing is linked unless every one of them is a real
+ * folder inside the home. Best effort: without the link the worker still runs, with a store of its own.
  */
+/** Undoes a link of `rel` into the shared folder (a link only: unlinking one never follows it), and drops its copy there. */
+function unshare(home: string, shared: string, rel: string): void {
+  try {
+    const at = path.join(home, rel);
+    if (fs.lstatSync(at, { throwIfNoEntry: false })?.isSymbolicLink() && fs.readlinkSync(at) === path.join(shared, rel)) fs.unlinkSync(at);
+    fs.rmSync(path.join(shared, rel), { recursive: true, force: true });
+  } catch {
+    // best effort
+  }
+}
+
 function shareCache(home: string, shared: string, rel: string): void {
   const at = path.join(home, rel);
   const to = path.join(shared, rel);
@@ -349,9 +363,7 @@ function shareCache(home: string, shared: string, rel: string): void {
     const realHome = fs.realpathSync(home);
     const realParent = fs.realpathSync(path.dirname(at));
     if (realParent !== realHome && !realParent.startsWith(realHome + path.sep)) return;
-    const st = fs.lstatSync(at, { throwIfNoEntry: false });
-    if (st?.isSymbolicLink() && fs.readlinkSync(at) === to) return;
-    if (st) fs.rmSync(at, { recursive: true, force: true });
+    if (fs.lstatSync(at, { throwIfNoEntry: false })) return;
     fs.symlinkSync(to, at);
   } catch {
     // see above
@@ -377,6 +389,7 @@ function workerHome(workspace: string, reads: OutsideRead[] = [], writes = false
   }
   const shared = path.join(root, SHARED);
   for (const rel of SHARED_CACHES[process.platform] ?? []) shareCache(dir, shared, rel);
+  for (const rel of NO_LONGER_SHARED[process.platform] ?? []) unshare(dir, shared, rel);
   const now = new Date();
   fs.utimesSync(dir, now, now);
   if (fs.existsSync(shared)) fs.utimesSync(shared, now, now);

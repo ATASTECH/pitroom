@@ -636,7 +636,7 @@ test('private homes: settings are replaced whole, a dangling sign-in link is rep
   assert.equal(fs.readFileSync(path.join(dir, 'h', 'token'), 'utf8'), 'refreshed by the CLI\n');
 });
 
-test('antigravity: every worker home shares one pnpm store; an old real one gives way, and pruning leaves the shared one', { skip: process.platform === 'win32' && 'Windows: pnpm follows LOCALAPPDATA, not the worker home' }, () => {
+test('antigravity: every new worker home shares one pnpm store; an old real one is left to go with its home, and pruning leaves the shared one', { skip: process.platform === 'win32' && 'Windows: pnpm follows LOCALAPPDATA, not the worker home' }, () => {
   const b = getBackend('antigravity');
   const rels = process.platform === 'darwin' ? ['Library/pnpm'] : ['.local/share/pnpm'];
   const own = process.platform === 'darwin' ? 'Library/Caches' : '.cache';
@@ -644,11 +644,20 @@ test('antigravity: every worker home shares one pnpm store; an old real one give
   const a = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-a-'));
   const c = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-c-'));
   const homeA = b.invocation(request({ cwd: a, mode: 'isolate' })).env.HOME;
-  // a home from before: a store of its own, which is only a cache
-  fs.rmSync(path.join(homeA, rels[0]), { recursive: true, force: true });
-  fs.mkdirSync(path.join(homeA, rels[0], 'store'), { recursive: true });
-  fs.writeFileSync(path.join(homeA, rels[0], 'store', 'old'), 'x');
-  b.invocation(request({ cwd: a, mode: 'isolate' }));
+  // a home from before: a store of its own, which Pitroom does not remove (a worker could race it)
+  const b2 = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-b-'));
+  const homeB = b.invocation(request({ cwd: b2 })).env.HOME;
+  fs.unlinkSync(path.join(homeB, rels[0]));
+  fs.mkdirSync(path.join(homeB, rels[0], 'store'), { recursive: true });
+  fs.writeFileSync(path.join(homeB, rels[0], 'store', 'old'), 'x');
+  // and one an unreleased build linked its general cache into the shared folder for
+  fs.mkdirSync(path.join(shared, own), { recursive: true });
+  fs.mkdirSync(path.dirname(path.join(homeB, own)), { recursive: true });
+  fs.rmSync(path.join(homeB, own), { recursive: true, force: true });
+  fs.symlinkSync(path.join(shared, own), path.join(homeB, own));
+  b.invocation(request({ cwd: b2 }));
+  assert.equal(fs.readFileSync(path.join(homeB, rels[0], 'store', 'old'), 'utf8'), 'x', 'left in place');
+  assert.ok(!fs.existsSync(path.join(homeB, own)), 'the old link into the shared folder is undone');
   const homeC = b.invocation(request({ cwd: c })).env.HOME;
   for (const home of [homeA, homeC]) {
     for (const rel of rels) {
@@ -658,7 +667,6 @@ test('antigravity: every worker home shares one pnpm store; an old real one give
   }
   fs.writeFileSync(path.join(homeA, rels[0], 'pkg'), 'y');
   assert.equal(fs.readFileSync(path.join(homeC, rels[0], 'pkg'), 'utf8'), 'y', 'one store for both');
-  assert.ok(!fs.existsSync(path.join(shared, rels[0], 'store', 'old')), 'the old store is not moved in');
   // a home left for two weeks goes; the shared folder, in use, stays with what is in it
   const old = new Date(Date.now() - 20 * 86_400_000);
   fs.utimesSync(homeA, old, old);
