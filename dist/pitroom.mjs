@@ -709,6 +709,21 @@ function baseSettings() {
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
+var SHARED_CACHES = { darwin: ["Library/pnpm", "Library/Caches"], linux: [".local/share/pnpm", ".cache"] };
+var SHARED = "_shared";
+function shareCache(home3, shared, rel) {
+  const at = path5.join(home3, rel);
+  const to = path5.join(shared, rel);
+  try {
+    fs6.mkdirSync(to, { recursive: true });
+    fs6.mkdirSync(path5.dirname(at), { recursive: true });
+    const st = fs6.lstatSync(at, { throwIfNoEntry: false });
+    if (st?.isSymbolicLink() && fs6.readlinkSync(at) === to) return;
+    if (st) fs6.rmSync(at, { recursive: true, force: true });
+    fs6.symlinkSync(to, at);
+  } catch {
+  }
+}
 function workerHome(workspace, reads = [], writes = false) {
   const root = path5.join(home(), "antigravity-home");
   const id2 = crypto3.createHash("sha256").update(path5.resolve(workspace)).digest("hex").slice(0, 16);
@@ -722,8 +737,11 @@ function workerHome(workspace, reads = [], writes = false) {
   } else {
     linkInto(dataDir(dir), path5.join(userDir(), TOKEN));
   }
+  const shared = path5.join(root, SHARED);
+  for (const rel of SHARED_CACHES[process.platform] ?? []) shareCache(dir, shared, rel);
   const now = /* @__PURE__ */ new Date();
   fs6.utimesSync(dir, now, now);
+  if (fs6.existsSync(shared)) fs6.utimesSync(shared, now, now);
   pruneHomes(root, dir);
   return dir;
 }
@@ -732,7 +750,7 @@ function pruneHomes(root, keep) {
   try {
     for (const name of fs6.readdirSync(root)) {
       const dir = path5.join(root, name);
-      if (dir === keep || !/^[0-9a-f]{16}$/.test(name)) continue;
+      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || name === SHARED)) continue;
       if (fs6.statSync(dir).mtimeMs < cutoff) fs6.rmSync(dir, { recursive: true, force: true });
     }
   } catch {

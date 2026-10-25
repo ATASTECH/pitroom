@@ -635,3 +635,33 @@ test('private homes: settings are replaced whole, a dangling sign-in link is rep
   linkInto(path.join(dir, 'h'), token);
   assert.equal(fs.readFileSync(path.join(dir, 'h', 'token'), 'utf8'), 'refreshed by the CLI\n');
 });
+
+test('antigravity: every worker home shares one pnpm store and cache folder; an old real one gives way, and pruning leaves the shared one', { skip: process.platform === 'win32' && 'Windows: pnpm follows LOCALAPPDATA, not the worker home' }, () => {
+  const b = getBackend('antigravity');
+  const rels = process.platform === 'darwin' ? ['Library/pnpm', 'Library/Caches'] : ['.local/share/pnpm', '.cache'];
+  const shared = path.join(process.env.PITROOM_HOME, 'antigravity-home', '_shared');
+  const a = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-a-'));
+  const c = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-c-'));
+  const homeA = b.invocation(request({ cwd: a, mode: 'isolate' })).env.HOME;
+  // a home from before: a store of its own, which is only a cache
+  fs.rmSync(path.join(homeA, rels[0]), { recursive: true, force: true });
+  fs.mkdirSync(path.join(homeA, rels[0], 'store'), { recursive: true });
+  fs.writeFileSync(path.join(homeA, rels[0], 'store', 'old'), 'x');
+  b.invocation(request({ cwd: a, mode: 'isolate' }));
+  const homeC = b.invocation(request({ cwd: c })).env.HOME;
+  for (const home of [homeA, homeC]) {
+    for (const rel of rels) {
+      assert.ok(fs.lstatSync(path.join(home, rel)).isSymbolicLink(), `${home}/${rel} is a link`);
+      assert.equal(fs.readlinkSync(path.join(home, rel)), path.join(shared, rel));
+    }
+  }
+  fs.writeFileSync(path.join(homeA, rels[0], 'pkg'), 'y');
+  assert.equal(fs.readFileSync(path.join(homeC, rels[0], 'pkg'), 'utf8'), 'y', 'one store for both');
+  assert.ok(!fs.existsSync(path.join(shared, rels[0], 'store', 'old')), 'the old store is not moved in');
+  // a home left for two weeks goes; the shared folder, in use, stays with what is in it
+  const old = new Date(Date.now() - 20 * 86_400_000);
+  fs.utimesSync(homeA, old, old);
+  b.invocation(request({ cwd: c }));
+  assert.ok(!fs.existsSync(homeA), 'the unused home is pruned');
+  assert.equal(fs.readFileSync(path.join(shared, rels[0], 'pkg'), 'utf8'), 'y', 'pruning a home does not follow its links');
+});

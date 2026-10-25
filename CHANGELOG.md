@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Workers
+- **Antigravity runs share one pnpm store.** Each Antigravity workspace gets a home of its own, and `pnpm install` in a run built a whole store there (2.2 GB in one home, 7.6 GB over 85 homes on one machine). Every home now links its package-manager store and caches (`Library/pnpm` and `Library/Caches` on macOS, `.local/share/pnpm` and `.cache` on Linux) to one shared folder in Pitroom's state, which goes like the homes when unused for two weeks. A home's own old store is dropped the next time it is used. Tried with agy 1.4.7: `pnpm add` in an isolated copy wrote to the shared store.
+
 ## 0.27.0
 
 ### Workers

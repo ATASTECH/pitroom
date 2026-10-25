@@ -319,6 +319,34 @@ const rulePath = (p: string) => p.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\
 const HOMES_KEPT_DAYS = 14;
 
 /**
+ * Package managers keep their store and caches in the home. In a home per workspace, `pnpm install` in an agy run
+ * built a store of its own each time (gigabytes per home, the same packages over and over): every home links these
+ * folders to one shared folder instead, which pnpm's content-addressable store is made to be shared through. Windows
+ * needs none: agy gets its own USERPROFILE there, but pnpm's store and caches follow LOCALAPPDATA, which stays the user's.
+ */
+const SHARED_CACHES: Record<string, string[]> = { darwin: ['Library/pnpm', 'Library/Caches'], linux: ['.local/share/pnpm', '.cache'] };
+const SHARED = '_shared';
+
+/**
+ * Points `rel` in a worker home at the shared folder. A real folder there (a home from before) is only a cache: it
+ * goes. Best effort: without the link the worker still runs, with a cache of its own.
+ */
+function shareCache(home: string, shared: string, rel: string): void {
+  const at = path.join(home, rel);
+  const to = path.join(shared, rel);
+  try {
+    fs.mkdirSync(to, { recursive: true });
+    fs.mkdirSync(path.dirname(at), { recursive: true });
+    const st = fs.lstatSync(at, { throwIfNoEntry: false });
+    if (st?.isSymbolicLink() && fs.readlinkSync(at) === to) return;
+    if (st) fs.rmSync(at, { recursive: true, force: true });
+    fs.symlinkSync(to, at);
+  } catch {
+    // see above
+  }
+}
+
+/**
  * The worker home for a workspace: its settings rewritten when they change, the user's sign-in linked in. Homes
  * not used for two weeks are removed (their conversations with them: a follow-up then starts a new one).
  */
@@ -335,8 +363,11 @@ function workerHome(workspace: string, reads: OutsideRead[] = [], writes = false
   } else {
     linkInto(dataDir(dir), path.join(userDir(), TOKEN));
   }
+  const shared = path.join(root, SHARED);
+  for (const rel of SHARED_CACHES[process.platform] ?? []) shareCache(dir, shared, rel);
   const now = new Date();
   fs.utimesSync(dir, now, now);
+  if (fs.existsSync(shared)) fs.utimesSync(shared, now, now);
   pruneHomes(root, dir);
   return dir;
 }
@@ -346,7 +377,8 @@ function pruneHomes(root: string, keep: string): void {
   try {
     for (const name of fs.readdirSync(root)) {
       const dir = path.join(root, name);
-      if (dir === keep || !/^[0-9a-f]{16}$/.test(name)) continue;
+      // the shared caches go too when no home has used them for as long
+      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || name === SHARED)) continue;
       if (fs.statSync(dir).mtimeMs < cutoff) fs.rmSync(dir, { recursive: true, force: true });
     }
   } catch {
