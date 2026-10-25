@@ -709,14 +709,23 @@ function baseSettings() {
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
-var SHARED_CACHES = { darwin: ["Library/pnpm", "Library/Caches"], linux: [".local/share/pnpm", ".cache"] };
+var SHARED_CACHES = { darwin: ["Library/pnpm"], linux: [".local/share/pnpm"] };
 var SHARED = "_shared";
 function shareCache(home3, shared, rel) {
   const at = path5.join(home3, rel);
   const to = path5.join(shared, rel);
   try {
     fs6.mkdirSync(to, { recursive: true });
-    fs6.mkdirSync(path5.dirname(at), { recursive: true });
+    let parent = home3;
+    for (const part of path5.dirname(rel).split("/").filter((p) => p && p !== ".")) {
+      parent = path5.join(parent, part);
+      const pst = fs6.lstatSync(parent, { throwIfNoEntry: false });
+      if (!pst) fs6.mkdirSync(parent);
+      else if (pst.isSymbolicLink() || !pst.isDirectory()) return;
+    }
+    const realHome = fs6.realpathSync(home3);
+    const realParent = fs6.realpathSync(path5.dirname(at));
+    if (realParent !== realHome && !realParent.startsWith(realHome + path5.sep)) return;
     const st = fs6.lstatSync(at, { throwIfNoEntry: false });
     if (st?.isSymbolicLink() && fs6.readlinkSync(at) === to) return;
     if (st) fs6.rmSync(at, { recursive: true, force: true });

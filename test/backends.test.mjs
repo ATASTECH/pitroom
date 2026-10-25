@@ -636,9 +636,10 @@ test('private homes: settings are replaced whole, a dangling sign-in link is rep
   assert.equal(fs.readFileSync(path.join(dir, 'h', 'token'), 'utf8'), 'refreshed by the CLI\n');
 });
 
-test('antigravity: every worker home shares one pnpm store and cache folder; an old real one gives way, and pruning leaves the shared one', { skip: process.platform === 'win32' && 'Windows: pnpm follows LOCALAPPDATA, not the worker home' }, () => {
+test('antigravity: every worker home shares one pnpm store; an old real one gives way, and pruning leaves the shared one', { skip: process.platform === 'win32' && 'Windows: pnpm follows LOCALAPPDATA, not the worker home' }, () => {
   const b = getBackend('antigravity');
-  const rels = process.platform === 'darwin' ? ['Library/pnpm', 'Library/Caches'] : ['.local/share/pnpm', '.cache'];
+  const rels = process.platform === 'darwin' ? ['Library/pnpm'] : ['.local/share/pnpm'];
+  const own = process.platform === 'darwin' ? 'Library/Caches' : '.cache';
   const shared = path.join(process.env.PITROOM_HOME, 'antigravity-home', '_shared');
   const a = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-a-'));
   const c = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-c-'));
@@ -664,4 +665,22 @@ test('antigravity: every worker home shares one pnpm store and cache folder; an 
   b.invocation(request({ cwd: c }));
   assert.ok(!fs.existsSync(homeA), 'the unused home is pruned');
   assert.equal(fs.readFileSync(path.join(shared, rels[0], 'pkg'), 'utf8'), 'y', 'pruning a home does not follow its links');
+  assert.ok(!fs.existsSync(path.join(shared, own)), 'caches nothing checks stay per home');
+});
+
+test('antigravity: a link the worker put on the way to its store (its Library pointing at the user\'s) stops Pitroom from deleting or linking there', { skip: process.platform === 'win32' && 'Windows: no shared store' }, () => {
+  const b = getBackend('antigravity');
+  const rel = process.platform === 'darwin' ? 'Library/pnpm' : '.local/share/pnpm';
+  const top = rel.split('/')[0];
+  const ws = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-evil-'));
+  const home = b.invocation(request({ cwd: ws, mode: 'isolate' })).env.HOME;
+  // a stand-in for the user's own folder, with a store the worker would like gone
+  const users = fs.mkdtempSync(path.join(os.tmpdir(), 'agy-share-users-'));
+  fs.mkdirSync(path.join(users, ...rel.split('/').slice(1)), { recursive: true });
+  fs.writeFileSync(path.join(users, ...rel.split('/').slice(1), 'precious'), 'z');
+  fs.rmSync(path.join(home, top), { recursive: true, force: true });
+  fs.symlinkSync(users, path.join(home, top));
+  b.invocation(request({ cwd: ws, mode: 'isolate' }));
+  assert.equal(fs.readFileSync(path.join(users, ...rel.split('/').slice(1), 'precious'), 'utf8'), 'z', 'nothing outside the home was removed');
+  assert.ok(!fs.lstatSync(path.join(users, ...rel.split('/').slice(1))).isSymbolicLink(), 'nor replaced by a link');
 });

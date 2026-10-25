@@ -319,24 +319,36 @@ const rulePath = (p: string) => p.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\
 const HOMES_KEPT_DAYS = 14;
 
 /**
- * Package managers keep their store and caches in the home. In a home per workspace, `pnpm install` in an agy run
- * built a store of its own each time (gigabytes per home, the same packages over and over): every home links these
- * folders to one shared folder instead, which pnpm's content-addressable store is made to be shared through. Windows
- * needs none: agy gets its own USERPROFILE there, but pnpm's store and caches follow LOCALAPPDATA, which stays the user's.
+ * pnpm keeps its store in the home. In a home per workspace, `pnpm install` in an agy run built a store of its own each
+ * time (gigabytes per home, the same packages over and over): every home links it to one shared folder instead. Only
+ * the store: it is content-addressable and pnpm checks each file against its hash, so what one workspace's worker
+ * leaves there cannot pass for another package. Other caches (`.cache`, `Library/Caches`) are checked by nothing and
+ * stay per home. Windows needs none: agy gets its own USERPROFILE there, but pnpm's store follows LOCALAPPDATA.
  */
-const SHARED_CACHES: Record<string, string[]> = { darwin: ['Library/pnpm', 'Library/Caches'], linux: ['.local/share/pnpm', '.cache'] };
+const SHARED_CACHES: Record<string, string[]> = { darwin: ['Library/pnpm'], linux: ['.local/share/pnpm'] };
 const SHARED = '_shared';
 
 /**
  * Points `rel` in a worker home at the shared folder. A real folder there (a home from before) is only a cache: it
- * goes. Best effort: without the link the worker still runs, with a cache of its own.
+ * goes. The worker can write in its home, so the folders on the way may be links it made (`Library` pointing at the
+ * user's own): nothing is removed or linked unless every one of them is a real folder inside the home. Best effort:
+ * without the link the worker still runs, with a store of its own.
  */
 function shareCache(home: string, shared: string, rel: string): void {
   const at = path.join(home, rel);
   const to = path.join(shared, rel);
   try {
     fs.mkdirSync(to, { recursive: true });
-    fs.mkdirSync(path.dirname(at), { recursive: true });
+    let parent = home;
+    for (const part of path.dirname(rel).split('/').filter((p) => p && p !== '.')) {
+      parent = path.join(parent, part);
+      const pst = fs.lstatSync(parent, { throwIfNoEntry: false });
+      if (!pst) fs.mkdirSync(parent);
+      else if (pst.isSymbolicLink() || !pst.isDirectory()) return;
+    }
+    const realHome = fs.realpathSync(home);
+    const realParent = fs.realpathSync(path.dirname(at));
+    if (realParent !== realHome && !realParent.startsWith(realHome + path.sep)) return;
     const st = fs.lstatSync(at, { throwIfNoEntry: false });
     if (st?.isSymbolicLink() && fs.readlinkSync(at) === to) return;
     if (st) fs.rmSync(at, { recursive: true, force: true });
