@@ -3719,7 +3719,7 @@ function settleLedger(metas) {
   let n = 0;
   for (const m of metas ?? finishedRuns()) {
     if (known.has(m.id) || !TERMINAL.includes(m.state)) continue;
-    if (isAlive(m.pid) && (!m.endedAt || Date.now() - Date.parse(m.endedAt) < SETTLING_MS)) continue;
+    if (m.pid !== process.pid && isAlive(m.pid) && (!m.endedAt || Date.now() - Date.parse(m.endedAt) < SETTLING_MS)) continue;
     if (record(m)) {
       known.add(m.id);
       n++;

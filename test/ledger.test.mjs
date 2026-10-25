@@ -15,6 +15,9 @@ const ledgerOf = (s) => {
 const writeLedger = (s, entries) => fs.writeFileSync(path.join(s.base, 'home', 'ledger.jsonl'), entries.map((e) => `${JSON.stringify(e)}\n`).join(''));
 const metaFile = (s, id) => path.join(s.base, 'home', 'runs', id, 'meta.json');
 const editMeta = (s, id, f) => fs.writeFileSync(metaFile(s, id), JSON.stringify(f(JSON.parse(fs.readFileSync(metaFile(s, id), 'utf8'))), null, 2));
+// The run's process is gone: on Windows its id may already belong to another process (one of the tests running
+// beside this one), which would read as a run still writing its own line.
+const gone = (s, id) => editMeta(s, id, (m) => ({ ...m, pid: undefined }));
 
 test('ledger: a run killed between its meta.json and its ledger line is recorded on the next look', () => {
   const s = sandbox();
@@ -24,6 +27,7 @@ test('ledger: a run killed between its meta.json and its ledger line is recorded
   const line = ledgerOf(s).find((e) => e.id === id);
   assert.ok(line, 'the run wrote its own line');
   writeLedger(s, ledgerOf(s).filter((e) => e.id !== id)); // as if killed right after its final meta.json
+  gone(s, id);
 
   assert.equal(s.run(['savings']).status, 0);
   const again = ledgerOf(s).filter((e) => e.id === id);
@@ -39,8 +43,8 @@ test('ledger: a done run with no steps counts; a failed one that never reached t
   const failed = s.run(['run', '--no-fallback', 'x'], { MOCK_FAIL_MODELS: 'default' });
   assert.equal(failed.status, 1);
   const failedId = RUN_ID.exec(failed.stdout)[0];
-  editMeta(s, done, (m) => ({ ...m, usage: { ...m.usage, steps: 0 } }));
-  editMeta(s, failedId, (m) => ({ ...m, usage: undefined }));
+  editMeta(s, done, (m) => ({ ...m, usage: { ...m.usage, steps: 0 }, pid: undefined }));
+  editMeta(s, failedId, (m) => ({ ...m, usage: undefined, pid: undefined }));
   writeLedger(s, []);
 
   assert.equal(s.run(['savings']).status, 0);
