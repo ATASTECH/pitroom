@@ -8,6 +8,7 @@
 // login shells and absolute paths bypass; layer 2 below (git's own env config)
 // catches those. Neither is an OS sandbox: working-tree edits in --write mode are
 // undone with `pitroom revert`, and --isolate never touches the user's tree.
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { renameOver } from '../core/fs-atomic.js';
@@ -175,6 +176,78 @@ export const cmdShim = (sh: string) =>
     '',
   ].join('\r\n');
 
+// `git.exe`: the door that leaves cmd.exe out. A batch file cannot keep an unquoted `& | < >` (the `cmd /c` line Windows
+// starts it with acts on them first), and a program that starts git without a shell finds git.exe, never git.cmd. This
+// small launcher takes its own command line as the caller wrote it, drops its own name and hands the rest to sh.exe
+// unread, so sh.exe splits the arguments once, as git.exe would have. It is compiled on the spot with the C# compiler
+// every Windows has (.NET Framework 4); without one, git.cmd stays the door. PATHEXT puts .EXE before .CMD.
+const launcherSource = (sh: string) => `// pitroom git guard: git.exe launcher v${VERSION} (generated; edit src/vcs/guard.ts)
+using System;
+using System.Diagnostics;
+using System.IO;
+
+static class PitroomGit {
+  const string Sh = @"${sh.replace(/"/g, '""')}";
+
+  static int Main() {
+    string line = Environment.CommandLine;
+    // this program's own name, as Windows reads it: up to the closing quote when it starts with one, else to a space
+    int i = 0;
+    if (line.Length > 0 && line[0] == '"') { int q = line.IndexOf('"', 1); i = q < 0 ? line.Length : q + 1; }
+    else { while (i < line.Length && line[i] != ' ' && line[i] != '\\t') i++; }
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "git");
+    ProcessStartInfo start = new ProcessStartInfo(Sh, "\\"" + script + "\\"" + line.Substring(i));
+    start.UseShellExecute = false;
+    start.EnvironmentVariables["MSYS2_ARG_CONV_EXCL"] = "*";
+    // Ctrl+C reaches git too: wait for it to end and pass its exit code on
+    Console.CancelKeyPress += delegate (object o, ConsoleCancelEventArgs e) { e.Cancel = true; };
+    using (Process git = Process.Start(start)) {
+      git.WaitForExit();
+      return git.ExitCode;
+    }
+  }
+}
+`;
+
+/** The C# compiler of .NET Framework 4, which ships with Windows; undefined when there is none. */
+function findCsc(): string | undefined {
+  const windir = process.env.WINDIR ?? process.env.SystemRoot ?? 'C:\\Windows';
+  for (const fw of ['Framework64', 'Framework']) {
+    const p = path.join(windir, 'Microsoft.NET', fw, 'v4.0.30319', 'csc.exe');
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
+/**
+ * Builds the shim's git.exe when it is missing or was built for another sh.exe (the source beside it says which). Best
+ * effort: no compiler, a failed build or a git.exe in use (it cannot be replaced while it runs) leave git.cmd or the
+ * old git.exe in place.
+ */
+function buildLauncher(dir: string, sh: string): void {
+  const source = launcherSource(sh);
+  const src = path.join(dir, 'git-launcher.cs');
+  const exe = path.join(dir, 'git.exe');
+  if (fs.existsSync(exe) && fs.existsSync(src) && fs.readFileSync(src, 'utf8') === source) return;
+  const csc = findCsc();
+  if (!csc) return;
+  const tmp = path.join(dir, `git.${process.pid}.tmp.exe`);
+  const tmpSrc = `${src}.${process.pid}.tmp`;
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(tmpSrc, source);
+    const r = spawnSync(csc, ['/nologo', '/optimize+', '/target:exe', `/out:${tmp}`, tmpSrc], { encoding: 'utf8', timeout: 60_000, windowsHide: true });
+    if (r.status !== 0 || !fs.existsSync(tmp)) return;
+    renameOver(tmp, exe);
+    renameOver(tmpSrc, src);
+  } catch {
+    // git.cmd (or the git.exe already there) goes on serving
+  } finally {
+    fs.rmSync(tmp, { force: true });
+    fs.rmSync(tmpSrc, { force: true });
+  }
+}
+
 // Second layer, carried in environment variables so it survives what PATH does not:
 // login shells (macOS path_helper and ~/.zprofile reorder PATH; Codex runs commands
 // through `zsh -lc`), absolute paths like /usr/bin/git, and scripts. Git reads
@@ -253,6 +326,7 @@ export function guardEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
     writeIfChanged(path.join(dir, 'git.cmd'), cmdShim(sh));
+    buildLauncher(dir, sh);
   }
   writeIfChanged(path.join(dir, 'git'), SHIM);
   const key = pathKey(env);

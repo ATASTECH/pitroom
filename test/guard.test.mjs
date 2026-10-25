@@ -202,15 +202,19 @@ test('Windows: behind a Scoop shim the shim is still put first, with the real gi
   }
 });
 
-// Windows starts a batch file through `cmd.exe /c "<line>"`, which removes a `^` (`HEAD^` became `HEAD`) and fills in a
-// `%name%` that names a variable (`%cd%`) before git.cmd runs; git.cmd takes the raw line instead. An unquoted `& | < >`
-// is acted on by that same cmd.exe, which no batch file can undo, so it is not tried here.
-test('Windows: git.cmd started by PowerShell hands the arguments over as written (^, %name% and spaces)', { skip: windowsOnly }, () => {
-  const { s, env } = setup();
-  // a stand-in for the real git that prints what it got, one argument per line (and has no aliases)
+/** What the shim hands git, as the fake git prints it: one `[argument]` per line. */
+function fakeGit(s) {
   const fake = path.join(s.base, 'fakegit');
   fs.writeFileSync(fake, '#!/bin/sh\n[ "$1" = config ] && exit 1\nfor a do printf \'[%s]\\n\' "$a"; done\n');
-  const args = ['show', 'HEAD^', '--grep=a^^b', '--format=%cd%n', '50%', 'two words', '--author=%USERNAME%', '%PATH%'];
+  return fake.replace(/\\/g, '/');
+}
+
+// PowerShell finds the shim's git.exe (PATHEXT puts .EXE before .CMD), which hands its raw command line to sh.exe:
+// no cmd.exe reads the arguments, so `^`, `%name%` and even an unquoted `& | < >` arrive as written.
+test('Windows: git started by PowerShell gets the arguments as written (^ & | < > %name% and spaces)', { skip: windowsOnly }, () => {
+  const { s, env } = setup();
+  assert.ok(fs.existsSync(path.join(process.env.PITROOM_HOME, 'shim', 'v2', 'git.exe')), 'git.exe was built');
+  const args = ['show', 'HEAD^', '--grep=a^^b', 'x&y', 'p|q', 'a<b>c', '--format=%cd%n', '50%', 'two words', '--author=%USERNAME%', '%PATH%'];
   const script = path.join(s.base, 'call.ps1');
   fs.writeFileSync(script, `& git ${args.map((a) => `'${a}'`).join(' ')}\r\nexit $LASTEXITCODE\r\n`);
   let ran = 0;
@@ -218,15 +222,48 @@ test('Windows: git.cmd started by PowerShell hands the arguments over as written
     if (spawnSync(shell, ['-NoProfile', '-Command', 'exit 0']).status !== 0) continue;
     ran++;
     const r = spawnSync(shell, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
-      cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fake.replace(/\\/g, '/') }, encoding: 'utf8', timeout: 30000,
+      cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fakeGit(s) }, encoding: 'utf8', timeout: 30000,
     });
     assert.equal(r.status, 0, `${shell}: ${r.stderr}\n${r.stdout}`);
     assert.deepEqual(r.stdout.trim().split(/\r?\n/), args.map((a) => `[${a}]`), `${shell} passed them as written`);
   }
-  assert.ok(ran > 0, 'no PowerShell to start git.cmd with');
+  assert.ok(ran > 0, 'no PowerShell to start git with');
 });
 
-test('Windows: git.cmd from a cmd /d /s /c line (Node\'s shell) still blocks and passes through', { skip: windowsOnly }, () => {
+test('Windows: a program that starts git without a shell goes through the shim too (git.exe)', { skip: windowsOnly }, () => {
+  const { s, env } = setup();
+  const before = s.git('rev-parse', 'HEAD');
+  const r = spawnSync('git', ['commit', '--allow-empty', '-m', 'x'], { cwd: s.repo, env, encoding: 'utf8', timeout: 15000 });
+  assert.equal(r.status, 1, r.stderr);
+  assert.match(r.stderr, /'git commit' is blocked for workers/, 'the shim answered, not the ref hook');
+  assert.equal(s.git('rev-parse', 'HEAD'), before);
+  const ok = spawnSync('git', ['rev-parse', '--is-inside-work-tree'], { cwd: s.repo, env, encoding: 'utf8', timeout: 15000 });
+  assert.equal(ok.stdout.trim(), 'true', ok.stderr);
+});
+
+test('Windows: with no C# compiler, git.cmd is the door and still keeps ^ and %name% from PowerShell', { skip: windowsOnly }, () => {
+  const windir = process.env.WINDIR;
+  process.env.WINDIR = scratchDir('pitroom-nowin-'); // no Microsoft.NET\Framework*\csc.exe there
+  let ctx;
+  try {
+    ctx = setup();
+  } finally {
+    process.env.WINDIR = windir;
+  }
+  const { s, env, blocked } = ctx;
+  assert.ok(!fs.existsSync(path.join(process.env.PITROOM_HOME, 'shim', 'v2', 'git.exe')), 'no git.exe');
+  blocked(['commit', '--allow-empty', '-m', 'x & y']);
+  const args = ['show', 'HEAD^', '--format=%cd%n', '--author=%USERNAME%', 'two words'];
+  const script = path.join(s.base, 'call.ps1');
+  fs.writeFileSync(script, `& git ${args.map((a) => `'${a}'`).join(' ')}\r\nexit $LASTEXITCODE\r\n`);
+  const r = spawnSync('powershell', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
+    cwd: s.repo, env: { ...env, PITROOM_REAL_GIT: fakeGit(s) }, encoding: 'utf8', timeout: 30000,
+  });
+  assert.equal(r.status, 0, `${r.stderr}\n${r.stdout}`);
+  assert.deepEqual(r.stdout.trim().split(/\r?\n/), args.map((a) => `[${a}]`));
+});
+
+test('Windows: git from a cmd /d /s /c line (Node\'s shell) still blocks and passes through', { skip: windowsOnly }, () => {
   const { blocked, allowed, run } = setup();
   blocked(['commit', '--allow-empty', '-m', 'x & y']);
   allowed(['status']);

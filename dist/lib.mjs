@@ -2601,7 +2601,8 @@ var SCHEMA = {
   priceFeedUrl: "string",
   priceFeedHours: "number",
   budgetDaily: "number",
-  rankWorkers: "boolean"
+  rankWorkers: "boolean",
+  autoFallback: "boolean"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path15.resolve(process.env.PITROOM_CONFIG);
@@ -2711,6 +2712,7 @@ function effective(flags = {}) {
     priceFeedUrl: setting(void 0, e.PITROOM_PRICE_FEED_URL?.trim() || void 0, c.priceFeedUrl?.trim() || void 0, "https://models.dev/api.json"),
     priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
     rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
+    autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0)
   };
 }
@@ -3156,6 +3158,7 @@ function summarize(rows) {
 }
 
 // src/vcs/guard.ts
+import { spawnSync as spawnSync9 } from "node:child_process";
 import fs19 from "node:fs";
 import path18 from "node:path";
 var VERSION = 2;
@@ -3293,6 +3296,63 @@ var cmdShim = (sh) => [
   "exit /b %errorlevel%",
   ""
 ].join("\r\n");
+var launcherSource = (sh) => `// pitroom git guard: git.exe launcher v${VERSION} (generated; edit src/vcs/guard.ts)
+using System;
+using System.Diagnostics;
+using System.IO;
+
+static class PitroomGit {
+  const string Sh = @"${sh.replace(/"/g, '""')}";
+
+  static int Main() {
+    string line = Environment.CommandLine;
+    // this program's own name, as Windows reads it: up to the closing quote when it starts with one, else to a space
+    int i = 0;
+    if (line.Length > 0 && line[0] == '"') { int q = line.IndexOf('"', 1); i = q < 0 ? line.Length : q + 1; }
+    else { while (i < line.Length && line[i] != ' ' && line[i] != '\\t') i++; }
+    string script = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "git");
+    ProcessStartInfo start = new ProcessStartInfo(Sh, "\\"" + script + "\\"" + line.Substring(i));
+    start.UseShellExecute = false;
+    start.EnvironmentVariables["MSYS2_ARG_CONV_EXCL"] = "*";
+    // Ctrl+C reaches git too: wait for it to end and pass its exit code on
+    Console.CancelKeyPress += delegate (object o, ConsoleCancelEventArgs e) { e.Cancel = true; };
+    using (Process git = Process.Start(start)) {
+      git.WaitForExit();
+      return git.ExitCode;
+    }
+  }
+}
+`;
+function findCsc() {
+  const windir = process.env.WINDIR ?? process.env.SystemRoot ?? "C:\\Windows";
+  for (const fw of ["Framework64", "Framework"]) {
+    const p = path18.join(windir, "Microsoft.NET", fw, "v4.0.30319", "csc.exe");
+    if (fs19.existsSync(p)) return p;
+  }
+  return void 0;
+}
+function buildLauncher(dir, sh) {
+  const source = launcherSource(sh);
+  const src = path18.join(dir, "git-launcher.cs");
+  const exe = path18.join(dir, "git.exe");
+  if (fs19.existsSync(exe) && fs19.existsSync(src) && fs19.readFileSync(src, "utf8") === source) return;
+  const csc = findCsc();
+  if (!csc) return;
+  const tmp = path18.join(dir, `git.${process.pid}.tmp.exe`);
+  const tmpSrc = `${src}.${process.pid}.tmp`;
+  try {
+    fs19.mkdirSync(dir, { recursive: true });
+    fs19.writeFileSync(tmpSrc, source);
+    const r = spawnSync9(csc, ["/nologo", "/optimize+", "/target:exe", `/out:${tmp}`, tmpSrc], { encoding: "utf8", timeout: 6e4, windowsHide: true });
+    if (r.status !== 0 || !fs19.existsSync(tmp)) return;
+    renameOver(tmp, exe);
+    renameOver(tmpSrc, src);
+  } catch {
+  } finally {
+    fs19.rmSync(tmp, { force: true });
+    fs19.rmSync(tmpSrc, { force: true });
+  }
+}
 var HOOK_VERSION = 1;
 var REF_HOOK = `#!/bin/sh
 # pitroom git guard (layer 2, v${HOOK_VERSION}): refuse ref updates made by workers.
@@ -3350,6 +3410,7 @@ function guardEnv(env) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
     writeIfChanged2(path18.join(dir, "git.cmd"), cmdShim(sh));
+    buildLauncher(dir, sh);
   }
   writeIfChanged2(path18.join(dir, "git"), SHIM);
   const key = pathKey(env);
