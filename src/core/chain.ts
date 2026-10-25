@@ -4,6 +4,8 @@
 // `worker`. A target without a model gets the per-worker default from the
 // config's `models` map (e.g. {"codex": "gpt-5.6-sol"}), else the worker CLI's
 // own default. Shared by `run` (and so `review`) and `doctor`.
+import fs from 'node:fs';
+import path from 'node:path';
 import { DEFAULT_BACKEND, getBackend } from '../backends/index.js';
 import type { Target } from '../backends/types.js';
 import { effective } from './config.js';
@@ -67,6 +69,53 @@ export function resolveChain(flags: { worker?: string; model?: string; tier?: st
         warnings.push(`fallback ${s} skipped: ${(e as Error).message}`);
       }
     }
+    if (!fallback.length && eff.autoFallback.value) fallback.push(...autoFallback(worker, withDefault));
   }
   return { worker, fallback, warnings };
+}
+
+const AUTO_MAX = 4;
+const bare = (t: Target) => `${t.backend}:${(t.model ?? '').split('#')[0]}`;
+
+/** Whether a worker's CLI is there to run: a missing one would end the chain at its turn. */
+function installed(backend: string): boolean {
+  try {
+    const bin = getBackend(backend).binary();
+    return path.isAbsolute(bin) && fs.statSync(bin).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `autoFallback`: the other workers this config already names (its tiers, its `models`, its `worker`), so no worker
+ * runs that the user has not picked somewhere: the installed ones, never the worker itself at another effort level,
+ * cheapest first by `costs` (those without a cost after, in the order named), at most four.
+ */
+export function autoFallback(worker: Target, withDefault: (t: Target) => Target = (t) => t): Target[] {
+  const eff = effective();
+  const named = [
+    ...Object.values(eff.tiers.value),
+    ...Object.entries(eff.models.value).map(([backend, model]) => `${backend}:${model}`),
+    eff.worker.value,
+  ];
+  const costs = eff.costs.value;
+  const out: Target[] = [];
+  for (const spec of named) {
+    let t: Target;
+    try {
+      t = withDefault(parseTarget(spec, worker.backend));
+      getBackend(t.backend);
+    } catch {
+      continue;
+    }
+    if (bare(t) === bare(worker) || out.some((o) => bare(o) === bare(t)) || !installed(t.backend)) continue;
+    out.push(t);
+  }
+  const cost = (t: Target) => costs[bare(t)] ?? Infinity;
+  return out
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => cost(a.t) - cost(b.t) || a.i - b.i)
+    .slice(0, AUTO_MAX)
+    .map((x) => x.t);
 }

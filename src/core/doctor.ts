@@ -7,7 +7,7 @@ import path from 'node:path';
 import { allBackends, getBackend, readsOwnSnapshot } from '../backends/index.js';
 import type { Backend, DoctorCheck, Target } from '../backends/types.js';
 import { gitAvailable } from '../vcs/git.js';
-import { guardEnv, shimReady } from '../vcs/guard.js';
+import { guardEnv, shimDir, shimReady } from '../vcs/guard.js';
 import { pickAuditor } from './audit.js';
 import { activeCooldowns, untilText } from './cooldown.js';
 import { resolveChain } from './chain.js';
@@ -93,7 +93,9 @@ export function doctor(probe: boolean): number {
   const cfg = loadConfig();
   add(cfg.warnings.length ? 'warn' : 'ok', `config: ${configPath()}${fs.existsSync(configPath()) ? '' : ' (not present, defaults in use)'}`);
   for (const w of cfg.warnings) add('warn', w);
-  if (shimReady()) add('ok', 'git guard shim ready');
+  if (shimReady() && process.platform === 'win32' && !fs.existsSync(path.join(shimDir(), 'git.exe'))) {
+    add('warn', "git guard shim ready as git.cmd only (no C# compiler of .NET Framework 4 to build git.exe): a program that starts git without a shell skips it, and PowerShell's unquoted & | < > reach git changed");
+  } else if (shimReady()) add('ok', 'git guard shim ready');
   else if (process.platform === 'win32') add('warn', "git guard: the ref and push guard is on, but the git shim needs the sh.exe of Git for Windows next to git (not found), so a worker's `git add`, `restore` or `clean` is not blocked; prefer --isolate and check the patch before apply");
   else add('warn', 'git guard unavailable (git not on PATH)');
 
@@ -107,7 +109,8 @@ export function doctor(probe: boolean): number {
   } catch (e) {
     add('fail', (e as Error).message);
   }
-  if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}`);
+  const auto = chain.length > 1 && !effective().fallback.value.length; // no fallback of yours: "autoFallback" made them
+  if (chain.length) add('ok', `worker chain: ${chain.map(describeTarget).join(' → ')}${auto ? ' (fallbacks from "autoFallback": the other workers your config names)' : ''}`);
   // Audits (config "audit") need a worker other than the one that answered: say when there is none.
   const rate = effective().audit.value;
   if (rate > 0 && chain.length) {

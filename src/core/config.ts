@@ -53,6 +53,11 @@ export interface PitroomConfig {
   budgetDaily?: number;
   /** Order the worker and its fallbacks by their record: runs that ended well and audits that held up (default false; PITROOM_RANK_WORKERS=1). */
   rankWorkers?: boolean;
+  /**
+   * With no `fallback`, fall back to the other workers this config names (tiers, `models`, `worker`), the installed
+   * ones, cheapest first by `costs` (default false; PITROOM_AUTO_FALLBACK=1).
+   */
+  autoFallback?: boolean;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
 }
@@ -85,6 +90,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   priceFeedHours: 'number',
   budgetDaily: 'number',
   rankWorkers: 'boolean',
+  autoFallback: 'boolean',
 };
 
 export function configPath(): string {
@@ -224,6 +230,7 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     priceFeedUrl: setting<string>(undefined, e.PITROOM_PRICE_FEED_URL?.trim() || undefined, c.priceFeedUrl?.trim() || undefined, 'https://models.dev/api.json'),
     priceFeedHours: setting<number>(undefined, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
     rankWorkers: setting<boolean>(undefined, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
+    autoFallback: setting<boolean>(undefined, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting<number | undefined>(undefined, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), undefined),
   };
 }

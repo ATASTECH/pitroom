@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Workers
+- **`autoFallback`** (off by default): with no `fallback` list, a run falls back to the other workers your config already names (tiers, `models`, `worker`), the installed ones, cheapest first by `costs`, at most four. It never adds a model you did not name somewhere, nor the worker itself at another effort level; `pitroom doctor` shows the chain and says where it came from.
+
+### Windows
+- **The git shim is a `git.exe` now**, built on the spot with the C# compiler that ships with Windows (.NET Framework 4). It hands its command line to `sh.exe` unread, so every argument arrives as written, an unquoted `& | < >` from PowerShell too (the `cmd /c` line a batch file is started with acted on those), and a program that starts git without a shell no longer skips the shim. Without a compiler, `git.cmd` stays the door, and `pitroom doctor` says so.
+
+### Docs and tests
+- The review benchmark's harmless packages are reviewed in full: `big-pickle` raised no false alarm in 16, `nemotron-3-ultra` 4 and `mimo-v2.6-flash` 2.
+
 ## 0.26.0
 
 ### Workers
