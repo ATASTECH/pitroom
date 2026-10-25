@@ -673,7 +673,7 @@ test('antigravity: every new worker home shares one pnpm store; an old real one 
   b.invocation(request({ cwd: c }));
   assert.ok(!fs.existsSync(homeA), 'the unused home is pruned');
   assert.equal(fs.readFileSync(path.join(shared, rels[0], 'pkg'), 'utf8'), 'y', 'pruning a home does not follow its links');
-  assert.ok(!fs.existsSync(path.join(shared, own)), 'caches nothing checks stay per home');
+  assert.ok(!fs.lstatSync(path.join(homeC, own), { throwIfNoEntry: false })?.isSymbolicLink(), 'caches nothing checks stay per home');
 });
 
 test('antigravity: a link the worker put on the way to its store (its Library pointing at the user\'s) stops Pitroom from deleting or linking there', { skip: process.platform === 'win32' && 'Windows: no shared store' }, () => {

@@ -337,12 +337,14 @@ const SHARED = '_shared';
  * links the worker made (`Library` pointing at the user's own): nothing is linked unless every one of them is a real
  * folder inside the home. Best effort: without the link the worker still runs, with a store of its own.
  */
-/** Undoes a link of `rel` into the shared folder (a link only: unlinking one never follows it), and drops its copy there. */
+/**
+ * Undoes a link of `rel` into the shared folder (a link only: unlinking one never follows it). Its copy in the shared
+ * folder stays until that folder is pruned: workers can write there, so a folder on the way could be a link out.
+ */
 function unshare(home: string, shared: string, rel: string): void {
   try {
     const at = path.join(home, rel);
     if (fs.lstatSync(at, { throwIfNoEntry: false })?.isSymbolicLink() && fs.readlinkSync(at) === path.join(shared, rel)) fs.unlinkSync(at);
-    fs.rmSync(path.join(shared, rel), { recursive: true, force: true });
   } catch {
     // best effort
   }

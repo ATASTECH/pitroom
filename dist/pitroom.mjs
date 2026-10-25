@@ -716,7 +716,6 @@ function unshare(home3, shared, rel) {
   try {
     const at = path5.join(home3, rel);
     if (fs6.lstatSync(at, { throwIfNoEntry: false })?.isSymbolicLink() && fs6.readlinkSync(at) === path5.join(shared, rel)) fs6.unlinkSync(at);
-    fs6.rmSync(path5.join(shared, rel), { recursive: true, force: true });
   } catch {
   }
 }
