@@ -175,7 +175,11 @@ How a worker is started, and why:
 
 ## Antigravity CLI notes
 
-Status: **beta**. Checked against **agy 1.3.5** on macOS (October 2026): a read run, a follow-up, an isolated edit, shell commands in the sandbox, the deny rules, an unknown model, a used-up quota and a missing sign-in were run against the real CLI, and `test/fixtures/antigravity` holds their recorded output (home paths replaced). Not yet checked on Linux (the sign-in file link) or Windows (`doctor` says to use `-i` there).
+Status: **beta**. Checked against **agy 1.3.5** on macOS (October 2026): a read run, a follow-up, an isolated edit, shell commands in the sandbox, the deny rules, an unknown model, a used-up quota and a missing sign-in were run against the real CLI, and `test/fixtures/antigravity` holds their recorded output (home paths replaced). Checked again against **agy 1.4.7** on macOS (2026-10-25) with `scripts/check-worker.mjs`: all eight checks held once edit runs granted writes in their workspace, which agy 1.4 asks for. Not yet checked on Linux (the sign-in file link) or Windows (`doctor` says to use `-i` there).
+
+To check it on another machine: sign in to `agy` there, then, from a checkout of this repository (`npm install && npm run build`), run `node scripts/check-worker.mjs antigravity:<model>`. It makes a new git repository in the temp folder and a Pitroom state folder of its own (your projects, history and savings are left alone) and tries what was tried on macOS: `doctor --probe`, a read, a follow-up, a read of a file outside the project, a shell command, an isolated edit, a commit the git guard must refuse, and an unknown model. It prints PASS, FAIL or SKIP for each and writes a JSON report to the temp folder. A used-up quota and a missing sign-in cannot be brought about on purpose; `pitroom doctor` reports both when they happen.
+
+The primary agent side has its own check: Cursor. `pitroom install --mcp --client cursor`, restart Cursor, then in a project ask its agent to "use pitroom_run to find where X is defined" (a read), "use pitroom_run with mode isolate to add a comment to Y" (then `pitroom_review` and `pitroom_apply`), and "what did pitroom cost today" (`pitroom_info`, topic savings). Each should show up in `pitroom dash`.
 
 Why it is here: Google refuses a Google account sign-in to Gemini CLI (`IneligibleTierError`, "migrate to the Antigravity suite"), so for someone without an AI Studio key, `agy` is the way to use their Google account's models (Gemini, and the Claude and GPT-OSS models Antigravity offers).
 

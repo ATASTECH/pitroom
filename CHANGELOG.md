@@ -5,6 +5,9 @@
 ### Workers
 - **`autoFallback`** (off by default): with no `fallback` list, a run falls back to the other workers your config already names (tiers, `models`, `worker`), the installed ones, cheapest first by `costs`, at most four. It never adds a model you did not name somewhere, nor the worker itself at another effort level; `pitroom doctor` shows the chain and says where it came from.
 
+- **Antigravity edits work again with agy 1.4.** agy 1.4 asks for a `write_file` grant before an edit in the workspace, `--mode accept-edits` or not, and a headless run cannot ask: every `-i` and `-w` run with Antigravity ended without an answer ("a tool required the write_file permission"). Edit runs now grant writes in their own workspace; read runs still may not write, and the workspace's secret files stay closed.
+- **`node scripts/check-worker.mjs <worker>`** tries a worker CLI the way Pitroom uses it (a read, a follow-up, a read outside the project, a shell command, an isolated edit, a commit the git guard refuses, an unknown model) in a scratch repository with a Pitroom state folder of its own, and prints what held: for a platform a worker has not been tried on. It found the agy 1.4 change above.
+
 ### Windows
 - **The git shim is a `git.exe` now**, built on the spot with the C# compiler that ships with Windows (.NET Framework 4). It hands its command line to `sh.exe` unread, so every argument arrives as written, an unquoted `& | < >` from PowerShell too (the `cmd /c` line a batch file is started with acted on those), and a program that starts git without a shell no longer skips the shim. Without a compiler, `git.cmd` stays the door, and `pitroom doctor` says so.
 
