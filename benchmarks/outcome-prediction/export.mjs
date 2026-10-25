@@ -50,6 +50,15 @@ const metas = new Map(rows.map((r) => [r.id, JSON.parse(r.meta_json)]));
 // An audit's verdict belongs to the run it checked.
 const auditOf = new Map();
 for (const [, m] of metas) if (m.auditOf && m.auditVerdict) auditOf.set(m.auditOf, m.auditVerdict);
+// So does a review's, for a change: approved when the spec is met and nothing needs fixing. The first review counts
+// (a later one judges the change after it was fixed); a verdict the reviewer did not give says nothing.
+const reviewOf = new Map();
+for (const r of rows) {
+  const m = metas.get(r.id);
+  const v = m.verdict;
+  if (!m.reviewOf || r.state !== 'done' || !v || !['approved', 'needs-fixes'].includes(v.quality) || reviewOf.has(m.reviewOf)) continue;
+  reviewOf.set(m.reviewOf, v.spec === 'pass' && v.quality === 'approved' ? 'approved' : 'needs-fixes');
+}
 
 const out = [];
 const ended = []; // { worker, endedAt, failed } of every earlier run, for the "failed just before" feature
@@ -78,6 +87,7 @@ for (const r of rows) {
     refsTotal: refsReliable ? m.refs.total : null,
     refsInvalid: refsReliable ? m.refs.invalid.length : null,
     audit: auditOf.get(r.id) ?? null,
+    review: r.mode !== 'read' ? (reviewOf.get(r.id) ?? null) : null,
     ...(withText ? { task: r.task ?? '' } : {}),
   };
   out.push(row);
@@ -92,4 +102,4 @@ const count = (f) => out.filter(f).length;
 console.log(`${out.length} runs → ${path.relative(process.cwd(), file)}${withText ? ' (with task text)' : ''}`);
 console.log(`  origin: ${['real', 'benchmark', 'test'].map((o) => `${o} ${count((x) => x.origin === o)}`).join(', ')}`);
 console.log(`  failed: ${count((x) => x.failed)} (rate-limit ${count((x) => x.cause === 'rate-limit')}), stopped: ${count((x) => x.state === 'stopped')}`);
-console.log(`  with reliable references: ${count((x) => x.refsTotal !== null)} (any invalid ${count((x) => x.refsInvalid > 0)}), audited: ${count((x) => x.audit)}`);
+console.log(`  with reliable references: ${count((x) => x.refsTotal !== null)} (any invalid ${count((x) => x.refsInvalid > 0)}), audited: ${count((x) => x.audit)}, reviewed changes: ${count((x) => x.review)}`);

@@ -147,10 +147,14 @@ const out = [
   ...evaluate('Will the run fail? (any cause)', usable, (r) => r.failed),
   ...evaluate('Will the run fail for a reason other than a rate limit or quota?', usable.filter((r) => r.cause !== 'rate-limit'), (r) => r.failed),
   ...evaluate('Will the run fail? (real use only)', usable.filter((r) => r.origin === 'real'), (r) => r.failed),
+  ...evaluate('Will a finished answer cite a file or line that does not check out?', usable.filter((r) => r.refsTotal !== null && !r.failed), (r) => r.refsInvalid > 0),
+  ...evaluate('Will an audit dispute the answer? (any verdict but "agree")', usable.filter((r) => r.audit && r.audit !== 'unclear'), (r) => r.audit !== 'agree'),
+  ...evaluate('Will a review send the change back? (spec not met, or fixes asked)', usable.filter((r) => r.review), (r) => r.review === 'needs-fixes'),
   '### Labels about the answer itself',
   '',
   `- Finished runs whose references could be checked with the current checker: ${count((r) => r.refsTotal !== null && !r.failed)}, of which ${count((r) => r.refsInvalid > 0 && !r.failed)} had a reference that did not check out.`,
   `- Audited runs: ${count((r) => r.audit)} (agree ${count((r) => r.audit === 'agree')}, partial ${count((r) => r.audit === 'partial')}, disagree ${count((r) => r.audit === 'disagree')}, unclear ${count((r) => r.audit === 'unclear')}).`,
+  `- Reviewed changes: ${count((r) => r.review)} (approved ${count((r) => r.review === 'approved')}, sent back ${count((r) => r.review === 'needs-fixes')}).`,
   '',
 ];
 const text = out.join('\n');

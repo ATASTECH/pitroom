@@ -9,6 +9,7 @@
 - **The git shim is a `git.exe` now**, built on the spot with the C# compiler that ships with Windows (.NET Framework 4). It hands its command line to `sh.exe` unread, so every argument arrives as written, an unquoted `& | < >` from PowerShell too (the `cmd /c` line a batch file is started with acted on those), and a program that starts git without a shell no longer skips the shim. Without a compiler, `git.cmd` stays the door, and `pitroom doctor` says so.
 
 ### Docs and tests
+- `benchmarks/outcome-prediction` again, on four weeks of runs (1,455), with two more labels: a review's verdict on a change, and whether an answer's references check out. Who answers predicts the latter well (AUC 0.85), but the label measures the reference checker too; failures are still about providers, and audit and review verdicts are still too few. No learned model yet.
 - The review benchmark's harmless packages are reviewed in full: `big-pickle` raised no false alarm in 16, `nemotron-3-ultra` 4 and `mimo-v2.6-flash` 2.
 
 ## 0.26.0
