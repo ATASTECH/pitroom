@@ -542,7 +542,7 @@ function denyCommandRules() {
     "command(eval)"
   ];
 }
-function workerSettings(workspace, workerHome3, reads = []) {
+function workerSettings(workspace, workerHome3, reads = [], writes = false) {
   const real = (p) => {
     try {
       return fs6.realpathSync.native(p);
@@ -566,6 +566,8 @@ function workerSettings(workspace, workerHome3, reads = []) {
       allow: [
         "command(*)",
         ...both(path5.join(dataDir(workerHome3), "brain")).map((p) => `write_file(${rulePath(p)})`),
+        // agy 1.4 asks for edits in the workspace too, --mode accept-edits or not, and a headless run cannot ask
+        ...writes ? both(workspace).map((p) => `write_file(${rulePath(p)})`) : [],
         ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
         ...reads.map((r) => r.path).flatMap(both).map((p) => `read_file(${rulePath(p)})`)
@@ -691,12 +693,12 @@ function baseSettings() {
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
 var HOMES_KEPT_DAYS = 14;
-function workerHome(workspace, reads = []) {
+function workerHome(workspace, reads = [], writes = false) {
   const root = path5.join(home(), "antigravity-home");
   const id2 = crypto3.createHash("sha256").update(path5.resolve(workspace)).digest("hex").slice(0, 16);
   const dir = path5.join(root, id2);
   fs6.mkdirSync(dataDir(dir), { recursive: true });
-  writeIfChanged(path5.join(dataDir(dir), "settings.json"), `${JSON.stringify(workerSettings(workspace, dir, reads), null, 2)}
+  writeIfChanged(path5.join(dataDir(dir), "settings.json"), `${JSON.stringify(workerSettings(workspace, dir, reads, writes), null, 2)}
 `);
   if (process.platform === "darwin") {
     fs6.mkdirSync(path5.join(dir, "Library"), { recursive: true });
@@ -753,7 +755,7 @@ function invocation(req) {
   if (model) args.push("--model", model);
   if (effort) args.push("--effort", effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root));
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root), req.mode !== "read");
   const env = { HOME: workerDir };
   if (process.platform === "win32") env.USERPROFILE = workerDir;
   return { command, args: [...prefix, ...args], env };
@@ -812,7 +814,7 @@ function doctor({ models, hasFallback }) {
     { level: "ok", message: `Antigravity CLI ${version.out.trim().split("\n")[0]} at ${binary()}` },
     {
       level: "warn",
-      message: "the Antigravity worker is in beta (checked against agy 1.3.5). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes"
+      message: "the Antigravity worker is in beta (checked against agy 1.4.7 on macOS). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes"
     }
   ];
   if (process.platform === "win32") {

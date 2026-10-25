@@ -453,6 +453,12 @@ test('antigravity: the private settings deny secrets, history-changing git, othe
   assert.equal(settings.permissions.allow[0], 'command(*)', 'without a grant a headless agy refuses every command');
   const allow = settings.permissions.allow.slice(1);
   assert.ok(allow.every((r) => /^write_file\(.*brain\)$/.test(r) || r.startsWith('read_file(')), 'only its own plan folder is writable outside the workspace');
+  assert.ok(!allow.some((r) => r.startsWith('write_file(') && !r.endsWith('brain)')), 'a read run may not write its workspace');
+  // an edit may (agy 1.4 asks even with --mode accept-edits, and a headless run cannot ask)
+  const edits = JSON.parse(fs.readFileSync(path.join(b.invocation(request({ cwd: workspace, mode: 'isolate' })).env.HOME, '.gemini', 'antigravity-cli', 'settings.json'), 'utf8'));
+  const own = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
+  assert.ok(edits.permissions.allow.includes(`write_file(${own(workspace)})`), edits.permissions.allow.join('\n'));
+  assert.ok(edits.permissions.deny.includes(`read_file(${own(path.join(workspace, '.env'))})`), 'its secrets stay closed, for writes too');
   assert.ok(allow.filter((r) => r.startsWith('read_file(')).every((r) => path.isAbsolute(r.slice(10, -1))), 'toolchains on PATH, read-only');
   assert.equal(b.capabilities.readOnly, 'snapshot', 'agy has no read-only mode for -p runs: read runs read a snapshot');
   const deny = settings.permissions.deny;

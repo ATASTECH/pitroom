@@ -105,9 +105,10 @@ export function denyCommandRules(): string[] {
  * conversation in the same home: what differs by mode is agy's own --mode. Deny beats allow in agy's rules.
  * `read_file` rules take absolute paths only (a relative one breaks the sandbox), so the workspace's secret files are
  * listed one by one. A denied read also denies the write. `reads` are the folders and files outside the workspace
- * that the task names (`outsideReads`), granted read-only, minus the secret files in them.
+ * that the task names (`outsideReads`), granted read-only, minus the secret files in them. `writes`: the run edits
+ * the workspace (write and isolate); a workspace is only ever used by one mode (a read run's is its own snapshot).
  */
-export function workerSettings(workspace: string, workerHome: string, reads: OutsideRead[] = []) {
+export function workerSettings(workspace: string, workerHome: string, reads: OutsideRead[] = [], writes = false) {
   const real = (p: string) => {
     try {
       return fs.realpathSync.native(p);
@@ -131,6 +132,8 @@ export function workerSettings(workspace: string, workerHome: string, reads: Out
       allow: [
         'command(*)',
         ...both(path.join(dataDir(workerHome), 'brain')).map((p) => `write_file(${rulePath(p)})`),
+        // agy 1.4 asks for edits in the workspace too, --mode accept-edits or not, and a headless run cannot ask
+        ...(writes ? both(workspace).map((p) => `write_file(${rulePath(p)})`) : []),
         ...toolchains().flatMap(both).map((p) => `read_file(${rulePath(p)})`),
         // what the task names outside the workspace: a headless agy cannot ask, and would end the turn unanswered
         ...reads.map((r) => r.path).flatMap(both).map((p) => `read_file(${rulePath(p)})`),
@@ -166,7 +169,7 @@ function toolchains(): string[] {
 /**
  * Shell commands run in agy's terminal sandbox without asking: a headless run refuses an ungranted command, which
  * can end the turn without an answer. command(*) grants them; the deny rules still win. Edits are approved by
- * --mode accept-edits.
+ * --mode accept-edits and, since agy 1.4, a write_file grant for the workspace (write and isolate runs only).
  */
 const isDir = (p: string) => {
   try {
@@ -319,12 +322,12 @@ const HOMES_KEPT_DAYS = 14;
  * The worker home for a workspace: its settings rewritten when they change, the user's sign-in linked in. Homes
  * not used for two weeks are removed (their conversations with them: a follow-up then starts a new one).
  */
-function workerHome(workspace: string, reads: OutsideRead[] = []): string {
+function workerHome(workspace: string, reads: OutsideRead[] = [], writes = false): string {
   const root = path.join(home(), 'antigravity-home');
   const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
   const dir = path.join(root, id);
   fs.mkdirSync(dataDir(dir), { recursive: true });
-  writeIfChanged(path.join(dataDir(dir), 'settings.json'), `${JSON.stringify(workerSettings(workspace, dir, reads), null, 2)}\n`);
+  writeIfChanged(path.join(dataDir(dir), 'settings.json'), `${JSON.stringify(workerSettings(workspace, dir, reads, writes), null, 2)}\n`);
   // macOS finds the sign-in through the login keychain under $HOME/Library/Keychains; elsewhere it is a file
   if (process.platform === 'darwin') {
     fs.mkdirSync(path.join(dir, 'Library'), { recursive: true });
@@ -387,7 +390,7 @@ function invocation(req: WorkerRequest) {
   if (model) args.push('--model', model);
   if (effort) args.push('--effort', effort);
   const { command, prefix } = resolveCommand(binary());
-  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root));
+  const workerDir = workerHome(req.cwd, outsideReads(prompt, req.cwd, req.project?.root), req.mode !== 'read');
   // The worker's commands see this home too: the user's own dotfiles stay out of their reach.
   const env: Record<string, string> = { HOME: workerDir };
   if (process.platform === 'win32') env.USERPROFILE = workerDir;
@@ -459,7 +462,7 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
     { level: 'ok', message: `Antigravity CLI ${version.out.trim().split('\n')[0]} at ${binary()}` },
     {
       level: 'warn',
-      message: 'the Antigravity worker is in beta (checked against agy 1.3.5). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes',
+      message: 'the Antigravity worker is in beta (checked against agy 1.4.7 on macOS). agy has no read-only mode for headless runs, so its read runs always read a snapshot of the project; prefer -i for changes',
     },
   ];
   if (process.platform === 'win32') {
