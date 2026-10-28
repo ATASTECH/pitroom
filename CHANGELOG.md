@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.28.0
 
 ### Crews
 - **One question, split by part: `pitroom crew --over src/auth,src/billing "… in {scope}"`** (MCP: `pitroom_run` with `task` and `scopes`). The task runs once per part, `{scope}` filled in, and each worker is told that its part is the only one it reads (in an `-i` crew, the only one it changes). A pattern in the last part of a path makes one part per match (`--over "packages/*/"`: one per folder, hidden ones left out). Parts must exist and must not overlap: `src` with `src/auth` is refused. Workers that read the same files hand the primary agent answers about the same code to reconcile, and when they disagree it opens the files itself, which is the reading a crew is meant to save.
