@@ -1423,8 +1423,10 @@ function cursor(args, timeout = 3e4) {
 }
 var HOMES_KEPT_DAYS2 = 14;
 var SECRETS2 = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/.netrc"];
-var HOME_SECRETS2 = [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gcloud", ".config/gh", ".gemini", ".cursor", ".claude", "Library/Keychains"];
-function workerSettings2(mode, web2) {
+var HOME_SECRETS2 = [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gcloud", ".config/gh", ".config/cursor", ".gemini", ".cursor", ".claude", "Library/Keychains"];
+var WORKER_HOME_SECRETS = ["Library/Keychains", ".config/cursor", ".cursor"];
+function workerSettings2(mode, web2, dir) {
+  const appData = process.platform === "win32" ? [path8.join(process.env.APPDATA ?? path8.join(os6.homedir(), "AppData", "Roaming"), "Cursor")] : [];
   return {
     version: 1,
     permissions: {
@@ -1433,7 +1435,12 @@ function workerSettings2(mode, web2) {
       deny: [
         ...FORBIDDEN_COMMANDS.map((c) => `Shell(${c})`),
         ...SECRETS2.flatMap((p) => [`Read(${p})`, `Write(${p})`]),
-        ...HOME_SECRETS2.map((d) => `Read(${path8.join(os6.homedir(), d)}/**)`),
+        ...[...HOME_SECRETS2.map((d) => path8.join(os6.homedir(), d)), ...appData].map((d) => `Read(${d}/**)`),
+        ...WORKER_HOME_SECRETS.flatMap((d) => [`Read(${path8.join(dir, d)}/**)`, `Write(${path8.join(dir, d)}/**)`]),
+        // Cursor runs a project's own hooks (.cursor/hooks.json, Claude Code's .claude/settings.json) and there is no
+        // switch to turn them off: no worker may plant any, for its follow-ups or for your own Cursor
+        "Write(**/.cursor/**)",
+        "Write(**/.claude/**)",
         ...web2 ? [] : ["WebFetch(*)"]
       ]
     },
@@ -1450,7 +1457,7 @@ function workerHome2(workspace, mode, web2) {
   const id2 = crypto4.createHash("sha256").update(path8.resolve(workspace)).digest("hex").slice(0, 16);
   const dir = path8.join(root, id2);
   fs9.mkdirSync(path8.join(dir, ".cursor"), { recursive: true });
-  writeIfChanged(path8.join(dir, ".cursor", "cli-config.json"), `${JSON.stringify(workerSettings2(mode, web2), null, 2)}
+  writeIfChanged(path8.join(dir, ".cursor", "cli-config.json"), `${JSON.stringify(workerSettings2(mode, web2, dir), null, 2)}
 `);
   if (process.platform === "darwin") {
     fs9.mkdirSync(path8.join(dir, "Library"), { recursive: true });
@@ -1527,6 +1534,10 @@ function doctor4({ models, hasFallback }) {
   );
   for (const m of models) checks.push({ level: "ok", message: m ? `Cursor model: ${m}` : "Cursor model: auto (Cursor picks; `cursor-agent models` lists yours)" });
   checks.push({ level: "ok", message: "Cursor applies your account's own User Rules from cursor.com to workers too (they may change the answer's language)" });
+  checks.push({
+    level: "warn",
+    message: "Cursor runs a project's own hooks (.cursor/hooks.json, and Claude Code's in .claude/settings.json) in worker runs too, with no switch to turn them off: use the Cursor worker on code whose hooks you would run yourself (not on a stranger's pull request)"
+  });
   if (!hasFallback) checks.push({ level: "warn", message: "no fallback workers configured for Cursor runs (its usage limits are per plan)" });
   return checks;
 }

@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import zlib from 'node:zlib';
 
 const argv = process.argv.slice(2);
 const only = argv.includes('--only') ? argv[argv.indexOf('--only') + 1] : undefined; // run the checks whose name has this
@@ -71,9 +72,11 @@ const run = (args) => {
   const answer = id ? pitroom(['show', id, '--full'], 60_000).out : r.out;
   return { ...r, id, meta, answer };
 };
+// a finished run's stream is kept compressed
 const events = (id) => {
+  const file = path.join(env.PITROOM_HOME, 'runs', id, 'events.jsonl');
   try {
-    return fs.readFileSync(path.join(env.PITROOM_HOME, 'runs', id, 'events.jsonl'), 'utf8');
+    return fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : zlib.gunzipSync(fs.readFileSync(`${file}.gz`)).toString('utf8');
   } catch {
     return '';
   }
@@ -150,6 +153,11 @@ check('git guard: a commit the worker tries does not happen', () => {
     copyHead = '';
   }
   const committed = !!copyHead && copyHead !== head;
+  // a worker that declined by itself (Pitroom's prompt says never to commit) left nothing for a guard to refuse
+  const tried = /"(command|CommandLine|cmd)"\s*:\s*"[^"]*git (add|commit)/.test(r.id ? events(r.id) : '');
+  if (!committed && git('rev-parse', 'HEAD') === head && by === 'nothing that said so' && !tried) {
+    return { ok: 'skip', detail: `no commit; the worker did not try one (it declined by itself), so no guard was tested; ${brief(r)}` };
+  }
   return { ok: !committed && git('rev-parse', 'HEAD') === head && by !== 'nothing that said so', detail: `${committed ? 'A COMMIT WAS MADE in the copy' : 'no commit'}; refused by ${by}; ${brief(r)}` };
 });
 

@@ -36,10 +36,16 @@ function cursor(args: string[], timeout = 30_000) {
 const HOMES_KEPT_DAYS = 14;
 const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.netrc'];
 /** The user's own folders of credentials: a read run's tools may read outside the project, never these. */
-const HOME_SECRETS = ['.ssh', '.aws', '.gnupg', '.docker', '.kube', '.config/gcloud', '.config/gh', '.gemini', '.cursor', '.claude', 'Library/Keychains'];
+const HOME_SECRETS = ['.ssh', '.aws', '.gnupg', '.docker', '.kube', '.config/gcloud', '.config/gh', '.config/cursor', '.gemini', '.cursor', '.claude', 'Library/Keychains'];
+/** In the worker's own home: the sign-in linked in, and Cursor's own settings and chats. */
+const WORKER_HOME_SECRETS = ['Library/Keychains', '.config/cursor', '.cursor'];
 
-/** The worker's cli-config.json: Cursor rewrites it as it runs, so it is written whole before every run. */
-export function workerSettings(mode: Mode, web: boolean) {
+/**
+ * The worker's cli-config.json: Cursor rewrites it as it runs, so it is written whole before every run. `dir` is the
+ * worker's home, whose sign-in links its read tool must not follow.
+ */
+export function workerSettings(mode: Mode, web: boolean, dir: string) {
+  const appData = process.platform === 'win32' ? [path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Cursor')] : [];
   return {
     version: 1,
     permissions: {
@@ -48,7 +54,12 @@ export function workerSettings(mode: Mode, web: boolean) {
       deny: [
         ...FORBIDDEN_COMMANDS.map((c) => `Shell(${c})`),
         ...SECRETS.flatMap((p) => [`Read(${p})`, `Write(${p})`]),
-        ...HOME_SECRETS.map((d) => `Read(${path.join(os.homedir(), d)}/**)`),
+        ...[...HOME_SECRETS.map((d) => path.join(os.homedir(), d)), ...appData].map((d) => `Read(${d}/**)`),
+        ...WORKER_HOME_SECRETS.flatMap((d) => [`Read(${path.join(dir, d)}/**)`, `Write(${path.join(dir, d)}/**)`]),
+        // Cursor runs a project's own hooks (.cursor/hooks.json, Claude Code's .claude/settings.json) and there is no
+        // switch to turn them off: no worker may plant any, for its follow-ups or for your own Cursor
+        'Write(**/.cursor/**)',
+        'Write(**/.claude/**)',
         ...(web ? [] : ['WebFetch(*)']),
       ],
     },
@@ -74,7 +85,7 @@ export function workerHome(workspace: string, mode: Mode, web: boolean): string 
   const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
   const dir = path.join(root, id);
   fs.mkdirSync(path.join(dir, '.cursor'), { recursive: true });
-  writeIfChanged(path.join(dir, '.cursor', 'cli-config.json'), `${JSON.stringify(workerSettings(mode, web), null, 2)}\n`);
+  writeIfChanged(path.join(dir, '.cursor', 'cli-config.json'), `${JSON.stringify(workerSettings(mode, web, dir), null, 2)}\n`);
   if (process.platform === 'darwin') {
     fs.mkdirSync(path.join(dir, 'Library'), { recursive: true });
     linkInto(path.join(dir, 'Library'), path.join(os.homedir(), 'Library', 'Keychains'));
@@ -171,6 +182,10 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
   );
   for (const m of models) checks.push({ level: 'ok', message: m ? `Cursor model: ${m}` : 'Cursor model: auto (Cursor picks; `cursor-agent models` lists yours)' });
   checks.push({ level: 'ok', message: "Cursor applies your account's own User Rules from cursor.com to workers too (they may change the answer's language)" });
+  checks.push({
+    level: 'warn',
+    message: "Cursor runs a project's own hooks (.cursor/hooks.json, and Claude Code's in .claude/settings.json) in worker runs too, with no switch to turn them off: use the Cursor worker on code whose hooks you would run yourself (not on a stranger's pull request)",
+  });
   if (!hasFallback) checks.push({ level: 'warn', message: 'no fallback workers configured for Cursor runs (its usage limits are per plan)' });
   return checks;
 }

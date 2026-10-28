@@ -30,6 +30,9 @@ test('cursor: a read is ask mode in its sandbox; a change runs commands but the 
   // the user's own credential folders, by absolute path: a read's tools may read outside the project, never these
   for (const d of ['.ssh', '.aws', '.config/gh', '.cursor', '.claude']) assert.ok(rc.permissions.deny.includes(`Read(${path.join(os.homedir(), d)}/**)`), d);
   assert.ok(rc.permissions.deny.includes('Shell(agent)'), "cursor-agent's other name");
+  // the sign-in linked into the worker's home, and no hooks planted for later runs
+  for (const d of ['Library/Keychains', '.config/cursor', '.cursor']) assert.ok(rc.permissions.deny.includes(`Read(${path.join(read.env.HOME, d)}/**)`), d);
+  for (const rule of ['Write(**/.cursor/**)', 'Write(**/.claude/**)']) assert.ok(rc.permissions.deny.includes(rule), rule);
   assert.equal(rc.attribution.attributeCommitsToAgent, false);
   if (process.platform === 'darwin') assert.equal(fs.readlinkSync(path.join(read.env.HOME, 'Library', 'Keychains')), path.join(os.homedir(), 'Library', 'Keychains'));
 
