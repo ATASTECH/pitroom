@@ -214,6 +214,22 @@ What is still open: Linux (the token file link, the secret-service keyring) and 
 
 Pitroom's own guards (the git guard, isolated copies, the read snapshot) would still apply, but not the CLI-level confinement the other workers have, so it would be the one worker that can write anywhere. `-W hermes` therefore says it is not supported yet. What would change that: a read-only (or per-tool) switch, file tools confined to the working directory, a fail-closed approval switch for headless runs, and a JSON event stream; or its Docker terminal backend with the project mounted, which would need Docker on the user's machine.
 
+## Cursor CLI: next
+
+[Cursor CLI](https://cursor.com/cli) (`cursor-agent`, also installed as `agent`; looked at 2026.05.09 on macOS) has the controls the other workers get from their own CLI, so it is the next worker, but it is not registered yet: [Adding a worker](#adding-a-worker) asks for fixtures recorded from real runs, and the CLI here was not signed in. `-W cursor` says it is not supported yet, and every worker is denied `cursor-agent` as a shell command (no recursive delegation).
+
+What its help shows, and how each piece would map:
+
+- **`-p` with `--output-format stream-json`**: one prompt, an event stream, exit. `-p` alone "has access to all tools, including write and shell".
+- **Read runs**: `--mode ask` (or `plan`), read-only by its help. Until a recorded run shows that it holds, Pitroom would give it `readOnly: 'snapshot'`, as for Antigravity: a read run reads a snapshot of its own, never the project.
+- **Changes**: `--sandbox enabled` (shell commands in its sandbox), its permission rules (`Shell(…)`, `Read(…)`, `Write(…)` allow and deny lists in `cli-config.json`, which would need a home of its own per workspace if no variable moves it) for the forbidden commands and secret files, and never `--force`/`--yolo`. `--trust` is needed for a headless run in a new folder (each isolated copy is one); `--approve-mcps` stays off.
+- **`--continue`**: `--resume <chatId>` with the id from the stream, never `--continue` (its latest session, unsafe beside parallel workers).
+- **Model**: `--model`; `cursor-agent models` lists the account's.
+
+To add it: `cursor-agent login`, then record a read, a follow-up, an isolated edit, a refused command, an unknown model and a missing sign-in into `test/fixtures/cursor/`, write the adapter from what they show, and run `node scripts/check-worker.mjs cursor`.
+
+Goose, Crush and Aider were not looked at: none is installed on the machine this was written on.
+
 ## Adding a worker
 
 1. Create `src/backends/<id>/index.ts` exporting a `Backend`; keep CLI knowledge

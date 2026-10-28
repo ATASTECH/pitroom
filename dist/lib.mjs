@@ -229,7 +229,8 @@ var FORBIDDEN_COMMANDS = [
   "qwen",
   "kilo",
   "kilocode",
-  "agy"
+  "agy",
+  "cursor-agent"
 ];
 
 // src/backends/exec.ts
@@ -1764,6 +1765,7 @@ var FORBIDDEN_BASH = [
   "kilo *",
   "kilocode*",
   "agy *",
+  "cursor-agent*",
   "pitroom *",
   "*pitroom*"
 ];
@@ -2315,7 +2317,7 @@ var qwen = {
 // src/backends/index.ts
 var REGISTRY = new Map([opencode, codex, claude, gemini, qwen, kiloBackend, antigravity].map((b) => [b.id, b]));
 var DEFAULT_BACKEND = opencode.id;
-var PLANNED = ["hermes"];
+var PLANNED = ["hermes", "cursor"];
 var backendIds = () => [...REGISTRY.keys()];
 var allBackends = () => [...REGISTRY.values()];
 var isBackendId = (id2) => REGISTRY.has(id2) || PLANNED.includes(id2);

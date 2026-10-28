@@ -16,7 +16,8 @@ export const DEFAULT_BACKEND = opencode.id;
 
 /** Recognised so users get a clear message instead of a confusing model-not-found. */
 // Hermes Agent: no read-only mode, file tools not confined to the project, auto-approved shell (docs/backends.md).
-const PLANNED: string[] = ['hermes'];
+// Cursor CLI: has the controls; waits for fixtures recorded from a signed-in run (docs/backends.md).
+const PLANNED: string[] = ['hermes', 'cursor'];
 
 export const backendIds = (): string[] => [...REGISTRY.keys()];
 
