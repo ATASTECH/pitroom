@@ -593,7 +593,7 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 <summary>All commands and exit codes</summary>
 
 ```text
-pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD [--verify-fix N]] [--link a,b] [--bg] "task"
+pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD [--verify-fix N]] [--max-cost USD] [--link a,b] [--bg] "task"
 pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
 pitroom crew [-i] [-g NAME] --over src/a,src/b "task about {scope}"   (one worker per part; "src/*/": one per folder)
@@ -779,6 +779,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 - `autoFallback`: with no `fallback` of yours, fall back to the other workers your config already names (its `tiers`, its `models` and its `worker`), the ones installed here, cheapest first by `costs` (those without a cost after, in the order named), at most four; never the worker itself at another effort level (default `false`; `PITROOM_AUTO_FALLBACK=1`). Pitroom still picks no model you did not name: it only reuses your own choices. Your `fallback` list, when you have one, and `--no-fallback` win; `pitroom doctor` says when the chain came from it.
 - `countRateLimits`: whether runs that failed on a rate limit or quota count in `pitroom history stats` and the dashboard's Stats (default `false`: they are left out of the run counts, success rates, times and tokens and shown apart as rate-limited, since they say nothing about the worker's work; `true` counts them as not ok).
 - `verifyFix`: how many times a failed `--verify` check of a change goes back to its worker, with the check's output, to fix it (default `1`, at most `3`, `0` = off; `PITROOM_VERIFY_FIX`; `--verify-fix N` per run). See [Modes](#modes).
+- `maxCost`: what one run's workers may cost, in USD (as their CLIs report it, or estimated from `workerPrices` and the price catalog; a worker a limit stopped and fix rounds included). The cost is checked every second while the worker runs; at the cap the worker is stopped, no fallback takes over, and the run fails saying so, with what it changed until then in its changes. A worker whose cost cannot be told (no reported cost, no price) is not stopped, and the run says the cap could not be checked. Default: none (`PITROOM_MAX_COST`; `--max-cost USD` per run).
 
 </details>
 

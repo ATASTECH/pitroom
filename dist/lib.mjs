@@ -2660,7 +2660,8 @@ var SCHEMA = {
   budgetDaily: "number",
   rankWorkers: "boolean",
   autoFallback: "boolean",
-  verifyFix: "number"
+  verifyFix: "number",
+  maxCost: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path15.resolve(process.env.PITROOM_CONFIG);
@@ -2722,6 +2723,10 @@ var amount = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : void 0;
 };
+var positiveAmount = (v) => {
+  const n = amount(v);
+  return n === void 0 || n === 0 ? void 0 : n;
+};
 var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
@@ -2777,7 +2782,8 @@ function effective(flags = {}) {
     rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
-    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1)
+    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
+    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0)
   };
 }
 
@@ -3637,6 +3643,7 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 // src/core/process.ts
 import { spawn } from "node:child_process";
 import fs22 from "node:fs";
+var CAP_CHECK_MS = 1e3;
 async function spawnWorker(inv, opts) {
   const out = fs22.openSync(opts.stdoutFile, "w");
   const err = fs22.openSync(opts.stderrFile, "w");
@@ -3655,11 +3662,19 @@ async function spawnWorker(inv, opts) {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   let killer;
+  const end = () => {
+    child.kill("SIGTERM");
+    killer ??= setTimeout(() => child.kill("SIGKILL"), 1e4);
+  };
   const timer = setTimeout(() => {
     res.timedOut = true;
-    child.kill("SIGTERM");
-    killer = setTimeout(() => child.kill("SIGKILL"), 1e4);
+    end();
   }, opts.timeoutSec * 1e3);
+  const capWatch = opts.overCap ? setInterval(() => {
+    if (res.capped || !opts.overCap()) return;
+    res.capped = true;
+    end();
+  }, CAP_CHECK_MS) : void 0;
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
       res.spawnError = e.code === "ENOENT" ? fs22.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
@@ -3668,6 +3683,7 @@ async function spawnWorker(inv, opts) {
     child.on("close", (c) => resolve2(c));
   });
   clearTimeout(timer);
+  if (capWatch) clearInterval(capWatch);
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);

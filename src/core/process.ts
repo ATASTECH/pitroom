@@ -14,11 +14,16 @@ export interface ProcessResult {
   stopped: boolean;
   /** Set when the executable could not be started at all. */
   spawnError?: string;
+  /** Stopped because `overCap` said the run reached its cost cap (--max-cost). */
+  capped?: boolean;
 }
+
+/** How often a run's cost is checked against its cap while the worker runs. */
+const CAP_CHECK_MS = 1000;
 
 export async function spawnWorker(
   inv: Invocation,
-  opts: { cwd: string; stdoutFile: string; stderrFile: string; timeoutSec: number },
+  opts: { cwd: string; stdoutFile: string; stderrFile: string; timeoutSec: number; overCap?: () => boolean },
 ): Promise<ProcessResult> {
   const out = fs.openSync(opts.stdoutFile, 'w');
   const err = fs.openSync(opts.stderrFile, 'w');
@@ -37,11 +42,21 @@ export async function spawnWorker(
   process.once('SIGINT', stop);
   process.once('SIGTERM', stop);
   let killer: NodeJS.Timeout | undefined;
+  const end = () => {
+    child.kill('SIGTERM');
+    killer ??= setTimeout(() => child.kill('SIGKILL'), 10_000);
+  };
   const timer = setTimeout(() => {
     res.timedOut = true;
-    child.kill('SIGTERM');
-    killer = setTimeout(() => child.kill('SIGKILL'), 10_000);
+    end();
   }, opts.timeoutSec * 1000);
+  const capWatch = opts.overCap
+    ? setInterval(() => {
+        if (res.capped || !opts.overCap!()) return;
+        res.capped = true;
+        end();
+      }, CAP_CHECK_MS)
+    : undefined;
   res.code = await new Promise<number | null>((resolve) => {
     child.on('error', (e) => {
       // ENOENT is also what spawn says when the working directory is missing: say which.
@@ -53,6 +68,7 @@ export async function spawnWorker(
     child.on('close', (c) => resolve(c));
   });
   clearTimeout(timer);
+  if (capWatch) clearInterval(capWatch);
   if (killer) clearTimeout(killer);
   process.off('SIGINT', stop);
   process.off('SIGTERM', stop);

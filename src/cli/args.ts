@@ -1,7 +1,7 @@
 // Argument parsing and the pieces every command shares.
 import fs from 'node:fs';
 import type { Mode } from '../backends/types.js';
-import { MAX_VERIFY_FIX, effective } from '../core/config.js';
+import { MAX_VERIFY_FIX, effective, positiveAmount } from '../core/config.js';
 import { UserError } from '../core/errors.js';
 import type { RunOptions } from '../core/run.js';
 import { type RunMeta, resolveRun } from '../core/store.js';
@@ -14,7 +14,7 @@ export interface Parsed {
 const VALUE_FLAGS: Record<string, string> = {
   '-d': 'dir', '--dir': 'dir', '-f': 'file', '--file': 'file', '-m': 'model', '--model': 'model',
   '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '--effort': 'effort', '-g': 'group', '--group': 'group',
-  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--verify-fix': 'verify-fix', '--link': 'link', '-c': 'continue',
+  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--verify-fix': 'verify-fix', '--max-cost': 'max-cost', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
   '--plan': 'plan', '--step': 'step', '--fallback': 'fallback', '--client': 'client', '--over': 'over',
@@ -114,6 +114,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
     timeoutSec: parseDuration(effective({ timeout: flag(p, 'timeout') }).timeout.value),
     verify: flag(p, 'verify'),
     verifyFix: verifyFixFlag(p),
+    maxCost: maxCostFlag(p),
     continueFrom: cont ? resolveRun(cont) : undefined,
     allowNonGit: has(p, 'allow-non-git'),
     web: has(p, 'web') || effective().web.value,
@@ -139,6 +140,15 @@ function verifyFixFlag(p: Parsed): number | undefined {
   if (!flag(p, 'verify')) throw new UserError('--verify-fix goes with --verify CMD: the check whose failure goes back to the worker');
   if (!/^\d+$/.test(v) || Number(v) > MAX_VERIFY_FIX) throw new UserError(`--verify-fix takes a number of rounds from 0 to ${MAX_VERIFY_FIX}, not "${v}"`);
   return Number(v);
+}
+
+/** --max-cost USD: what one run's workers may cost, more than 0 (a leading $ is allowed). */
+function maxCostFlag(p: Parsed): number | undefined {
+  const v = flag(p, 'max-cost');
+  if (v === undefined) return undefined;
+  const n = positiveAmount(v.trim().replace(/^\$/, ''));
+  if (n === undefined) throw new UserError(`--max-cost takes an amount in USD above 0, e.g. 0.50, not "${v}"`);
+  return n;
 }
 
 /** --effort LEVEL: a word such as low, medium, high, xhigh, max; the worker CLI decides which it accepts. */

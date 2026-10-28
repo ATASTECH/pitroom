@@ -25,7 +25,7 @@ import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
-import { addUsage, costAt, estimateTokens, record, savedUsd, workerPrice } from './receipt.js';
+import { addUsage, costAt, estimateTokens, record, savedUsd, usd, workerPrice } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
@@ -53,6 +53,8 @@ export interface RunOptions {
   verify?: string;
   /** `--verify-fix N`: fix rounds a failed check of a change gets (default: the config's `verifyFix`). */
   verifyFix?: number;
+  /** `--max-cost USD`: what the run's workers may cost (default: the config's `maxCost`). */
+  maxCost?: number;
   continueFrom?: string;
   allowNonGit: boolean;
   web: boolean;
@@ -204,6 +206,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     verify: o.verify,
     // a read run's worker cannot change what the check found
     verifyFix: o.verify && mode !== 'read' ? (o.verifyFix ?? effective().verifyFix.value) || undefined : undefined,
+    maxCost: o.maxCost ?? effective().maxCost.value,
     web: o.web || !!parent?.web,
     state: 'queued',
     startedAt: new Date().toISOString(),
@@ -330,7 +333,8 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
       const before = own ? (place.before ?? changedIn(meta.snapshot!.dir)) : [];
       result = await attempt(meta, backend, target);
       if (own) strayWrites(meta, backend, before);
-      if (result.timedOut || result.stopped || result.spawnError) break;
+      // the cap is the run's: no fallback spends past it
+      if (result.timedOut || result.stopped || result.spawnError || result.capped) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
       lastFailure = why;
@@ -582,7 +586,29 @@ function attempt(meta: RunMeta, backend: Backend, target: Target, prompt?: strin
     stdoutFile: runFile(meta.id, 'events.jsonl'),
     stderrFile: runFile(meta.id, 'stderr.log'),
     timeoutSec: meta.timeoutSec,
+    overCap: meta.maxCost === undefined ? undefined : () => (costSoFar(meta, backend, target) ?? 0) >= meta.maxCost!,
   });
+}
+
+/**
+ * What the run's workers have cost so far, USD: the turns before (a worker a limit stopped, earlier fix rounds) and
+ * the current turn's stream, as the CLI reports it or estimated from a price. Undefined when the current turn's cost
+ * cannot be told (a CLI that reports none, and no price for its model).
+ */
+function costSoFar(meta: RunMeta, backend: Backend, target: Target): number | undefined {
+  let now: number | undefined;
+  try {
+    const run = backend.parse(read(runFile(meta.id, 'events.jsonl')));
+    now = run.usage.cost;
+    if (now === undefined) {
+      const price = workerPrice(target.backend, run.model, target.model);
+      if (price) now = costAt(run.usage, price);
+    }
+  } catch {
+    return undefined; // a stream being written
+  }
+  if (now === undefined) return undefined;
+  return now + (meta.priorUsage ? (meta.priorUsage.cost ?? meta.priorUsage.costEstimate ?? 0) : 0);
 }
 
 const read = (f: string) => (fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '');
@@ -641,7 +667,7 @@ async function fixUntilVerified(meta: RunMeta, result: ProcessResult): Promise<P
   if (!meta.verify || !meta.verifyFix || !target) return result;
   const backend = getBackend(target.backend);
   for (let round = 1; ; round++) {
-    if (result.timedOut || result.stopped || meta.error || failureOf(meta, backend, result)) return result;
+    if (result.timedOut || result.stopped || result.capped || meta.error || failureOf(meta, backend, result)) return result;
     const v = runVerify(meta);
     meta.verifyResult = v;
     writeMeta(meta);
@@ -650,7 +676,14 @@ async function fixUntilVerified(meta: RunMeta, result: ProcessResult): Promise<P
     if (fs.existsSync(runFile(meta.id, STOP_FILE))) return result;
     const done = backend.parse(read(runFile(meta.id, 'events.jsonl')));
     meta.sessionId = done.sessionId ?? meta.sessionId;
-    const why = !meta.sessionId ? 'its session is not known' :!inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : undefined;
+    const spent = meta.maxCost !== undefined ? costSoFar(meta, backend, target) : undefined;
+    const why = !meta.sessionId
+      ? 'its session is not known'
+      : !inBudget(target)
+        ? 'the daily budget ("budgetDaily") is spent'
+        : spent !== undefined && spent >= meta.maxCost!
+          ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost!)})`
+          : undefined;
     if (why) {
       meta.warnings.push(`the failed check was not sent back to the worker: ${why}`);
       return result;
@@ -667,13 +700,17 @@ async function fixUntilVerified(meta: RunMeta, result: ProcessResult): Promise<P
     writeMeta(meta);
     result = await attempt(meta, backend, target, prompt);
     if (result.stopped || result.spawnError) return result;
-    const f = result.timedOut ? { kind: 'other' as const, message: `it ran out of time (${meta.timeoutSec}s)` } : failureOf(meta, backend, result);
+    const f = result.timedOut
+      ? { kind: 'other' as const, message: `it ran out of time (${meta.timeoutSec}s)` }
+      : result.capped
+        ? { kind: 'other' as const, message: `the run reached its cost cap (${usd(meta.maxCost!)}) and the worker was stopped` }
+        : failureOf(meta, backend, result);
     if (f) {
       // the work before this round stands: a warning, not a failed run (finalize leaves it so)
       if (f.kind === 'rate-limited') recordCooldown(cooldownKey(target, backend), describeTarget(target), f.message);
       meta.verifyRounds.at(-1)!.fixFailed = f.message;
       meta.warnings.push(`fix ${round} after the failed check did not end well (${f.message}); the files hold what it changed before it stopped`);
-      return { ...result, timedOut: false };
+      return { ...result, timedOut: false, capped: false };
     }
   }
 }
@@ -734,6 +771,14 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   }
   for (const w of backend.warnings?.(run, read(runFile(meta.id, 'stderr.log'))) ?? []) {
     if (!meta.warnings.includes(w)) meta.warnings.push(w);
+  }
+  if (meta.maxCost !== undefined && !res.capped && run.usage.steps && costSoFar(meta, backend, ran) === undefined) {
+    meta.warnings.push(`the cost cap (${usd(meta.maxCost)}) could not be checked: ${backend.name} reports no cost and its model has no price ("workerPrices", "priceFeed")`);
+  }
+  if (res.capped && !meta.error) {
+    meta.capped = true;
+    const spent = costSoFar(meta, backend, ran);
+    meta.error = `stopped at the run's cost cap: ${spent === undefined ? 'its' : `${usd(spent)} of the`} ${usd(meta.maxCost!)} allowed (--max-cost, "maxCost")${meta.mode === 'read' ? '' : '; what it changed until then is in the changes'}`;
   }
   // a fix round that did not end well is a warning (fixUntilVerified): the work before it stands
   if (!res.timedOut && !res.stopped && !meta.error && !meta.verifyRounds?.at(-1)?.fixFailed) {

@@ -2382,7 +2382,8 @@ var SCHEMA = {
   budgetDaily: "number",
   rankWorkers: "boolean",
   autoFallback: "boolean",
-  verifyFix: "number"
+  verifyFix: "number",
+  maxCost: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path12.resolve(process.env.PITROOM_CONFIG);
@@ -2444,6 +2445,10 @@ var amount = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : void 0;
 };
+var positiveAmount = (v) => {
+  const n = amount(v);
+  return n === void 0 || n === 0 ? void 0 : n;
+};
 var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
@@ -2499,7 +2504,8 @@ function effective(flags = {}) {
     rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
-    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1)
+    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
+    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0)
   };
 }
 
@@ -2521,6 +2527,7 @@ var VALUE_FLAGS = {
   "--timeout": "timeout",
   "--verify": "verify",
   "--verify-fix": "verify-fix",
+  "--max-cost": "max-cost",
   "--link": "link",
   "-c": "continue",
   "--continue": "continue",
@@ -2663,6 +2670,7 @@ function runOptions(p, task) {
     timeoutSec: parseDuration(effective({ timeout: flag(p, "timeout") }).timeout.value),
     verify: flag(p, "verify"),
     verifyFix: verifyFixFlag(p),
+    maxCost: maxCostFlag(p),
     continueFrom: cont ? resolveRun(cont) : void 0,
     allowNonGit: has(p, "allow-non-git"),
     web: has(p, "web") || effective().web.value,
@@ -2684,6 +2692,13 @@ function verifyFixFlag(p) {
   if (!flag(p, "verify")) throw new UserError("--verify-fix goes with --verify CMD: the check whose failure goes back to the worker");
   if (!/^\d+$/.test(v) || Number(v) > MAX_VERIFY_FIX) throw new UserError(`--verify-fix takes a number of rounds from 0 to ${MAX_VERIFY_FIX}, not "${v}"`);
   return Number(v);
+}
+function maxCostFlag(p) {
+  const v = flag(p, "max-cost");
+  if (v === void 0) return void 0;
+  const n = positiveAmount(v.trim().replace(/^\$/, ""));
+  if (n === void 0) throw new UserError(`--max-cost takes an amount in USD above 0, e.g. 0.50, not "${v}"`);
+  return n;
 }
 function effortFlag(p) {
   const v = flag(p, "effort");
@@ -3248,6 +3263,7 @@ function shimReady() {
 }
 
 // src/core/process.ts
+var CAP_CHECK_MS = 1e3;
 async function spawnWorker(inv, opts) {
   const out = fs17.openSync(opts.stdoutFile, "w");
   const err = fs17.openSync(opts.stderrFile, "w");
@@ -3266,11 +3282,19 @@ async function spawnWorker(inv, opts) {
   process.once("SIGINT", stop);
   process.once("SIGTERM", stop);
   let killer;
+  const end = () => {
+    child.kill("SIGTERM");
+    killer ??= setTimeout(() => child.kill("SIGKILL"), 1e4);
+  };
   const timer2 = setTimeout(() => {
     res.timedOut = true;
-    child.kill("SIGTERM");
-    killer = setTimeout(() => child.kill("SIGKILL"), 1e4);
+    end();
   }, opts.timeoutSec * 1e3);
+  const capWatch = opts.overCap ? setInterval(() => {
+    if (res.capped || !opts.overCap()) return;
+    res.capped = true;
+    end();
+  }, CAP_CHECK_MS) : void 0;
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
       res.spawnError = e.code === "ENOENT" ? fs17.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
@@ -3279,6 +3303,7 @@ async function spawnWorker(inv, opts) {
     child.on("close", (c) => resolve2(c));
   });
   clearTimeout(timer2);
+  if (capWatch) clearInterval(capWatch);
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
@@ -5601,6 +5626,7 @@ function prepareRun(o) {
     verify: o.verify,
     // a read run's worker cannot change what the check found
     verifyFix: o.verify && mode !== "read" ? (o.verifyFix ?? effective().verifyFix.value) || void 0 : void 0,
+    maxCost: o.maxCost ?? effective().maxCost.value,
     web: o.web || !!parent?.web,
     state: "queued",
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -5715,7 +5741,7 @@ async function execute(meta) {
       const before = own ? place2.before ?? changedIn(meta.snapshot.dir) : [];
       result = await attempt(meta, backend, target);
       if (own) strayWrites(meta, backend, before);
-      if (result.timedOut || result.stopped || result.spawnError) break;
+      if (result.timedOut || result.stopped || result.spawnError || result.capped) break;
       const why = retryableFailure(meta, backend, result);
       if (!why) break;
       lastFailure = why;
@@ -5921,8 +5947,24 @@ ${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
     stdoutFile: runFile(meta.id, "events.jsonl"),
     stderrFile: runFile(meta.id, "stderr.log"),
-    timeoutSec: meta.timeoutSec
+    timeoutSec: meta.timeoutSec,
+    overCap: meta.maxCost === void 0 ? void 0 : () => (costSoFar(meta, backend, target) ?? 0) >= meta.maxCost
   });
+}
+function costSoFar(meta, backend, target) {
+  let now;
+  try {
+    const run2 = backend.parse(read2(runFile(meta.id, "events.jsonl")));
+    now = run2.usage.cost;
+    if (now === void 0) {
+      const price = workerPrice(target.backend, run2.model, target.model);
+      if (price) now = costAt(run2.usage, price);
+    }
+  } catch {
+    return void 0;
+  }
+  if (now === void 0) return void 0;
+  return now + (meta.priorUsage ? meta.priorUsage.cost ?? meta.priorUsage.costEstimate ?? 0 : 0);
 }
 var read2 = (f) => fs32.existsSync(f) ? fs32.readFileSync(f, "utf8") : "";
 function retryableFailure(meta, backend, res) {
@@ -5957,7 +5999,7 @@ async function fixUntilVerified(meta, result) {
   if (!meta.verify || !meta.verifyFix || !target) return result;
   const backend = getBackend(target.backend);
   for (let round = 1; ; round++) {
-    if (result.timedOut || result.stopped || meta.error || failureOf(meta, backend, result)) return result;
+    if (result.timedOut || result.stopped || result.capped || meta.error || failureOf(meta, backend, result)) return result;
     const v = runVerify(meta);
     meta.verifyResult = v;
     writeMeta(meta);
@@ -5965,7 +6007,8 @@ async function fixUntilVerified(meta, result) {
     if (fs32.existsSync(runFile(meta.id, STOP_FILE))) return result;
     const done = backend.parse(read2(runFile(meta.id, "events.jsonl")));
     meta.sessionId = done.sessionId ?? meta.sessionId;
-    const why = !meta.sessionId ? "its session is not known" : !inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : void 0;
+    const spent = meta.maxCost !== void 0 ? costSoFar(meta, backend, target) : void 0;
+    const why = !meta.sessionId ? "its session is not known" : !inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : spent !== void 0 && spent >= meta.maxCost ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost)})` : void 0;
     if (why) {
       meta.warnings.push(`the failed check was not sent back to the worker: ${why}`);
       return result;
@@ -5982,12 +6025,12 @@ async function fixUntilVerified(meta, result) {
     writeMeta(meta);
     result = await attempt(meta, backend, target, prompt);
     if (result.stopped || result.spawnError) return result;
-    const f = result.timedOut ? { kind: "other", message: `it ran out of time (${meta.timeoutSec}s)` } : failureOf(meta, backend, result);
+    const f = result.timedOut ? { kind: "other", message: `it ran out of time (${meta.timeoutSec}s)` } : result.capped ? { kind: "other", message: `the run reached its cost cap (${usd(meta.maxCost)}) and the worker was stopped` } : failureOf(meta, backend, result);
     if (f) {
       if (f.kind === "rate-limited") recordCooldown(cooldownKey(target, backend), describeTarget(target), f.message);
       meta.verifyRounds.at(-1).fixFailed = f.message;
       meta.warnings.push(`fix ${round} after the failed check did not end well (${f.message}); the files hold what it changed before it stopped`);
-      return { ...result, timedOut: false };
+      return { ...result, timedOut: false, capped: false };
     }
   }
 }
@@ -6039,6 +6082,14 @@ function finalize(meta, res) {
   }
   for (const w of backend.warnings?.(run2, read2(runFile(meta.id, "stderr.log"))) ?? []) {
     if (!meta.warnings.includes(w)) meta.warnings.push(w);
+  }
+  if (meta.maxCost !== void 0 && !res.capped && run2.usage.steps && costSoFar(meta, backend, ran) === void 0) {
+    meta.warnings.push(`the cost cap (${usd(meta.maxCost)}) could not be checked: ${backend.name} reports no cost and its model has no price ("workerPrices", "priceFeed")`);
+  }
+  if (res.capped && !meta.error) {
+    meta.capped = true;
+    const spent = costSoFar(meta, backend, ran);
+    meta.error = `stopped at the run's cost cap: ${spent === void 0 ? "its" : `${usd(spent)} of the`} ${usd(meta.maxCost)} allowed (--max-cost, "maxCost")${meta.mode === "read" ? "" : "; what it changed until then is in the changes"}`;
   }
   if (!res.timedOut && !res.stopped && !meta.error && !meta.verifyRounds?.at(-1)?.fixFailed) {
     const f = backend.failure(run2, read2(runFile(meta.id, "stderr.log")), res.code);
@@ -9619,6 +9670,7 @@ Run options
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
       --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
                         (0 to 3; default: config "verifyFix", 1)
+      --max-cost USD    stop the worker when the run has cost this much (reported or estimated; config "maxCost")
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
   -c, --continue RUN    follow up in the same worker session (and the same isolated copy)
       --bg              start in background, print the run id, return immediately
@@ -9638,10 +9690,10 @@ Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, P
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
      PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
-     PITROOM_VERIFY_FIX, PITROOM_<WORKER>_BIN
+     PITROOM_VERIFY_FIX, PITROOM_MAX_COST, PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
         countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
-        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix)`;
+        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix, maxCost)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,
