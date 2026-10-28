@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/cli.ts
-import fs44 from "node:fs";
+import fs45 from "node:fs";
 
 // src/core/errors.ts
 var UserError = class extends Error {
@@ -2530,7 +2530,8 @@ var VALUE_FLAGS = {
   "--plan": "plan",
   "--step": "step",
   "--fallback": "fallback",
-  "--client": "client"
+  "--client": "client",
+  "--over": "over"
 };
 var BOOL_FLAGS = {
   "-r": "read",
@@ -6410,7 +6411,7 @@ function getPrompt(name, given) {
 
 // src/cli/mcp-tools.ts
 var WORKER_PROPS = {
-  worker: { type: "string", description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku". Default: configured.' },
+  worker: { type: "string", description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku".' },
   model: { type: "string", description: "Model for that worker." },
   tier: { type: "string", description: "cheap, standard or capable (from the config)." },
   effort: { type: "string", description: "low, medium, high, xhigh." },
@@ -6421,7 +6422,7 @@ var WORKER_PROPS = {
   web: { type: "boolean", description: "Allow web tools." },
   group: { type: "string", description: "Group name for related runs." }
 };
-var WAIT_PROP = { waitSeconds: { type: "number", description: `Wait this long before returning "still running" (default ${DEFAULT_WAIT}, max ${MAX_WAIT}).` } };
+var WAIT_PROP = { waitSeconds: { type: "number", description: `Seconds before returning "still running" (default ${DEFAULT_WAIT}, max ${MAX_WAIT}).` } };
 var RUN_ID2 = { type: "string", description: 'Run id, or "last".' };
 var READ_ONLY = { readOnlyHint: true, openWorldHint: false };
 var TOPICS = {
@@ -6473,12 +6474,13 @@ var TOOLS2 = [
   {
     name: "pitroom_run",
     title: "Run a worker",
-    description: 'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. The using-pitroom skill (or prompt) says when and how to delegate. Cancelling the call stops the run.',
+    description: 'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). "tasks" or "scopes" run workers in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. The using-pitroom skill (or prompt) says when and how to delegate. Cancelling the call stops the run.',
     inputSchema: {
       type: "object",
       properties: {
         task: { type: "string", description: "What to do, with the context the worker needs." },
-        tasks: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_TASKS, description: "Or several independent tasks, one worker each." },
+        tasks: { type: "array", items: { type: "string" }, minItems: 1, maxItems: MAX_TASKS, description: "Or independent tasks, one worker each." },
+        scopes: { type: "array", items: { type: "string" }, description: 'Or "task" per part ({scope}): paths that do not overlap, or "src/*/".' },
         mode: { type: "string", enum: ["read", "isolate", "write"] },
         continue: { type: "string", description: "A finished run to follow up in the same worker session." },
         inPlace: { type: "boolean", description: "Read: read the directory itself, not a snapshot without secret-looking files." },
@@ -6502,6 +6504,13 @@ var TOOLS2 = [
         if (bool(a, "fresh")) flags.push("--fresh");
       }
       const follow = str2(a, "continue");
+      const scopes = strs(a, "scopes").filter((t) => t.trim());
+      if (scopes.length) {
+        if (!task) throw new ToolError('"scopes" splits one "task" over parts of the project: give "task", not "tasks"');
+        if (mode === "write") throw new ToolError('parallel workers never write in place: use mode "isolate" (each gets its own copy)');
+        if (follow) throw new ToolError('"continue" follows up one run: drop "scopes"');
+        return startCrew([...flags, ...scopes.flatMap((sc) => ["--over", sc]), ...workerFlags(a)], [task], waitSeconds(a), ctx);
+      }
       if (tasks.length) {
         if (tasks.length > MAX_TASKS) throw new ToolError(`at most ${MAX_TASKS} tasks at once: start the rest when these are done`);
         if (mode === "write") throw new ToolError('parallel workers never write in place: use mode "isolate" (each gets its own copy)');
@@ -6904,7 +6913,7 @@ import { fileURLToPath as fileURLToPath4 } from "node:url";
 // src/core/file-diff.ts
 var PREVIEW_LINES = 300;
 function gitPath(value, prefix = true) {
-  let path39 = value;
+  let path40 = value;
   if (value.startsWith('"') && value.endsWith('"')) {
     const bytes = [];
     const escapes = { t: "	", n: "\n", r: "\r", b: "\b", f: "\f", v: "\v" };
@@ -6912,9 +6921,9 @@ function gitPath(value, prefix = true) {
       if (match[1] && /^[0-7]+$/.test(match[1])) bytes.push(parseInt(match[1], 8));
       else bytes.push(...new TextEncoder().encode(match[2] ?? escapes[match[1]] ?? match[1]));
     }
-    path39 = new TextDecoder().decode(new Uint8Array(bytes));
+    path40 = new TextDecoder().decode(new Uint8Array(bytes));
   }
-  return prefix ? path39.replace(/^[ab]\//, "") : path39;
+  return prefix ? path40.replace(/^[ab]\//, "") : path40;
 }
 function headerPath(header) {
   const quoted = header.match(/^diff --git ("(?:[^"\\]|\\.)*"|\S+) ("(?:[^"\\]|\\.)*"|\S+)$/);
@@ -7636,8 +7645,8 @@ async function serveMcpHttp(opts) {
 
 // src/cli/commands.ts
 import { spawnSync as spawnSync13 } from "node:child_process";
-import fs42 from "node:fs";
-import path37 from "node:path";
+import fs43 from "node:fs";
+import path38 from "node:path";
 import { fileURLToPath as fileURLToPath5 } from "node:url";
 
 // src/core/init.ts
@@ -8077,14 +8086,61 @@ function ago(iso, now = Date.now()) {
 }
 var cachedNote = (m) => `pitroom \u27F2 cached answer \xB7 the same question on the same code as run ${m.id} (${ago(m.endedAt ?? m.startedAt)}) \xB7 no worker ran \xB7 --fresh asks one again`;
 
+// src/core/scopes.ts
+import fs40 from "node:fs";
+import path36 from "node:path";
+var clean = (p) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "") || ".";
+function expandScopes(patterns, dir) {
+  const root = path36.resolve(dir);
+  const scopes = [];
+  for (const raw of patterns.flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean)) {
+    const foldersOnly = /[\\/]$/.test(raw);
+    const p = clean(raw);
+    const base2 = path36.posix.basename(p);
+    if (/[*?]/.test(path36.posix.dirname(p))) throw new UserError(`--over ${raw}: only the last part of a path can have * or ?`);
+    if (!/[*?]/.test(base2)) {
+      const abs = path36.resolve(root, p);
+      if (!fs40.existsSync(abs)) throw new UserError(`--over ${raw}: no such file or folder in ${root}`);
+      scopes.push(inside3(root, abs, raw));
+      continue;
+    }
+    const parent = path36.resolve(root, path36.posix.dirname(p));
+    const re = new RegExp(`^${base2.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+    const hits = (fs40.existsSync(parent) ? fs40.readdirSync(parent, { withFileTypes: true }) : []).filter((e) => !e.name.startsWith(".") && re.test(e.name) && (!foldersOnly || e.isDirectory())).map((e) => inside3(root, path36.join(parent, e.name), raw)).sort();
+    if (!hits.length) throw new UserError(`--over ${raw}: matches nothing in ${root}`);
+    scopes.push(...hits);
+  }
+  if (!scopes.length) throw new UserError('--over needs the parts to split over, e.g. --over src/auth,src/billing or --over "src/*/"');
+  for (const a of scopes) {
+    for (const b of scopes) {
+      if (a === b && scopes.indexOf(a) !== scopes.lastIndexOf(a)) throw new UserError(`--over names ${a} twice`);
+      if (a !== b && (a === "." || b.startsWith(`${a}/`))) {
+        throw new UserError(`--over: ${b} is inside ${a}, so two workers would read the same files; name parts that do not overlap`);
+      }
+    }
+  }
+  return scopes;
+}
+function inside3(root, abs, raw) {
+  const rel = path36.relative(root, abs);
+  if (rel === ".." || rel.startsWith(`..${path36.sep}`) || path36.isAbsolute(rel)) throw new UserError(`--over ${raw} is outside ${root}`);
+  return clean(rel);
+}
+function scopedTask(template, scope, mode) {
+  const keep = mode === "read" ? "Read only inside it: other workers cover the rest of the project, in parallel." : "Change only files inside it (read what you need elsewhere): other workers change the rest, in parallel.";
+  return `${template.split("{scope}").join(scope)}
+
+Your part of the project: ${scope}. ${keep}`;
+}
+
 // src/core/eval.ts
 import { spawnSync as spawnSync12 } from "node:child_process";
-import fs40 from "node:fs";
+import fs41 from "node:fs";
 var KINDS = ["definition", "count", "set"];
 function loadEval(file2) {
   let raw;
   try {
-    raw = JSON.parse(fs40.readFileSync(file2, "utf8"));
+    raw = JSON.parse(fs41.readFileSync(file2, "utf8"));
   } catch (e) {
     throw new UserError(`cannot read ${file2}: ${e.message}`);
   }
@@ -8109,7 +8165,7 @@ function loadEval(file2) {
     return { id: id2, task: q.task.trim(), kind: q.kind, truth: t };
   });
 }
-var clean = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
+var clean2 = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
 function gitGrep(root, flags, t) {
   const r = spawnSync12("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
     encoding: "utf8",
@@ -8127,17 +8183,17 @@ function truthOf(q, root) {
     if (q.kind === "definition") {
       const hit = gitGrep(root, ["-n"], t).map((l) => /^(.*?):(\d+):/.exec(l)).find(Boolean);
       if (!hit) throw new UserError(`question ${q.id}: git grep found no definition for "${t.grep}"`);
-      return { path: clean(hit[1]), line: Number(hit[2]) };
+      return { path: clean2(hit[1]), line: Number(hit[2]) };
     }
-    const files = [...new Set(gitGrep(root, ["-l"], t).map(clean))];
+    const files = [...new Set(gitGrep(root, ["-l"], t).map(clean2))];
     return q.kind === "count" ? { count: files.length } : { files };
   }
   if (q.kind === "definition") {
     const m = /^(.*):(\d+)$/.exec(t);
-    return { path: clean(m[1]), line: Number(m[2]) };
+    return { path: clean2(m[1]), line: Number(m[2]) };
   }
   if (q.kind === "count") return { count: t };
-  return { files: [...new Set(t.map(clean))] };
+  return { files: [...new Set(t.map(clean2))] };
 }
 function answerParts(answer) {
   const text = answer.replace(/`/g, "");
@@ -8148,10 +8204,10 @@ function answerParts(answer) {
 }
 function pathsIn2(text) {
   const found = text.replace(/\\/g, "/").match(/[A-Za-z0-9_.@\-/]+\.[A-Za-z0-9]{1,8}(?::\d+)?/g) ?? [];
-  return [...new Set(found.map((p) => clean(p.replace(/:\d+$/, ""))))];
+  return [...new Set(found.map((p) => clean2(p.replace(/:\d+$/, ""))))];
 }
 function scoreAnswer(q, truth, answer, root) {
-  const prefix = root ? `${clean(root).replace(/\/$/, "")}/` : "";
+  const prefix = root ? `${clean2(root).replace(/\/$/, "")}/` : "";
   const text = prefix ? answer.replace(/\\/g, "/").split(prefix).join("") : answer;
   const { summary, details } = answerParts(text);
   if (!summary && !details) return { score: 0, got: "(no answer)" };
@@ -8207,8 +8263,8 @@ function formatEval(rows, group) {
 
 // src/core/review.ts
 import crypto13 from "node:crypto";
-import fs41 from "node:fs";
-import path36 from "node:path";
+import fs42 from "node:fs";
+import path37 from "node:path";
 var TEMPLATE2 = { task: "task-reviewer", fix: "re-review", range: "code-reviewer" };
 var section = (title, body) => `## ${title}
 
@@ -8229,7 +8285,7 @@ function ancestors(m) {
 function briefOf(m) {
   const root = [m, ...ancestors(m)].at(-1);
   const f = runFile(root.id, "brief.md");
-  return fs41.existsSync(f) ? fs41.readFileSync(f, "utf8") : root.task;
+  return fs42.existsSync(f) ? fs42.readFileSync(f, "utf8") : root.task;
 }
 function latestReview(ids) {
   for (const id2 of listRunIds().reverse()) {
@@ -8243,7 +8299,7 @@ function latestReview(ids) {
 }
 function diffOf(m, from = m.baseTree) {
   const where = m.mode === "isolate" ? m.worktree : m.repoRoot;
-  if (where && fs41.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
+  if (where && fs42.existsSync(where) && from && m.afterTree) return reviewDiff(where, from, m.afterTree);
   if (from !== m.baseTree) {
     throw new UserError(`the isolated copy of ${m.id} is gone, so its fix round cannot be shown on its own; review a run that is not applied yet`, 3);
   }
@@ -8257,7 +8313,7 @@ function runReview(id2) {
   if (!m.changes?.length) throw new UserError(`run ${m.id} made no changes; nothing to review`);
   const chain = ancestors(m);
   const previous = latestReview(chain.map((a) => a.id));
-  const dir = m.mode === "isolate" && m.worktree && fs41.existsSync(m.worktree) ? m.cwd : m.dir;
+  const dir = m.mode === "isolate" && m.worktree && fs42.existsSync(m.worktree) ? m.cwd : m.dir;
   const job = { of: m.id, dir, implementer: m.ran ?? m.worker, group: m.group, plan: m.plan };
   const title = m.plan ? `Task ${m.plan.step}: ${m.plan.title}` : `run ${m.id}`;
   if (!previous) {
@@ -8333,19 +8389,19 @@ function writePackage(job) {
   const root = repoRoot(job.dir);
   if (!g || !root) throw new UserError(`not a git repository: ${job.dir}`);
   const name = `review-${crypto13.randomBytes(4).toString("hex")}.md`;
-  const inside3 = !path36.relative(fs41.realpathSync(root), fs41.realpathSync(g)).startsWith("..");
-  const file2 = inside3 ? path36.join(g, "pitroom", name) : path36.join(root, ".pitroom", name);
-  if (!inside3) ignoreInGit(root, "/.pitroom/");
-  fs41.mkdirSync(path36.dirname(file2), { recursive: true });
-  fs41.writeFileSync(file2, job.package);
+  const inside4 = !path37.relative(fs42.realpathSync(root), fs42.realpathSync(g)).startsWith("..");
+  const file2 = inside4 ? path37.join(g, "pitroom", name) : path37.join(root, ".pitroom", name);
+  if (!inside4) ignoreInGit(root, "/.pitroom/");
+  fs42.mkdirSync(path37.dirname(file2), { recursive: true });
+  fs42.writeFileSync(file2, job.package);
   return file2;
 }
 function ignoreInGit(root, pattern) {
-  const exclude = path36.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
-  const text = fs41.existsSync(exclude) ? fs41.readFileSync(exclude, "utf8") : "";
+  const exclude = path37.resolve(root, git(root, ["rev-parse", "--git-path", "info/exclude"]).stdout.trim());
+  const text = fs42.existsSync(exclude) ? fs42.readFileSync(exclude, "utf8") : "";
   if (text.split(/\r?\n/).includes(pattern)) return;
-  fs41.mkdirSync(path36.dirname(exclude), { recursive: true });
-  fs41.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
+  fs42.mkdirSync(path37.dirname(exclude), { recursive: true });
+  fs42.appendFileSync(exclude, `${text && !text.endsWith("\n") ? "\n" : ""}# Pitroom review packages in worktrees (removed after each review)
 ${pattern}
 `);
 }
@@ -8501,10 +8557,10 @@ async function cmdReview(p) {
       writeMeta(meta);
     }
   } catch (e) {
-    fs42.rmSync(packageFile, { force: true });
+    fs43.rmSync(packageFile, { force: true });
     throw e;
   }
-  fs42.writeFileSync(runFile(meta.id, "package.md"), job.package);
+  fs43.writeFileSync(runFile(meta.id, "package.md"), job.package);
   return launch(p, meta);
 }
 async function cmdAudit(p) {
@@ -8619,8 +8675,14 @@ function cmdPlan(p) {
 }
 function cmdCrew(p) {
   const file2 = flag(p, "task-file");
-  const tasks = (file2 ? fs42.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  let tasks = (file2 ? fs43.readFileSync(file2, "utf8").split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
+  const over = p.flags.get("over");
+  if (over) {
+    if (tasks.length > 1) throw new UserError('--over takes one task, run once per part: pitroom crew --over src/a,src/b "Find \u2026 in {scope}"');
+    const mode = has(p, "isolate") ? "isolate" : has(p, "write") ? "write" : "read";
+    tasks = expandScopes(over, flag(p, "dir") ?? process.cwd()).map((scope) => scopedTask(tasks[0], scope, mode));
+  }
   if (has(p, "write") && tasks.length > 1) {
     throw new UserError("parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)");
   }
@@ -8646,7 +8708,7 @@ async function cmdEval(p) {
   if (has(p, "write") || has(p, "isolate") || has(p, "continue") || has(p, "plan")) throw new UserError("eval asks read questions: drop -w/-i/--continue/--plan");
   const questions = loadEval(file2);
   const base2 = runOptions(p, "eval");
-  const root = repoRoot(path37.resolve(base2.dir));
+  const root = repoRoot(path38.resolve(base2.dir));
   const truths = new Map(questions.map((q) => [q.id, truthOf(q, root)]));
   const workers = [...new Set(p.flags.get("worker") ?? [effective().worker.value])];
   const group = flag(p, "group") ?? `eval-${(/* @__PURE__ */ new Date()).toISOString().slice(11, 19).replace(/:/g, "")}`;
@@ -8849,7 +8911,7 @@ function sinceMs(s) {
   if (!m) throw new UserError("--since takes 7d, 30d, \u2026 or all");
   return Date.now() - Number(m[1]) * 864e5;
 }
-var readStdin = () => process.stdin.isTTY ? "" : fs42.readFileSync(0, "utf8");
+var readStdin = () => process.stdin.isTTY ? "" : fs43.readFileSync(0, "utf8");
 function cmdStatusline(p) {
   const input = readStdin();
   const lines = [];
@@ -8889,8 +8951,8 @@ function cmdModels(p) {
   return 0;
 }
 function cmdHookStart() {
-  const script = path37.join(path37.dirname(path37.dirname(fileURLToPath5(import.meta.url))), "hooks", "session-start.mjs");
-  if (fs42.existsSync(script)) spawnSync13(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
+  const script = path38.join(path38.dirname(path38.dirname(fileURLToPath5(import.meta.url))), "hooks", "session-start.mjs");
+  if (fs43.existsSync(script)) spawnSync13(process.execPath, [script], { stdio: ["ignore", "inherit", "ignore"], env: process.env });
   return 0;
 }
 function cmdInit(p) {
@@ -8932,8 +8994,8 @@ function cmdSavings(p) {
   est. saved          ${usd(t.saved)}  (vs ${primaryPrice().name} list prices)`);
   const out = flag(p, "card");
   if (out) {
-    fs42.writeFileSync(out, card(t, period));
-    console.log(`card written to ${path37.resolve(out)}`);
+    fs43.writeFileSync(out, card(t, period));
+    console.log(`card written to ${path38.resolve(out)}`);
   }
   if (has(p, "badge")) console.log(`![pitroom](${badgeUrl(t)})`);
   return 0;
@@ -8975,7 +9037,7 @@ function cmdConfig(p) {
     console.log(JSON.stringify({ path: configPath(), settings: eff, warnings: warnings2 }, null, 2));
     return 0;
   }
-  console.log(`config file: ${configPath()}${fs42.existsSync(configPath()) ? "" : " (not present)"}`);
+  console.log(`config file: ${configPath()}${fs43.existsSync(configPath()) ? "" : " (not present)"}`);
   for (const [key, s] of Object.entries(eff)) {
     const v = Array.isArray(s.value) ? s.value.join(", ") || "\u2014" : s.value && typeof s.value === "object" ? Object.entries(s.value).map(([k, m]) => `${k}=${m}`).join(", ") || "\u2014" : s.value === void 0 ? key === "model" ? "the worker's default" : "\u2014" : String(s.value);
     console.log(`  ${key.padEnd(15)} ${v}  (${s.source})`);
@@ -8999,7 +9061,7 @@ function cmdClean(p) {
     const m = readMeta(id2);
     if (m.mode === "isolate" && !m.discarded && !m.applied) discardRun(m);
     recordRun(m);
-    fs42.rmSync(runDir(id2), { recursive: true, force: true });
+    fs43.rmSync(runDir(id2), { recursive: true, force: true });
   }
   const snapshots = prune(Date.now(), 0);
   console.log(`removed ${old.length} run(s)${snapshots ? ` and ${snapshots} read snapshot${snapshots === 1 ? "" : "s"}` : ""}; the history and the savings ledger are kept`);
@@ -9010,9 +9072,9 @@ var cmdDiscard = (p) => (console.log(discardRun(freshMeta(resolveRun(p.positiona
 
 // src/core/doctor.ts
 import { spawnSync as spawnSync14 } from "node:child_process";
-import fs43 from "node:fs";
+import fs44 from "node:fs";
 import os13 from "node:os";
-import path38 from "node:path";
+import path39 from "node:path";
 var MARK2 = { ok: () => green("\u2714"), warn: () => yellow("!"), fail: () => red("\u2718") };
 var NEXT = [
   { when: /no default model|no fallback workers/, command: "pitroom init", why: "propose a starter config (fallback models from your catalogue)" },
@@ -9035,10 +9097,10 @@ function usageLine() {
   return `${ids.length} run${ids.length === 1 ? "" : "s"} so far${when2} (pitroom savings shows what they saved)`;
 }
 function firstNodeOnPath() {
-  for (const dir of (process.env.PATH ?? "").split(path38.delimiter).filter(Boolean)) {
-    const file2 = path38.join(dir, process.platform === "win32" ? "node.exe" : "node");
+  for (const dir of (process.env.PATH ?? "").split(path39.delimiter).filter(Boolean)) {
+    const file2 = path39.join(dir, process.platform === "win32" ? "node.exe" : "node");
     try {
-      if (!fs43.statSync(file2).isFile()) continue;
+      if (!fs44.statSync(file2).isFile()) continue;
     } catch {
       continue;
     }
@@ -9066,14 +9128,14 @@ function doctor8(probe2) {
   const addAll = (list2) => list2.forEach((c) => add2(c.level, c.message));
   add2("ok", `pitroom ${VERSION2} \xB7 node ${process.versions.node} \xB7 state in ${home()}`);
   const onPath = firstNodeOnPath();
-  if (onPath && onPath.version && tooOld(onPath.version) && path38.resolve(onPath.path) !== path38.resolve(process.execPath)) {
+  if (onPath && onPath.version && tooOld(onPath.version) && path39.resolve(onPath.path) !== path39.resolve(process.execPath)) {
     add2("warn", `the first \`node\` on PATH is v${onPath.version} (${onPath.path}), older than the 22.13 Pitroom needs: shells that agent apps start may use it (the pitroom command finds a newer Node itself; other tools may not)`);
   }
   add2(gitAvailable() ? "ok" : "warn", gitAvailable() ? "git available" : "git not found: --write/--isolate tracking disabled");
   const cfg = loadConfig();
-  add2(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs43.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
+  add2(cfg.warnings.length ? "warn" : "ok", `config: ${configPath()}${fs44.existsSync(configPath()) ? "" : " (not present, defaults in use)"}`);
   for (const w of cfg.warnings) add2("warn", w);
-  if (shimReady() && process.platform === "win32" && !fs43.existsSync(path38.join(shimDir(), "git.exe"))) {
+  if (shimReady() && process.platform === "win32" && !fs44.existsSync(path39.join(shimDir(), "git.exe"))) {
     add2("warn", "git guard shim ready as git.cmd only (no C# compiler of .NET Framework 4 to build git.exe): a program that starts git without a shell skips it, and PowerShell's unquoted & | < > reach git changed");
   } else if (shimReady()) add2("ok", "git guard shim ready");
   else if (process.platform === "win32") add2("warn", "git guard: the ref and push guard is on, but the git shim needs the sh.exe of Git for Windows next to git (not found), so a worker's `git add`, `restore` or `clean` is not blocked; prefer --isolate and check the patch before apply");
@@ -9207,12 +9269,12 @@ function liveProbe(target) {
   } catch (e) {
     return { level: "fail", message: e.message };
   }
-  const scratch = readsOwnSnapshot(backend) ? fs43.mkdtempSync(path38.join(os13.tmpdir(), "pitroom-probe-")) : void 0;
+  const scratch = readsOwnSnapshot(backend) ? fs44.mkdtempSync(path39.join(os13.tmpdir(), "pitroom-probe-")) : void 0;
   const cwd = scratch ?? process.cwd();
   try {
     return probe(backend, target, cwd);
   } finally {
-    if (scratch) fs43.rmSync(scratch, { recursive: true, force: true });
+    if (scratch) fs44.rmSync(scratch, { recursive: true, force: true });
   }
 }
 function probe(backend, target, cwd) {
@@ -9257,19 +9319,19 @@ function skillChecks() {
     else if (!viaPlugin) checks.push({ level: "warn", message: `no Pitroom skills in ${base2}; run \`pitroom install\`` });
   }
   if (geminiExtensionInstalled()) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path38.sep}.agents${path38.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path39.sep}.agents${path39.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Gemini CLI extension and linked into ~/.agents/skills: Gemini loads the skills twice; run `pitroom uninstall` or `gemini extensions uninstall pitroom`" } : { level: "ok", message: "Gemini CLI extension installed (skills + context)" }
     );
   }
   if (viaPlugin) {
-    const linked = installedSkills().some((i) => i.base.includes(`${path38.sep}.claude${path38.sep}`) && i.names.length);
+    const linked = installedSkills().some((i) => i.base.includes(`${path39.sep}.claude${path39.sep}`) && i.names.length);
     checks.push(
       linked ? { level: "warn", message: "Pitroom is installed as a Claude Code plugin and linked into ~/.claude/skills: skills load twice; run `pitroom uninstall` or remove the plugin" } : { level: "ok", message: "Claude Code plugin installed (skills + session-start hook)" }
     );
   }
   const launcher = launcherPath();
-  if (fs43.existsSync(launcher)) {
+  if (fs44.existsSync(launcher)) {
     const r = spawnSync14(launcher, ["--version"], { encoding: "utf8", timeout: 3e4, stdio: ["ignore", "pipe", "pipe"], shell: process.platform === "win32" });
     checks.push(
       r.status === 0 ? { level: "ok", message: `launcher ${launcher} \u2192 pitroom ${r.stdout.trim()}` } : { level: "fail", message: `launcher ${launcher} does not start: ${(r.stderr || r.stdout).trim().slice(0, 200)}` }
@@ -9281,12 +9343,12 @@ function skillChecks() {
 }
 function geminiExtensionInstalled() {
   const home3 = process.env.GEMINI_CLI_HOME ?? os13.homedir();
-  return fs43.existsSync(path38.join(home3, ".gemini", "extensions", "pitroom"));
+  return fs44.existsSync(path39.join(home3, ".gemini", "extensions", "pitroom"));
 }
 function pluginInstalled() {
   try {
-    const f = path38.join(os13.homedir(), ".claude", "plugins", "installed_plugins.json");
-    const plugins = JSON.parse(fs43.readFileSync(f, "utf8")).plugins ?? {};
+    const f = path39.join(os13.homedir(), ".claude", "plugins", "installed_plugins.json");
+    const plugins = JSON.parse(fs44.readFileSync(f, "utf8")).plugins ?? {};
     return Object.keys(plugins).some((k) => k.startsWith("pitroom@"));
   } catch {
     return false;
@@ -9303,24 +9365,24 @@ function superpowersActive() {
   for (const p of openCodePlugins()) {
     if (/superpowers/i.test(p)) found.push(`OpenCode plugin ${p}`);
   }
-  for (const base2 of [path38.join(os13.homedir(), ".agents", "skills"), path38.join(os13.homedir(), ".claude", "skills")]) {
-    const dir = path38.join(base2, "using-superpowers");
-    if (fs43.existsSync(path38.join(dir, "SKILL.md"))) found.push(dir);
+  for (const base2 of [path39.join(os13.homedir(), ".agents", "skills"), path39.join(os13.homedir(), ".claude", "skills")]) {
+    const dir = path39.join(base2, "using-superpowers");
+    if (fs44.existsSync(path39.join(dir, "SKILL.md"))) found.push(dir);
   }
   return found;
 }
 function claudePlugins() {
   try {
-    const f = path38.join(os13.homedir(), ".claude", "plugins", "installed_plugins.json");
-    return Object.keys(JSON.parse(fs43.readFileSync(f, "utf8")).plugins ?? {});
+    const f = path39.join(os13.homedir(), ".claude", "plugins", "installed_plugins.json");
+    return Object.keys(JSON.parse(fs44.readFileSync(f, "utf8")).plugins ?? {});
   } catch {
     return [];
   }
 }
 function claudePluginEnabled(key) {
   try {
-    const f = path38.join(os13.homedir(), ".claude", "settings.json");
-    return JSON.parse(fs43.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
+    const f = path39.join(os13.homedir(), ".claude", "settings.json");
+    return JSON.parse(fs44.readFileSync(f, "utf8")).enabledPlugins?.[key] !== false;
   } catch {
     return true;
   }
@@ -9329,7 +9391,7 @@ function codexPlugins() {
   const plugins = /* @__PURE__ */ new Map();
   let text;
   try {
-    text = fs43.readFileSync(path38.join(process.env.CODEX_HOME ?? path38.join(os13.homedir(), ".codex"), "config.toml"), "utf8");
+    text = fs44.readFileSync(path39.join(process.env.CODEX_HOME ?? path39.join(os13.homedir(), ".codex"), "config.toml"), "utf8");
   } catch {
     return plugins;
   }
@@ -9347,11 +9409,11 @@ function codexPlugins() {
   return plugins;
 }
 function openCodePlugins() {
-  const dir = path38.join(process.env.XDG_CONFIG_HOME ?? path38.join(os13.homedir(), ".config"), "opencode");
+  const dir = path39.join(process.env.XDG_CONFIG_HOME ?? path39.join(os13.homedir(), ".config"), "opencode");
   const plugins = [];
   for (const name of ["opencode.json", "opencode.jsonc"]) {
     try {
-      const text = fs43.readFileSync(path38.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
+      const text = fs44.readFileSync(path39.join(dir, name), "utf8").replace(/\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm, "");
       const list2 = JSON.parse(text).plugin;
       if (Array.isArray(list2)) plugins.push(...list2.filter((p) => typeof p === "string"));
     } catch {
@@ -9359,7 +9421,7 @@ function openCodePlugins() {
   }
   for (const folder of ["plugin", "plugins"]) {
     try {
-      for (const f of fs43.readdirSync(path38.join(dir, folder))) plugins.push(path38.join(dir, folder, f));
+      for (const f of fs44.readdirSync(path39.join(dir, folder))) plugins.push(path39.join(dir, folder, f));
     } catch {
     }
   }
@@ -9376,6 +9438,9 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" \u2026
                                         start several workers in background as one group
+  pitroom crew [options] --over src/a,src/b "task about {scope}"
+                                        one task per part of the project, each worker kept to its part
+                                        (a pattern such as "src/*/" makes one part per folder)
   pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
                                         read-only review of a run's change (a follow-up: only its
                                         fix round) or of a commit range; by default on another worker
@@ -9486,7 +9551,7 @@ var COMMANDS = {
     if (port !== void 0 && !(/^\d+$/.test(port) && Number(port) <= 65535)) throw new UserError("--port takes a number from 0 to 65535 (0 picks a free one)");
     const dir = flag(p, "dir");
     if (dir !== void 0) {
-      if (!fs44.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new UserError(`-d ${dir}: no such directory`);
+      if (!fs45.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) throw new UserError(`-d ${dir}: no such directory`);
       process.chdir(dir);
       process.env.PWD = process.cwd();
     }

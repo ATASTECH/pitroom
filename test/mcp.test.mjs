@@ -396,6 +396,12 @@ test('mcp: pitroom_run with tasks runs them in parallel as one group and returns
     assert.equal((await c.call('pitroom_run', { tasks: [] })).isError, true);
     assert.match((await c.call('pitroom_run', { tasks: ['x'], continue: 'last' })).text, /follows up one run/);
     assert.equal((await c.call('pitroom_run', { tasks: ['x'], mode: 'write' })).isError, true, 'parallel workers never write in place');
+    const parts = await c.call('pitroom_run', { task: 'Summarize {scope}', scopes: ['app.txt', 'other.txt'], group: 'parts', waitSeconds: 90 });
+    assert.equal(parts.isError, false, parts.text);
+    assert.equal(parts.text.match(/pitroom ✔ done/g).length, 2, parts.text);
+    assert.match((await c.call('pitroom_run', { tasks: ['x'], scopes: ['app.txt'] })).text, /give "task", not "tasks"/);
+    assert.equal((await c.call('pitroom_run', { task: 'x', scopes: ['app.txt'], mode: 'write' })).isError, true, 'parallel workers never write in place');
+    assert.match((await c.call('pitroom_run', { task: 'x', scopes: ['nope'] })).text, /no such file or folder/);
   } finally {
     await c.close();
   }

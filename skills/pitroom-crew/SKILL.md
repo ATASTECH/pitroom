@@ -19,6 +19,16 @@ Don't use it when the failures are related (fixing one might fix the others: inv
 
 Parts must be **independent**: no part needs another's result, and no two parts edit the same file. Start as many workers as there are independent parts: up to 20 run at a time by default (`maxParallel`, 30 at most), the rest queue. Keep dependent or judgment-heavy parts for yourself.
 
+Split by **where**, not by **what**: each worker gets its own part of the project and its brief names it. Three workers asked for "validation bugs", "error-handling bugs" and "security holes" all read the whole project and hand you three answers about the same code to reconcile; when they disagree you end up opening the files yourself, which is the reading the crew was meant to save. Ask the same question once per folder instead. `--over` does that split for you and refuses parts that overlap:
+
+```bash
+pitroom crew -g validation --over src/auth,src/billing,src/uploads \
+  "Find request handlers in {scope} that use input without validating it. file:line for each."
+pitroom crew -g todo --over "packages/*/" "List the TODOs in {scope} that name a missing feature. file:line for each."
+```
+
+A question about how parts connect (a flow that crosses folders) is one brief, not a split.
+
 ## 2. Write focused briefs
 
 Each worker sees only its brief, so each brief is:

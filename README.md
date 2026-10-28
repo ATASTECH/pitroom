@@ -553,6 +553,8 @@ RUN                   STATE  MODE  TIME  STEPS  WORKER                    NOW / 
 
 Humans get the same table live with `pitroom watch -g NAME`; `pitroom wait -g NAME --brief` prints one line per worker, `pitroom show <run>` the full answer.
 
+**One question, split by part.** `pitroom crew --over src/auth,src/billing,src/uploads "Find missing input validation in {scope}. file:line for each."` runs the task once per part (`{scope}` is filled in) and tells each worker that its part is the only one it reads, or in an `-i` crew the only one it changes. A pattern in the last part of a path makes one part per match, hidden ones left out (`--over "packages/*/"`: one per folder). Parts must exist and must not overlap (`src` with `src/auth` is refused): two workers that read the same files hand your agent two answers about the same code to reconcile, and when they disagree it opens the files itself.
+
 For changes, `pitroom crew -i …` gives every worker its own isolated copy of your current state and `pitroom apply -g NAME` lands the patches in order, stopping at the first conflict. Up to `maxParallel` workers (default 20, at most 30) run at once, the rest queue; only one `--write` run per repository is allowed. `pitroom stop -g NAME` stops running and queued workers.
 
 ---
@@ -592,6 +594,7 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD] [--link a,b] [--bg] "task"
 pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
+pitroom crew [-i] [-g NAME] --over src/a,src/b "task about {scope}"   (one worker per part; "src/*/": one per folder)
 pitroom run -i --plan PLAN --step N [--tier T] ["notes"]
 pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
 pitroom audit RUN [-W worker]

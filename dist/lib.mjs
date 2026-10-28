@@ -3097,14 +3097,61 @@ function retryCommands(metas, shell = retryShell()) {
   });
 }
 
+// src/core/scopes.ts
+import fs18 from "node:fs";
+import path18 from "node:path";
+var clean = (p) => p.replace(/\\/g, "/").replace(/^(\.\/)+/, "").replace(/\/+$/, "") || ".";
+function expandScopes(patterns, dir) {
+  const root = path18.resolve(dir);
+  const scopes = [];
+  for (const raw of patterns.flatMap((s) => s.split(",")).map((s) => s.trim()).filter(Boolean)) {
+    const foldersOnly = /[\\/]$/.test(raw);
+    const p = clean(raw);
+    const base = path18.posix.basename(p);
+    if (/[*?]/.test(path18.posix.dirname(p))) throw new UserError(`--over ${raw}: only the last part of a path can have * or ?`);
+    if (!/[*?]/.test(base)) {
+      const abs = path18.resolve(root, p);
+      if (!fs18.existsSync(abs)) throw new UserError(`--over ${raw}: no such file or folder in ${root}`);
+      scopes.push(inside3(root, abs, raw));
+      continue;
+    }
+    const parent = path18.resolve(root, path18.posix.dirname(p));
+    const re = new RegExp(`^${base.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".")}$`);
+    const hits = (fs18.existsSync(parent) ? fs18.readdirSync(parent, { withFileTypes: true }) : []).filter((e) => !e.name.startsWith(".") && re.test(e.name) && (!foldersOnly || e.isDirectory())).map((e) => inside3(root, path18.join(parent, e.name), raw)).sort();
+    if (!hits.length) throw new UserError(`--over ${raw}: matches nothing in ${root}`);
+    scopes.push(...hits);
+  }
+  if (!scopes.length) throw new UserError('--over needs the parts to split over, e.g. --over src/auth,src/billing or --over "src/*/"');
+  for (const a of scopes) {
+    for (const b of scopes) {
+      if (a === b && scopes.indexOf(a) !== scopes.lastIndexOf(a)) throw new UserError(`--over names ${a} twice`);
+      if (a !== b && (a === "." || b.startsWith(`${a}/`))) {
+        throw new UserError(`--over: ${b} is inside ${a}, so two workers would read the same files; name parts that do not overlap`);
+      }
+    }
+  }
+  return scopes;
+}
+function inside3(root, abs, raw) {
+  const rel = path18.relative(root, abs);
+  if (rel === ".." || rel.startsWith(`..${path18.sep}`) || path18.isAbsolute(rel)) throw new UserError(`--over ${raw} is outside ${root}`);
+  return clean(rel);
+}
+function scopedTask(template, scope, mode) {
+  const keep = mode === "read" ? "Read only inside it: other workers cover the rest of the project, in parallel." : "Change only files inside it (read what you need elsewhere): other workers change the rest, in parallel.";
+  return `${template.split("{scope}").join(scope)}
+
+Your part of the project: ${scope}. ${keep}`;
+}
+
 // src/core/eval.ts
 import { spawnSync as spawnSync8 } from "node:child_process";
-import fs18 from "node:fs";
+import fs19 from "node:fs";
 var KINDS = ["definition", "count", "set"];
 function loadEval(file) {
   let raw;
   try {
-    raw = JSON.parse(fs18.readFileSync(file, "utf8"));
+    raw = JSON.parse(fs19.readFileSync(file, "utf8"));
   } catch (e) {
     throw new UserError(`cannot read ${file}: ${e.message}`);
   }
@@ -3129,7 +3176,7 @@ function loadEval(file) {
     return { id: id2, task: q.task.trim(), kind: q.kind, truth: t };
   });
 }
-var clean = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
+var clean2 = (p) => p.replace(/\\/g, "/").replace(/^\.?\//, "");
 function gitGrep(root, flags, t) {
   const r = spawnSync8("git", ["-C", root, "grep", ...flags, t.regex ? "-E" : "-F", ...t.word ? ["-w"] : [], "-e", t.grep, "--", t.dir ?? "."], {
     encoding: "utf8",
@@ -3147,17 +3194,17 @@ function truthOf(q, root) {
     if (q.kind === "definition") {
       const hit = gitGrep(root, ["-n"], t).map((l) => /^(.*?):(\d+):/.exec(l)).find(Boolean);
       if (!hit) throw new UserError(`question ${q.id}: git grep found no definition for "${t.grep}"`);
-      return { path: clean(hit[1]), line: Number(hit[2]) };
+      return { path: clean2(hit[1]), line: Number(hit[2]) };
     }
-    const files = [...new Set(gitGrep(root, ["-l"], t).map(clean))];
+    const files = [...new Set(gitGrep(root, ["-l"], t).map(clean2))];
     return q.kind === "count" ? { count: files.length } : { files };
   }
   if (q.kind === "definition") {
     const m = /^(.*):(\d+)$/.exec(t);
-    return { path: clean(m[1]), line: Number(m[2]) };
+    return { path: clean2(m[1]), line: Number(m[2]) };
   }
   if (q.kind === "count") return { count: t };
-  return { files: [...new Set(t.map(clean))] };
+  return { files: [...new Set(t.map(clean2))] };
 }
 function answerParts(answer) {
   const text = answer.replace(/`/g, "");
@@ -3168,10 +3215,10 @@ function answerParts(answer) {
 }
 function pathsIn2(text) {
   const found = text.replace(/\\/g, "/").match(/[A-Za-z0-9_.@\-/]+\.[A-Za-z0-9]{1,8}(?::\d+)?/g) ?? [];
-  return [...new Set(found.map((p) => clean(p.replace(/:\d+$/, ""))))];
+  return [...new Set(found.map((p) => clean2(p.replace(/:\d+$/, ""))))];
 }
 function scoreAnswer(q, truth, answer, root) {
-  const prefix = root ? `${clean(root).replace(/\/$/, "")}/` : "";
+  const prefix = root ? `${clean2(root).replace(/\/$/, "")}/` : "";
   const text = prefix ? answer.replace(/\\/g, "/").split(prefix).join("") : answer;
   const { summary, details } = answerParts(text);
   if (!summary && !details) return { score: 0, got: "(no answer)" };
@@ -3216,8 +3263,8 @@ function summarize(rows) {
 
 // src/vcs/guard.ts
 import { spawnSync as spawnSync9 } from "node:child_process";
-import fs19 from "node:fs";
-import path18 from "node:path";
+import fs20 from "node:fs";
+import path19 from "node:path";
 var VERSION = 2;
 var WINDOWS = process.platform === "win32";
 var fwd = (p) => WINDOWS ? p.replace(/\\/g, "/") : p;
@@ -3294,38 +3341,38 @@ esac
 exec "$real" "$@"
 `;
 function shimDir() {
-  return path18.join(home(), "shim", `v${VERSION}`);
+  return path19.join(home(), "shim", `v${VERSION}`);
 }
 function scoopTarget(exe) {
   try {
-    const text = fs19.readFileSync(exe.replace(/\.exe$/i, ".shim"), "utf8");
+    const text = fs20.readFileSync(exe.replace(/\.exe$/i, ".shim"), "utf8");
     const target = /^\s*path\s*=\s*"?([^"\r\n]+?)"?\s*$/m.exec(text)?.[1];
-    return target && fs19.statSync(target).isFile() ? target : void 0;
+    return target && fs20.statSync(target).isFile() ? target : void 0;
   } catch {
     return void 0;
   }
 }
 function findRealGit(skip) {
   const same = (a, b) => WINDOWS ? a.toLowerCase() === b.toLowerCase() : a === b;
-  for (const dir of (process.env.PATH ?? "").split(path18.delimiter).filter(Boolean)) {
-    if (same(path18.resolve(dir), skip)) continue;
-    const p = path18.join(dir, WINDOWS ? "git.exe" : "git");
+  for (const dir of (process.env.PATH ?? "").split(path19.delimiter).filter(Boolean)) {
+    if (same(path19.resolve(dir), skip)) continue;
+    const p = path19.join(dir, WINDOWS ? "git.exe" : "git");
     try {
-      fs19.accessSync(p, fs19.constants.X_OK);
-      if (fs19.statSync(p).isFile()) return WINDOWS && scoopTarget(p) || p;
+      fs20.accessSync(p, fs20.constants.X_OK);
+      if (fs20.statSync(p).isFile()) return WINDOWS && scoopTarget(p) || p;
     } catch {
     }
   }
   return void 0;
 }
 function findGitSh(realGit) {
-  let dir = path18.dirname(realGit);
+  let dir = path19.dirname(realGit);
   for (let i = 0; i < 4; i++) {
     for (const rel of ["bin/sh.exe", "usr/bin/sh.exe"]) {
-      const p = path18.join(dir, rel);
-      if (fs19.existsSync(p)) return p;
+      const p = path19.join(dir, rel);
+      if (fs20.existsSync(p)) return p;
     }
-    const up = path18.dirname(dir);
+    const up = path19.dirname(dir);
     if (up === dir) break;
     dir = up;
   }
@@ -3383,31 +3430,31 @@ static class PitroomGit {
 function findCsc() {
   const windir = process.env.WINDIR ?? process.env.SystemRoot ?? "C:\\Windows";
   for (const fw of ["Framework64", "Framework"]) {
-    const p = path18.join(windir, "Microsoft.NET", fw, "v4.0.30319", "csc.exe");
-    if (fs19.existsSync(p)) return p;
+    const p = path19.join(windir, "Microsoft.NET", fw, "v4.0.30319", "csc.exe");
+    if (fs20.existsSync(p)) return p;
   }
   return void 0;
 }
 function buildLauncher(dir, sh) {
   const source = launcherSource(sh);
-  const src = path18.join(dir, "git-launcher.cs");
-  const exe = path18.join(dir, "git.exe");
-  if (fs19.existsSync(exe) && fs19.existsSync(src) && fs19.readFileSync(src, "utf8") === source) return;
+  const src = path19.join(dir, "git-launcher.cs");
+  const exe = path19.join(dir, "git.exe");
+  if (fs20.existsSync(exe) && fs20.existsSync(src) && fs20.readFileSync(src, "utf8") === source) return;
   const csc = findCsc();
   if (!csc) return;
-  const tmp = path18.join(dir, `git.${process.pid}.tmp.exe`);
+  const tmp = path19.join(dir, `git.${process.pid}.tmp.exe`);
   const tmpSrc = `${src}.${process.pid}.tmp`;
   try {
-    fs19.mkdirSync(dir, { recursive: true });
-    fs19.writeFileSync(tmpSrc, source);
+    fs20.mkdirSync(dir, { recursive: true });
+    fs20.writeFileSync(tmpSrc, source);
     const r = spawnSync9(csc, ["/nologo", "/optimize+", "/target:exe", `/out:${tmp}`, tmpSrc], { encoding: "utf8", timeout: 6e4, windowsHide: true });
-    if (r.status !== 0 || !fs19.existsSync(tmp)) return;
+    if (r.status !== 0 || !fs20.existsSync(tmp)) return;
     renameOver(tmp, exe);
     renameOver(tmpSrc, src);
   } catch {
   } finally {
-    fs19.rmSync(tmp, { force: true });
-    fs19.rmSync(tmpSrc, { force: true });
+    fs20.rmSync(tmp, { force: true });
+    fs20.rmSync(tmpSrc, { force: true });
   }
 }
 var HOOK_VERSION = 1;
@@ -3417,12 +3464,12 @@ var REF_HOOK = `#!/bin/sh
 echo "pitroom: git ref updates (commit, reset, branch, tag, stash, rebase, merge) are blocked for workers" >&2
 exit 1
 `;
-var hooksDir = () => path18.join(home(), "git-hooks", `v${HOOK_VERSION}`);
+var hooksDir = () => path19.join(home(), "git-hooks", `v${HOOK_VERSION}`);
 function writeIfChanged2(file, content) {
-  if (fs19.existsSync(file) && fs19.readFileSync(file, "utf8") === content) return;
-  fs19.mkdirSync(path18.dirname(file), { recursive: true });
+  if (fs20.existsSync(file) && fs20.readFileSync(file, "utf8") === content) return;
+  fs20.mkdirSync(path19.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.tmp`;
-  fs19.writeFileSync(tmp, content, { mode: 493 });
+  fs20.writeFileSync(tmp, content, { mode: 493 });
   renameOver(tmp, file);
 }
 function pathKey(env) {
@@ -3454,7 +3501,7 @@ function guardEnv(env) {
     GIT_PAGER: "cat",
     PAGER: "cat"
   };
-  writeIfChanged2(path18.join(hooksDir(), "reference-transaction"), REF_HOOK);
+  writeIfChanged2(path19.join(hooksDir(), "reference-transaction"), REF_HOOK);
   env = withGitConfig(onePath(env), [
     ["core.hooksPath", fwd(hooksDir())],
     ["url.pitroom-push-blocked://.pushInsteadOf", ""]
@@ -3466,12 +3513,12 @@ function guardEnv(env) {
   if (WINDOWS) {
     sh = findGitSh(real);
     if (!sh) return { ...env, ...quiet };
-    writeIfChanged2(path18.join(dir, "git.cmd"), cmdShim(sh));
+    writeIfChanged2(path19.join(dir, "git.cmd"), cmdShim(sh));
     buildLauncher(dir, sh);
   }
-  writeIfChanged2(path18.join(dir, "git"), SHIM);
+  writeIfChanged2(path19.join(dir, "git"), SHIM);
   const key = pathKey(env);
-  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path18.delimiter}${env[key] ?? ""}` };
+  return { ...env, ...quiet, PITROOM_REAL_GIT: fwd(real), [key]: `${dir}${path19.delimiter}${env[key] ?? ""}` };
 }
 function shimReady() {
   const env = guardEnv({ ...process.env });
@@ -3503,10 +3550,10 @@ function numberDiff(diff) {
 
 // src/core/slots.ts
 import crypto4 from "node:crypto";
-import fs20 from "node:fs";
-import path19 from "node:path";
-var slotsDir = () => path19.join(home(), "slots");
-var locksDir = () => path19.join(home(), "locks");
+import fs21 from "node:fs";
+import path20 from "node:path";
+var slotsDir = () => path20.join(home(), "slots");
+var locksDir = () => path20.join(home(), "locks");
 var STARTUP_GRACE_MS = 3e4;
 function holderActive(runId, self) {
   if (!runId || runId === self) return false;
@@ -3520,23 +3567,23 @@ function holderActive(runId, self) {
   }
 }
 function tryClaim(file, runId) {
-  fs20.mkdirSync(path19.dirname(file), { recursive: true });
+  fs21.mkdirSync(path20.dirname(file), { recursive: true });
   try {
-    fs20.writeFileSync(file, runId, { flag: "wx" });
+    fs21.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch (e) {
     if (e.code !== "EEXIST") throw e;
   }
   let owner = "";
   try {
-    owner = fs20.readFileSync(file, "utf8").trim();
+    owner = fs21.readFileSync(file, "utf8").trim();
   } catch {
   }
   if (owner === runId) return true;
   if (holderActive(owner, runId)) return false;
-  fs20.rmSync(file, { force: true });
+  fs21.rmSync(file, { force: true });
   try {
-    fs20.writeFileSync(file, runId, { flag: "wx" });
+    fs21.writeFileSync(file, runId, { flag: "wx" });
     return true;
   } catch {
     return false;
@@ -3545,35 +3592,35 @@ function tryClaim(file, runId) {
 function releaseIfOwner(file, runId) {
   if (!file) return;
   try {
-    if (fs20.readFileSync(file, "utf8").trim() === runId) fs20.rmSync(file, { force: true });
+    if (fs21.readFileSync(file, "utf8").trim() === runId) fs21.rmSync(file, { force: true });
   } catch {
   }
 }
 function tryAcquireSlot(runId, maxParallel) {
   for (let n = 0; n < Math.max(1, maxParallel); n++) {
-    const file = path19.join(slotsDir(), `slot-${n}`);
+    const file = path20.join(slotsDir(), `slot-${n}`);
     if (tryClaim(file, runId)) return file;
   }
   return void 0;
 }
 var releaseSlot = (file, runId) => releaseIfOwner(file, runId);
 function slotHolders() {
-  if (!fs20.existsSync(slotsDir())) return [];
-  return fs20.readdirSync(slotsDir()).map((f) => {
+  if (!fs21.existsSync(slotsDir())) return [];
+  return fs21.readdirSync(slotsDir()).map((f) => {
     try {
-      return fs20.readFileSync(path19.join(slotsDir(), f), "utf8").trim();
+      return fs21.readFileSync(path20.join(slotsDir(), f), "utf8").trim();
     } catch {
       return "";
     }
   }).filter((id2) => holderActive(id2, ""));
 }
-var lockFile = (repoRoot) => path19.join(locksDir(), `write-${crypto4.createHash("sha1").update(path19.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
+var lockFile = (repoRoot) => path20.join(locksDir(), `write-${crypto4.createHash("sha1").update(path20.resolve(repoRoot)).digest("hex").slice(0, 16)}`);
 function acquireWriteLock(repoRoot, runId) {
   const file = lockFile(repoRoot);
   if (tryClaim(file, runId)) return;
   let owner = "";
   try {
-    owner = fs20.readFileSync(file, "utf8").trim();
+    owner = fs21.readFileSync(file, "utf8").trim();
   } catch {
   }
   throw new UserError(`another --write run (${owner}) is active in this repo; use --isolate for parallel changes`, 3);
@@ -3582,10 +3629,10 @@ var releaseWriteLock = (repoRoot, runId) => releaseIfOwner(lockFile(repoRoot), r
 
 // src/core/process.ts
 import { spawn } from "node:child_process";
-import fs21 from "node:fs";
+import fs22 from "node:fs";
 async function spawnWorker(inv, opts) {
-  const out = fs21.openSync(opts.stdoutFile, "w");
-  const err = fs21.openSync(opts.stderrFile, "w");
+  const out = fs22.openSync(opts.stdoutFile, "w");
+  const err = fs22.openSync(opts.stderrFile, "w");
   const res = { code: null, timedOut: false, stopped: false };
   const child = spawn(inv.command, inv.args, {
     cwd: opts.cwd,
@@ -3608,7 +3655,7 @@ async function spawnWorker(inv, opts) {
   }, opts.timeoutSec * 1e3);
   res.code = await new Promise((resolve2) => {
     child.on("error", (e) => {
-      res.spawnError = e.code === "ENOENT" ? fs21.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
+      res.spawnError = e.code === "ENOENT" ? fs22.existsSync(opts.cwd) ? `${inv.command} not found` : `the working directory ${opts.cwd} does not exist` : e.message;
       resolve2(127);
     });
     child.on("close", (c) => resolve2(c));
@@ -3617,8 +3664,8 @@ async function spawnWorker(inv, opts) {
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
-  fs21.closeSync(out);
-  fs21.closeSync(err);
+  fs22.closeSync(out);
+  fs22.closeSync(err);
   return res;
 }
 export {
@@ -3641,6 +3688,7 @@ export {
   costAt,
   describeTarget,
   estimateTokens,
+  expandScopes,
   extractRefs,
   fill,
   findSecretFiles,
@@ -3688,6 +3736,7 @@ export {
   runsDir,
   savedUsd,
   scoopTarget,
+  scopedTask,
   scoreAnswer,
   scoreOf,
   secretWarning,
