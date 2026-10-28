@@ -67,6 +67,9 @@ export interface RunMeta {
   verifyResult?: { ok: boolean; code: number | null; tail: string };
   /** Fix rounds a failed --verify may get (config `verifyFix`, --verify-fix); only on a change with a check. */
   verifyFix?: number;
+  /** In a race (`--race N`): how many workers race, and this run's place once all have ended (see race.ts). */
+  race?: number;
+  racePlace?: number;
   /** USD the run's workers may cost (--max-cost, config `maxCost`); `capped` when the run was stopped there. */
   maxCost?: number;
   capped?: boolean;

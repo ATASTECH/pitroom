@@ -14,7 +14,7 @@ export interface Parsed {
 const VALUE_FLAGS: Record<string, string> = {
   '-d': 'dir', '--dir': 'dir', '-f': 'file', '--file': 'file', '-m': 'model', '--model': 'model',
   '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '--effort': 'effort', '-g': 'group', '--group': 'group',
-  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--verify-fix': 'verify-fix', '--max-cost': 'max-cost', '--link': 'link', '-c': 'continue',
+  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--verify-fix': 'verify-fix', '--max-cost': 'max-cost', '--race': 'race', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
   '--plan': 'plan', '--step': 'step', '--fallback': 'fallback', '--client': 'client', '--over': 'over',

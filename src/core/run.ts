@@ -55,6 +55,8 @@ export interface RunOptions {
   verifyFix?: number;
   /** `--max-cost USD`: what the run's workers may cost (default: the config's `maxCost`). */
   maxCost?: number;
+  /** Set on each run of a race (`--race N`): how many race. */
+  race?: number;
   continueFrom?: string;
   allowNonGit: boolean;
   web: boolean;
@@ -207,6 +209,7 @@ export function prepareRun(o: RunOptions): RunMeta {
     // a read run's worker cannot change what the check found
     verifyFix: o.verify && mode !== 'read' ? (o.verifyFix ?? effective().verifyFix.value) || undefined : undefined,
     maxCost: o.maxCost ?? effective().maxCost.value,
+    race: o.race,
     web: o.web || !!parent?.web,
     state: 'queued',
     startedAt: new Date().toISOString(),

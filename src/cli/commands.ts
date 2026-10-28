@@ -30,7 +30,8 @@ import { formatModels, modelTable } from '../core/models.js';
 import { dashCommand } from '../core/dash.js';
 import { archivedRun, historyFile, historyStats, importRuns, listHistory, openDb, readRunFile, recordRun } from '../core/history.js';
 import { hookCards, statusLine } from '../core/ui.js';
-import { applyRun, discardRun, execute, prepareRun, revertRun, startInBackground, stopRun } from '../core/run.js';
+import { type RunOptions, applyRun, discardRun, execute, prepareRun, revertRun, startInBackground, stopRun } from '../core/run.js';
+import { MAX_RACE, formatRace, settleRace, startRace } from '../core/race.js';
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
@@ -58,6 +59,8 @@ async function launch(p: Parsed, meta: RunMeta): Promise<number> {
 export async function cmdRun(p: Parsed): Promise<number> {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
+  const race = flag(p, 'race');
+  if (race !== undefined) return runRace(p, opts, raceSize(race));
   const cache = cacheKey(opts);
   // --fresh asks a worker, and its answer is the one found from then on
   const hit = cache && !has(p, 'fresh') ? findCached(cache) : undefined;
@@ -67,6 +70,41 @@ export async function cmdRun(p: Parsed): Promise<number> {
     return exitCodeFor(hit);
   }
   return launch(p, prepareRun({ ...opts, cache }));
+}
+
+function raceSize(v: string): number {
+  if (!/^\d+$/.test(v) || Number(v) < 2 || Number(v) > MAX_RACE) throw new UserError(`--race takes how many workers race, 2 to ${MAX_RACE}, not "${v}"`);
+  return Number(v);
+}
+
+/** `pitroom run -i --race N`: N workers make the same change; in the foreground, waits for all and names the winner. */
+async function runRace(p: Parsed, opts: RunOptions, size: number): Promise<number> {
+  const metas = startRace(opts, size);
+  const group = metas[0]!.group!;
+  const ids = metas.map((m) => m.id);
+  const started = [`pitroom race "${group}": ${size} workers make the same change, each in an isolated copy`, ...metas.map((m) => `   ${m.id}  ${describeRacer(m)}`)];
+  if (has(p, 'bg')) {
+    console.log(has(p, 'json') ? JSON.stringify({ group, runs: ids }, null, 2) : [...started, `   live:    pitroom watch -g ${group}`, `   results: pitroom wait -g ${group}   (names the winner)`].join('\n'));
+    return 0;
+  }
+  if (!has(p, 'json')) console.error(`${started.join('\n')}\n   waiting for all of them (follow: pitroom watch -g ${group}; stop: pitroom stop -g ${group})`);
+  await waitMany(ids, { any: false, timeoutMs: 7 * 86_400_000 });
+  return printRace(p, ids);
+}
+
+const describeRacer = (m: RunMeta) => (m.worker.model ? `${m.worker.backend}:${m.worker.model}` : m.worker.backend);
+
+/** The race's places and the winner's report; exit as the winner's run, or 1 when there is none. */
+function printRace(p: Parsed, ids: string[]): number {
+  const placings = settleRace(ids)!;
+  const winner = placings[0]!.meta;
+  const won = winner.state === 'done' && !!winner.changes?.length;
+  if (has(p, 'json')) {
+    console.log(JSON.stringify({ winner: won ? winner.id : undefined, places: placings.map((x) => ({ place: x.place, id: x.meta.id, why: x.why })) }, null, 2));
+  } else {
+    console.log(`${formatRace(placings)}${won ? `\n\n${formatReport(winner)}` : ''}`);
+  }
+  return won ? exitCodeFor(winner) : 1;
 }
 
 /** A read-only review of a run's change, of a fix round, or of a commit range. */
@@ -326,6 +364,8 @@ export async function cmdWait(p: Parsed): Promise<number> {
   });
   const finished = metas.filter((m) => TERMINAL.includes(m.state));
   const pending = metas.filter((m) => isActive(m.state));
+  // a race's group, ended: its places and the winner's report, not every racer's
+  if (flag(p, 'group') && !pending.length && metas.every((m) => m.race)) return printRace(p, ids);
   const parts = finished.map((m) =>
     has(p, 'brief') ? `pitroom ${m.state} · ${m.id} · ${headline(m) || m.error || m.task}` : formatReport(m),
   );

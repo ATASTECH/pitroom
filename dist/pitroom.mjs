@@ -2528,6 +2528,7 @@ var VALUE_FLAGS = {
   "--verify": "verify",
   "--verify-fix": "verify-fix",
   "--max-cost": "max-cost",
+  "--race": "race",
   "--link": "link",
   "-c": "continue",
   "--continue": "continue",
@@ -3594,19 +3595,19 @@ var ASKS_FOR_LIST = /\b(all|every|each|list|lists|enumerate|how many|count|which
 function focusedRate(base2, task, record2) {
   if (base2 <= 0 || base2 >= 1) return { rate: base2, why: [] };
   let rate2 = base2;
-  const why = [];
+  const why2 = [];
   if (ASKS_FOR_LIST.test(task)) {
     rate2 *= 2;
-    why.push("asks for a list or a count");
+    why2.push("asks for a list or a count");
   }
   if (record2 && record2.audited >= 3 && record2.agreed / record2.audited < 0.5) {
     rate2 *= 2;
-    why.push(`the worker's audited answers were confirmed ${record2.agreed} of ${record2.audited} times`);
+    why2.push(`the worker's audited answers were confirmed ${record2.agreed} of ${record2.audited} times`);
   } else if (record2 && record2.audited >= 5 && record2.agreed === record2.audited) {
     rate2 /= 2;
-    why.push(`the worker's ${record2.audited} audited answers were all confirmed`);
+    why2.push(`the worker's ${record2.audited} audited answers were all confirmed`);
   }
-  return { rate: Math.min(rate2, 1), why };
+  return { rate: Math.min(rate2, 1), why: why2 };
 }
 function pickAuditor(meta) {
   return auditors(meta)[0];
@@ -5627,6 +5628,7 @@ function prepareRun(o) {
     // a read run's worker cannot change what the check found
     verifyFix: o.verify && mode !== "read" ? (o.verifyFix ?? effective().verifyFix.value) || void 0 : void 0,
     maxCost: o.maxCost ?? effective().maxCost.value,
+    race: o.race,
     web: o.web || !!parent?.web,
     state: "queued",
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -5742,10 +5744,10 @@ async function execute(meta) {
       result = await attempt(meta, backend, target);
       if (own) strayWrites(meta, backend, before);
       if (result.timedOut || result.stopped || result.spawnError || result.capped) break;
-      const why = retryableFailure(meta, backend, result);
-      if (!why) break;
-      lastFailure = why;
-      if (why.kind === "rate-limited") recordCooldown(cooldownKey(target, backend), describeTarget(target), why.message);
+      const why2 = retryableFailure(meta, backend, result);
+      if (!why2) break;
+      lastFailure = why2;
+      if (why2.kind === "rate-limited") recordCooldown(cooldownKey(target, backend), describeTarget(target), why2.message);
       if (!target.model && backend.defaultModel) {
         const failed = backend.defaultModel();
         for (let j = chain.length - 1; j > i; j--) {
@@ -5753,8 +5755,8 @@ async function execute(meta) {
         }
       }
       if (i === chain.length - 1) break;
-      if (why.partial) handOver(meta, backend, target);
-      (meta.attempts ??= []).push({ target: describeTarget(target), error: why.message, ...why.partial ? { partial: true } : {} });
+      if (why2.partial) handOver(meta, backend, target);
+      (meta.attempts ??= []).push({ target: describeTarget(target), error: why2.message, ...why2.partial ? { partial: true } : {} });
       for (const f of ["events.jsonl", "stderr.log"]) {
         const from = runFile(meta.id, f);
         if (fs32.existsSync(from)) fs32.renameSync(from, runFile(meta.id, f.replace(".", `.attempt-${i + 1}.`)));
@@ -6008,9 +6010,9 @@ async function fixUntilVerified(meta, result) {
     const done = backend.parse(read2(runFile(meta.id, "events.jsonl")));
     meta.sessionId = done.sessionId ?? meta.sessionId;
     const spent = meta.maxCost !== void 0 ? costSoFar(meta, backend, target) : void 0;
-    const why = !meta.sessionId ? "its session is not known" : !inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : spent !== void 0 && spent >= meta.maxCost ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost)})` : void 0;
-    if (why) {
-      meta.warnings.push(`the failed check was not sent back to the worker: ${why}`);
+    const why2 = !meta.sessionId ? "its session is not known" : !inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : spent !== void 0 && spent >= meta.maxCost ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost)})` : void 0;
+    if (why2) {
+      meta.warnings.push(`the failed check was not sent back to the worker: ${why2}`);
       return result;
     }
     const prompt = fixPrompt(meta, v.code);
@@ -8656,6 +8658,84 @@ function formatModels(t) {
   return out.join("\n");
 }
 
+// src/core/race.ts
+var MAX_RACE = 5;
+function racers(o, size) {
+  if (o.worker) return Array.from({ length: size }, () => ({ worker: o.worker, model: o.model }));
+  const chain = resolveChain({ model: o.model, tier: o.tier, effort: o.effort });
+  const distinct = [];
+  for (const t of [chain.worker, ...chain.fallback]) if (!distinct.some((d) => sameTarget(d, t))) distinct.push(t);
+  return Array.from({ length: size }, (_, i) => ({ worker: formatTarget(distinct[i % distinct.length]) }));
+}
+function startRace(o, size) {
+  if (o.mode !== "isolate") throw new UserError("--race runs one change side by side in isolated copies: add -i");
+  if (o.continueFrom || o.plan) throw new UserError("--race starts new runs: drop --continue and --plan");
+  const group = o.group ?? `race-${(/* @__PURE__ */ new Date()).toISOString().slice(11, 19).replace(/:/g, "")}`;
+  return racers(o, size).map((r) => startInBackground(prepareRun({ ...o, ...r, tier: void 0, effort: o.worker ? o.effort : void 0, group, race: size })));
+}
+var verifyScore = (m) => !m.verifyResult ? 1 : m.verifyResult.ok ? 0 : 2;
+var diffSize = (m) => m.stats ? m.stats.insertions + m.stats.deletions : 0;
+var costOf = (m) => m.usage?.cost ?? m.usage?.costEstimate;
+function score(m) {
+  return [
+    m.state === "done" ? 0 : 1,
+    verifyScore(m),
+    m.changes?.length ? 0 : 1,
+    m.refs?.invalid.length ?? 0,
+    diffSize(m),
+    costOf(m) ?? Number.MAX_VALUE,
+    Date.parse(m.endedAt ?? "") || Number.MAX_VALUE
+  ];
+}
+function compare(a, b) {
+  const x = score(a);
+  const y = score(b);
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
+  return 0;
+}
+function why(m) {
+  if (m.state !== "done") return `${m.state}${m.error ? `: ${m.error.replace(/\s+/g, " ").slice(0, 80)}` : ""}`;
+  const parts = [];
+  if (m.verifyResult) parts.push(m.verifyResult.ok ? "verify passed" : `verify failed (exit ${m.verifyResult.code})`);
+  parts.push(m.changes?.length ? `+${m.stats?.insertions ?? 0} \u2212${m.stats?.deletions ?? 0}` : "no changes");
+  if (m.refs?.total) parts.push(`${m.refs.valid}/${m.refs.total} refs`);
+  const cost = costOf(m);
+  if (cost !== void 0) parts.push(cost === 0 ? "free" : `${m.usage?.cost === void 0 ? "~" : ""}${usd(cost)}`);
+  return parts.join(" \xB7 ");
+}
+function settleRace(ids) {
+  const metas = ids.map((id2) => freshMeta(id2));
+  if (metas.some((m) => isActive(m.state))) return void 0;
+  if (metas.every((m) => m.racePlace)) {
+    return metas.sort((a, b) => a.racePlace - b.racePlace).map((m) => ({ meta: m, place: m.racePlace, why: why(m) }));
+  }
+  const ranked = [...metas].sort(compare);
+  const winner = ranked[0].state === "done" && ranked[0].changes?.length ? ranked[0] : void 0;
+  return ranked.map((m, i) => {
+    m.racePlace = i + 1;
+    writeMeta(m);
+    if (winner && m !== winner && m.mode === "isolate" && !m.applied && !m.discarded && m.worktree) {
+      try {
+        discardRun(m);
+      } catch {
+      }
+    }
+    return { meta: m, place: i + 1, why: why(m) };
+  });
+}
+function formatRace(placings) {
+  const first = placings[0].meta;
+  const won = first.state === "done" && !!first.changes?.length;
+  const head = `pitroom race "${first.group ?? ""}": ${placings.length} workers, ${won ? `winner ${first.id} (${workerName(ranTarget(first))})` : "no winner: no worker ended with a change"}`;
+  const rows = placings.map(({ meta: m, place: place2, why: w }) => {
+    const gone = m.changes?.length ? "  (copy discarded; the patch stays)" : "  (copy discarded)";
+    const note = won && place2 === 1 ? "  \u2190 winner" : m.discarded && !m.applied ? gone : "";
+    return `   ${place2}. ${m.id}  ${workerName(ranTarget(m))} \xB7 ${w}${note}`;
+  });
+  const next = won ? [`   apply:   pitroom apply ${first.id}`, `   diff:    pitroom show ${first.id} --patch   (another racer's: pitroom show RUN --patch)`] : [];
+  return [head, ...rows, ...next].join("\n");
+}
+
 // src/cli/commands.ts
 async function launch(p, meta) {
   if (has(p, "bg")) {
@@ -8675,6 +8755,8 @@ warning: ${w}`).join("")
 async function cmdRun(p) {
   const opts = { ...runOptions(p, readTask(p)), plan: planStep(p) };
   if (!opts.task.trim() && !opts.plan) throw new UserError('no task given (pitroom "find where X is handled")');
+  const race = flag(p, "race");
+  if (race !== void 0) return runRace(p, opts, raceSize(race));
   const cache = cacheKey(opts);
   const hit = cache && !has(p, "fresh") ? findCached(cache) : void 0;
   if (hit) {
@@ -8684,6 +8766,38 @@ ${formatReport(hit)}`);
     return exitCodeFor(hit);
   }
   return launch(p, prepareRun({ ...opts, cache }));
+}
+function raceSize(v) {
+  if (!/^\d+$/.test(v) || Number(v) < 2 || Number(v) > MAX_RACE) throw new UserError(`--race takes how many workers race, 2 to ${MAX_RACE}, not "${v}"`);
+  return Number(v);
+}
+async function runRace(p, opts, size) {
+  const metas = startRace(opts, size);
+  const group = metas[0].group;
+  const ids = metas.map((m) => m.id);
+  const started = [`pitroom race "${group}": ${size} workers make the same change, each in an isolated copy`, ...metas.map((m) => `   ${m.id}  ${describeRacer(m)}`)];
+  if (has(p, "bg")) {
+    console.log(has(p, "json") ? JSON.stringify({ group, runs: ids }, null, 2) : [...started, `   live:    pitroom watch -g ${group}`, `   results: pitroom wait -g ${group}   (names the winner)`].join("\n"));
+    return 0;
+  }
+  if (!has(p, "json")) console.error(`${started.join("\n")}
+   waiting for all of them (follow: pitroom watch -g ${group}; stop: pitroom stop -g ${group})`);
+  await waitMany(ids, { any: false, timeoutMs: 7 * 864e5 });
+  return printRace(p, ids);
+}
+var describeRacer = (m) => m.worker.model ? `${m.worker.backend}:${m.worker.model}` : m.worker.backend;
+function printRace(p, ids) {
+  const placings = settleRace(ids);
+  const winner = placings[0].meta;
+  const won = winner.state === "done" && !!winner.changes?.length;
+  if (has(p, "json")) {
+    console.log(JSON.stringify({ winner: won ? winner.id : void 0, places: placings.map((x) => ({ place: x.place, id: x.meta.id, why: x.why })) }, null, 2));
+  } else {
+    console.log(`${formatRace(placings)}${won ? `
+
+${formatReport(winner)}` : ""}`);
+  }
+  return won ? exitCodeFor(winner) : 1;
 }
 async function cmdReview(p) {
   const range = flag(p, "range");
@@ -8909,6 +9023,7 @@ async function cmdWait(p) {
   });
   const finished = metas.filter((m) => TERMINAL.includes(m.state));
   const pending = metas.filter((m) => isActive(m.state));
+  if (flag(p, "group") && !pending.length && metas.every((m) => m.race)) return printRace(p, ids);
   const parts = finished.map(
     (m) => has(p, "brief") ? `pitroom ${m.state} \xB7 ${m.id} \xB7 ${headline(m) || m.error || m.task}` : formatReport(m)
   );
@@ -9453,8 +9568,8 @@ function probe(backend, target, cwd) {
   const secs2 = ((Date.now() - t0) / 1e3).toFixed(1);
   const run2 = backend.parse(r.stdout ?? "");
   if (run2.finalText.includes("PONG")) return { level: "ok", message: `live probe (${describeTarget(target)}) answered in ${secs2}s` };
-  const why = backend.failure(run2, r.stderr ?? "", r.status)?.message ?? run2.finalText.slice(0, 200);
-  return { level: "fail", message: `live probe (${describeTarget(target)}) failed after ${secs2}s: ${why}` };
+  const why2 = backend.failure(run2, r.stderr ?? "", r.status)?.message ?? run2.finalText.slice(0, 200);
+  return { level: "fail", message: `live probe (${describeTarget(target)}) failed after ${secs2}s: ${why2}` };
 }
 function skillChecks() {
   const checks = [];
@@ -9671,6 +9786,8 @@ Run options
       --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
                         (0 to 3; default: config "verifyFix", 1)
       --max-cost USD    stop the worker when the run has cost this much (reported or estimated; config "maxCost")
+      --race N          -i: N workers (the worker and its fallbacks in turn, or -W each time) make the same change
+                        side by side; when all end, the best one wins and the others' copies go (2 to 5)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
   -c, --continue RUN    follow up in the same worker session (and the same isolated copy)
       --bg              start in background, print the run id, return immediately

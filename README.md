@@ -557,6 +557,8 @@ Humans get the same table live with `pitroom watch -g NAME`; `pitroom wait -g NA
 
 **One question, split by part.** `pitroom crew --over src/auth,src/billing,src/uploads "Find missing input validation in {scope}. file:line for each."` runs the task once per part (`{scope}` is filled in) and tells each worker that its part is the only one it reads, or in an `-i` crew the only one it changes. A pattern in the last part of a path makes one part per match, hidden ones left out (`--over "packages/*/"`: one per folder). Parts must exist and must not overlap (`src` with `src/auth` is refused): two workers that read the same files hand your agent two answers about the same code to reconcile, and when they disagree it opens the files itself.
 
+**One change, raced.** `pitroom run -i --race 3 --verify "npm test" "Fix the off-by-one in paginate()"` gives the same change to three workers at once (your worker and its fallbacks in turn, or `-W` three times: free models answer differently each time), each in an isolated copy of its own. When all have ended the best one wins: it ended well, its check passed, it changed something, its references held, then the smallest diff and the lowest cost. The others' copies are discarded (their patches stay: `pitroom show RUN --patch`, even `pitroom apply RUN`), and you get the places and the winner's report. Nothing reaches your tree until you apply the winner. `--bg` returns at once; `pitroom wait -g race-…` names the winner.
+
 For changes, `pitroom crew -i …` gives every worker its own isolated copy of your current state and `pitroom apply -g NAME` lands the patches in order, stopping at the first conflict. Up to `maxParallel` workers (default 20, at most 30) run at once, the rest queue; only one `--write` run per repository is allowed. `pitroom stop -g NAME` stops running and queued workers.
 
 ---
@@ -594,6 +596,7 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 
 ```text
 pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD [--verify-fix N]] [--max-cost USD] [--link a,b] [--bg] "task"
+pitroom run -i --race N [--verify CMD] "task"     N workers (2 to 5) make the same change; the best one wins
 pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
 pitroom crew [-i] [-g NAME] --over src/a,src/b "task about {scope}"   (one worker per part; "src/*/": one per folder)

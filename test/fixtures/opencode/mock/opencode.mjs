@@ -97,7 +97,9 @@ if ((process.env.MOCK_RATE_LIMIT_MODELS ?? '').split(',').includes(model)) {
 // Split only on ";" that starts a new action, so answers and commands may contain ";".
 // A task may carry its own script as [[mock:…]] (lets one crew run different tasks).
 const inline = /\[\[mock:([\s\S]*?)\]\]/.exec(argv[argv.length - 1] ?? '')?.[1];
-const actions = (inline ?? process.env.MOCK_ACTIONS ?? 'answer:SUMMARY: mock answer')
+// MOCK_ACTIONS_BY_MODEL='{"mock/a": "…"}': a script per --model (lets the workers of one race differ)
+const byModel = process.env.MOCK_ACTIONS_BY_MODEL ? JSON.parse(process.env.MOCK_ACTIONS_BY_MODEL)[model] : undefined;
+const actions = (inline ?? byModel ?? process.env.MOCK_ACTIONS ?? 'answer:SUMMARY: mock answer')
   .split(/;(?=(?:answer|append|write|sleep|fail|exec):)/)
   .filter(Boolean);
 const partWay = (process.env.MOCK_LIMIT_PART_WAY_MODELS ?? '').split(',').includes(model);

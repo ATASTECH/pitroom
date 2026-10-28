@@ -22,7 +22,7 @@ pitroom run -i --link node_modules --verify "npm test -- auth" \
 pitroom run -w "Rename getUserById to findUserById in src/ and update imports. No other changes."
 ```
 
-`--link` shares ignored folders (node_modules, .venv) with the isolated copy so tests can run there; `--verify` runs your check after the worker and reports pass/fail; when it fails, its output first goes back to the worker for a fix round (`--verify-fix N`, default 1), and the report says `passed after 1 fix round` when that worked. Long changes: add `--bg` and collect with `pitroom wait <run>`.
+`--link` shares ignored folders (node_modules, .venv) with the isolated copy so tests can run there; `--verify` runs your check after the worker and reports pass/fail; when it fails, its output first goes back to the worker for a fix round (`--verify-fix N`, default 1), and the report says `passed after 1 fix round` when that worked. Long changes: add `--bg` and collect with `pitroom wait <run>`. A change free models often get wrong: `--race 3` gives it to three workers at once and keeps the best (the check decides first).
 
 ## Write a good brief
 

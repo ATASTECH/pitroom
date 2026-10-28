@@ -100,6 +100,8 @@ Run options
       --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
                         (0 to 3; default: config "verifyFix", 1)
       --max-cost USD    stop the worker when the run has cost this much (reported or estimated; config "maxCost")
+      --race N          -i: N workers (the worker and its fallbacks in turn, or -W each time) make the same change
+                        side by side; when all end, the best one wins and the others' copies go (2 to 5)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
   -c, --continue RUN    follow up in the same worker session (and the same isolated copy)
       --bg              start in background, print the run id, return immediately
