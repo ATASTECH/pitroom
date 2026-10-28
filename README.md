@@ -72,7 +72,7 @@ Pitroom uses your worker CLI's default model: a free tier, a local MLX/Ollama mo
 
 ### Any worker CLI
 
-OpenCode, Codex CLI, Claude Code, Gemini CLI, Qwen Code, Kilo Code and Antigravity CLI (beta on Linux and Windows).
+OpenCode, Codex CLI, Claude Code, Gemini CLI, Qwen Code, Kilo Code, Antigravity CLI and Cursor CLI (the last two beta on Linux and Windows).
 
 One group can mix them, and a fallback chain can cross them ([how adapters work](docs/backends.md)).
 
@@ -708,6 +708,7 @@ pitroom run -W gemini:gemini-3.8-flash "…"               # Gemini CLI (beta; n
 pitroom run -W qwen:qwen3-coder-plus "…"                 # Qwen Code (beta; your provider from ~/.qwen/settings.json)
 pitroom run -W kilo:kilo/<model> "…"                      # Kilo Code's CLI (beta; any model from `kilo models`)
 pitroom run -i -W antigravity "…"                         # Antigravity CLI (your Google account, models from `agy models`; beta on Linux and Windows)
+pitroom run -W cursor:composer-2.5 "…"                    # Cursor CLI (your Cursor plan, models from `cursor-agent models`; beta on Linux and Windows)
 pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on the preferred worker
 ```
 
@@ -720,6 +721,7 @@ pitroom run -m nvidia/z-ai/glm-5.3 "…"                   # another model on th
 | Qwen Code | beta | `--approval-mode plan`; edits only inside the working directory, the rest declined | tokens only | checked against Qwen Code 0.25 with a scripted model, not yet with a real provider; uses your sign-in and model from `~/.qwen/settings.json` (any OpenAI-compatible provider, DashScope, a local model); `--safe-mode` keeps your QWEN.md, hooks, skills and MCP servers out and stops the CLI writing memories of the run; reads `.env` if asked, so a read run with secret-looking files reads a [clean snapshot](#modes); see [the notes](docs/backends.md#qwen-code-notes) |
 | Kilo Code | beta | per-run permission rules (OpenCode's profiles) | reported | the CLI of `@kilocode/cli` (an OpenCode fork): the same `pitroom-read`/`pitroom-write` profiles through `KILO_CONFIG_CONTENT`, your sign-in and providers as they are; workers use a private state folder so a running `kilo daemon` (which would ignore the profiles) is never attached to; checked against Kilo 7.8.8 with a scripted model, not yet with a real provider; see [the notes](docs/backends.md#kilo-code-notes) |
 | Antigravity CLI | macOS; beta on Linux and Windows | a read-only [snapshot](#modes) of its own for every read run (agy has no read-only mode for headless runs) | tokens only | checked against agy 1.4.7 on macOS (`scripts/check-worker.mjs`), not yet on Linux or Windows; use `-i` for changes, not `-w` (its deny rules are patterns, a layer on top of the git guard and the isolated copy); runs with a home of its own per workspace (agy reads its settings only from `~/.gemini`), so its commands do not see your dotfiles; an answerless run (a refused command can end its turn with no answer and exit 0) is a failure; your Google account sign-in (the one Gemini CLI now refuses); shell in agy's terminal sandbox (macOS, Linux); no web access for these workers; give it a fallback, its quota is per account; see [the notes](docs/backends.md#antigravity-cli-notes) |
+| Cursor CLI | macOS; beta on Linux and Windows | ask mode, in a read-only [snapshot](#modes) of its own; no shell in a read | tokens only | `cursor-agent login`; checked against Cursor CLI 2026.10.22 on macOS (`scripts/check-worker.mjs`: 8 of 8); changes run in its sandbox (writes only in the workspace and the temp folder; an edit elsewhere is refused; the network stays reachable) with Pitroom's deny rules; workers run in a home of their own per workspace, so your `~/.cursor` MCP servers, hooks and plugins are not loaded; your account's User Rules on cursor.com still apply (they can change the answer's language) |
 
 ### Models, costs and effort
 

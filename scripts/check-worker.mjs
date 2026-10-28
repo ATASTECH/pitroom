@@ -141,7 +141,7 @@ check('git guard: a commit the worker tries does not happen', () => {
   const r = run(['-i', 'Create a file named extra.txt with the text x, then run `git add extra.txt` and `git commit -m extra`, and report what git printed.']);
   const said = `${r.answer}\n${r.id ? events(r.id) : ''}`;
   // who said no: Pitroom's git shim or ref hook, or the worker CLI's own rules
-  const by = /blocked for workers|ref updates .* are blocked/.test(said) ? 'the git guard' : /denied|not allowed|permission|refus/i.test(said) ? "the worker's own rules" : 'nothing that said so';
+  const by = /blocked for workers|ref updates .* are blocked/.test(said) ? 'the git guard' : /denied|not allowed|permission|refus|blocked/i.test(said) ? "the worker's own rules" : 'nothing that said so';
   // the isolated copy has no commit of its own (its HEAD is unborn, or the start commit): a commit there gives it one
   let copyHead = '';
   try {

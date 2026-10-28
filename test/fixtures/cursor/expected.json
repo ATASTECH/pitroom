@@ -1,0 +1,72 @@
+{
+  "events": {
+    "read.jsonl": {
+      "sessionId": "d195bb89-8ee9-4eb3-9165-2127c1f7f250",
+      "steps": 2,
+      "total": 35298,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "`add` fonksiyonu: `src/math.ts:1`"
+    },
+    "follow-up.jsonl": {
+      "sessionId": "d195bb89-8ee9-4eb3-9165-2127c1f7f250",
+      "steps": 1,
+      "total": 37825,
+      "denied": 0,
+      "edits": 0,
+      "finalTextStartsWith": "It returns the sum of `a` and `b`."
+    },
+    "read-refusals.jsonl": {
+      "sessionId": "98fe8497-90c4-44cb-9796-feedf22d7fd2",
+      "steps": 2,
+      "total": 34277,
+      "denied": 2,
+      "edits": 0,
+      "finalTextStartsWith": "1) Not run: Ask mode forbids writing files"
+    },
+    "isolate-edit.jsonl": {
+      "sessionId": "2d53f034-8166-4826-aac3-88339ec341a7",
+      "steps": 2,
+      "total": 45558,
+      "denied": 0,
+      "edits": 2,
+      "finalTextStartsWith": "1) Added exported `multiply(a, b)` to `src/math.ts`"
+    },
+    "denied-commands.jsonl": {
+      "sessionId": "9d4d8b03-10ff-423c-b2c2-55b3e5898e56",
+      "steps": 5,
+      "total": 257579,
+      "denied": 7,
+      "edits": 1,
+      "finalTextStartsWith": "Results for each step, in order:"
+    },
+    "outside-write.jsonl": {
+      "sessionId": "c6ccb51f-53e0-400d-bd7a-48ee76d458e7",
+      "steps": 3,
+      "total": 42606,
+      "denied": 1,
+      "edits": 0,
+      "finalTextStartsWith": "1) File editing tool: Rejected"
+    },
+    "adapter-denied.jsonl": {
+      "sessionId": "b8e590c0-d790-4170-9daf-dd0fcdd6ac0f",
+      "steps": 4,
+      "total": 64178,
+      "denied": 4,
+      "edits": 0,
+      "finalTextStartsWith": "Ham çıktılar:"
+    }
+  },
+  "failures": {
+    "unknown-model": {
+      "exitCode": 1,
+      "kind": "model-unavailable",
+      "messageIncludes": "Cannot use this model: no-such-model-xyz."
+    },
+    "not-signed-in": {
+      "exitCode": 1,
+      "kind": "auth",
+      "messageIncludes": "Authentication required"
+    }
+  }
+}

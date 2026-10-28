@@ -612,7 +612,7 @@ test('deny list: one list for every worker; Gemini\'s rule file and OpenCode\'s 
     assert.ok(qwen.includes(`run_shell_command(${c})`), `qwen: ${c}`);
   }
   const bash = JSON.parse(getBackend('opencode').invocation(request({ mode: 'write' })).env.OPENCODE_CONFIG_CONTENT).agent['pitroom-write'].permission.bash;
-  for (const agent of ['opencode', 'kilo', 'kilocode', 'agy', 'cursor-agent', 'pitroom']) assert.ok(Object.keys(bash).some((k) => k.startsWith(agent) && bash[k] === 'deny'), `opencode: ${agent}`);
+  for (const agent of ['opencode', 'kilo', 'kilocode', 'agy', 'cursor-agent', 'agent', 'pitroom']) assert.ok(Object.keys(bash).some((k) => k.startsWith(agent) && bash[k] === 'deny'), `opencode: ${agent}`);
 });
 
 test('private homes: settings are replaced whole, a dangling sign-in link is repaired, a file the CLI wrote is kept', () => {
