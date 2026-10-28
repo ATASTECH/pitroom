@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
-import { root, sandbox } from './helpers.mjs';
+import { posixOnly, root, sandbox } from './helpers.mjs';
 
 const SCRIPT = path.join(root, 'scripts', 'github-review.mjs');
 
@@ -13,7 +13,8 @@ const SCRIPT = path.join(root, 'scripts', 'github-review.mjs');
 const SERVER = `
 const http = require('node:http');
 const fs = require('node:fs');
-const comments = [];
+// a person's comment that starts with the marker: never the action's to update
+const comments = [{ id: 99, body: '<!-- pitroom-review -->\\nnot from the action', user: { login: 'someone', type: 'User' } }];
 let next = 1;
 http.createServer((req, res) => {
   let b = '';
@@ -25,7 +26,7 @@ http.createServer((req, res) => {
     let m;
     if (req.method === 'GET' && /^\\/repos\\/o\\/r\\/issues\\/7\\/comments\\?/.test(req.url)) return res.end(JSON.stringify(comments));
     if (req.method === 'POST' && req.url === '/repos/o/r/issues/7/comments') {
-      const c = { id: next++, body: body.body };
+      const c = { id: next++, body: body.body, user: { login: 'github-actions[bot]', type: 'Bot' } };
       comments.push(c);
       return res.end(JSON.stringify(c));
     }
@@ -60,7 +61,9 @@ function pullRequest(s) {
   return { base, head, eventFile, summary: path.join(s.base, 'summary.md'), output: path.join(s.base, 'output.txt') };
 }
 
-const VERDICT = 'answer:SUMMARY: SPEC: PASS · QUALITY: NEEDS_FIXES · ISSUES: critical=1 important=0 minor=0\\nCRITICAL:\\n- app.txt:2 breaks [see](http://example.com) @someone';
+const TOKEN = 'ghs_fakeTokenValue0123456789';
+const KEY = 'sk-worker-key-abcdef0123456789';
+const VERDICT = `answer:SUMMARY: SPEC: PASS · QUALITY: NEEDS_FIXES · ISSUES: critical=1 important=0 minor=0\\nCRITICAL:\\n- app.txt:2 breaks [see](http://example.com) @someone ${TOKEN} ${KEY}`;
 
 function step(s, prq, gh, extra = {}) {
   return spawnSync(process.execPath, [SCRIPT], {
@@ -73,7 +76,8 @@ function step(s, prq, gh, extra = {}) {
       GITHUB_EVENT_PATH: prq.eventFile,
       GITHUB_REPOSITORY: 'o/r',
       GITHUB_API_URL: gh.url,
-      GITHUB_TOKEN: 'tok',
+      PITROOM_GITHUB_TOKEN: TOKEN,
+      OPENCODE_API_KEY: KEY,
       GITHUB_STEP_SUMMARY: prq.summary,
       GITHUB_OUTPUT: prq.output,
       MOCK_ACTIONS: VERDICT,
@@ -91,7 +95,7 @@ test('action: the pull request is reviewed; summary, outputs and one comment, up
   const r = step(s, prq, gh, { INPUT_WORKER: 'opencode:mock/reviewer' });
   assert.equal(r.status, 0, r.stdout + r.stderr);
   const summary = fs.readFileSync(prq.summary, 'utf8');
-  assert.match(summary, /^### Pitroom review: SPEC PASS · QUALITY NEEDS FIXES\n\*\*critical 1 · important 0 · minor 0\*\* · `[0-9a-f]{7}\.\.[0-9a-f]{7}` reviewed by opencode \(mock\/reviewer\) · run `\d{8}-\d{6}-[0-9a-f]{4}`/);
+  assert.match(summary, /^### Pitroom review: SPEC PASS · QUALITY NEEDS FIXES\n\*\*critical 1 · important 0 · minor 0\*\* · `[0-9a-f]{7}\.\.[0-9a-f]{7}` reviewed by `opencode \(mock\/reviewer\)` · run `\d{8}-\d{6}-[0-9a-f]{4}`/);
   // the worker's text sits in a code fence: no link, image or mention is rendered
   assert.match(summary, /```text\n[\s\S]*\[see\]\(http:\/\/example\.com\) @someone[\s\S]*\n```\n<\/details>/);
   const out = fs.readFileSync(prq.output, 'utf8');
@@ -101,8 +105,15 @@ test('action: the pull request is reviewed; summary, outputs and one comment, up
 
   const posted = gh.requests().filter((q) => q.method === 'POST');
   assert.equal(posted.length, 1);
-  assert.equal(posted[0].auth, 'Bearer tok');
+  assert.equal(posted[0].auth, `Bearer ${TOKEN}`);
   assert.match(posted[0].body.body, /^<!-- pitroom-review -->\n### Pitroom review: SPEC PASS/);
+  // secrets the worker was talked into writing are cut out of what is posted, and the token is masked in the log
+  for (const text of [posted[0].body.body, summary]) {
+    assert.doesNotMatch(text, new RegExp(`${TOKEN}|${KEY}`));
+    assert.match(text, /@someone \*\*\* \*\*\*/);
+  }
+  assert.match(r.stdout, new RegExp(`^::add-mask::${TOKEN}$`, 'm'));
+  assert.equal(gh.requests().filter((q) => q.method === 'PATCH').length, 0, "a person's comment with the marker is left alone");
 
   const again = step(s, prq, gh, { INPUT_FAIL_ON: 'critical' });
   assert.equal(again.status, 1, again.stdout + again.stderr);
@@ -120,7 +131,7 @@ test('action: a review that cannot finish warns (fail-on never) or fails; no ran
   const warned = step(s, prq, gh, broken);
   assert.equal(warned.status, 0, warned.stdout + warned.stderr);
   assert.match(warned.stdout, /::warning::Pitroom review could not finish on opencode \(mock\/gone\)/);
-  assert.match(fs.readFileSync(prq.summary, 'utf8'), /^### Pitroom review could not finish\n`[0-9a-f]{7}\.\.[0-9a-f]{7}` on opencode \(mock\/gone\): .*Model not found/m);
+  assert.match(fs.readFileSync(prq.summary, 'utf8'), /^### Pitroom review could not finish\n`[0-9a-f]{7}\.\.[0-9a-f]{7}` on `opencode \(mock\/gone\)`:\n\n```text\n.*Model not found[^\n]*\n```$/m);
   const failed = step(s, prq, gh, { ...broken, INPUT_FAIL_ON: 'important' });
   assert.equal(failed.status, 1);
   assert.match(failed.stdout, /::error::Pitroom review could not finish/);
@@ -133,9 +144,21 @@ test('action: a review that cannot finish warns (fail-on never) or fails; no ran
   assert.match(bad.stdout, /"fail-on" is critical, important or never, not "sometimes"/);
 });
 
+test('action: the GitHub token never reaches the worker or its tools', { skip: posixOnly }, async (t) => {
+  const s = sandbox();
+  const prq = pullRequest(s);
+  const gh = await fakeGitHub(s.base);
+  t.after(gh.stop);
+  const r = step(s, prq, gh, { GITHUB_TOKEN: TOKEN, GH_TOKEN: TOKEN, MOCK_ACTIONS: `exec:env;${VERDICT}` });
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  const [seen] = s.execs();
+  assert.match(seen.output, /OPENCODE_API_KEY=/, 'the worker keeps what it needs');
+  assert.doesNotMatch(seen.output, /^(PITROOM_GITHUB_TOKEN|GITHUB_TOKEN|GH_TOKEN)=/m);
+});
+
 test('action: action.yml runs the script with every input mapped', () => {
   const yml = fs.readFileSync(path.join(root, 'action.yml'), 'utf8');
   for (const input of ['worker', 'range', 'fail-on', 'comment', 'github-token', 'node-version']) assert.match(yml, new RegExp(`^  ${input}:\\n`, 'm'));
-  for (const v of ['INPUT_WORKER', 'INPUT_RANGE', 'INPUT_FAIL_ON', 'INPUT_COMMENT', 'GITHUB_TOKEN']) assert.match(yml, new RegExp(`^ {8}${v}: \\$\\{\\{ inputs\\.`, 'm'));
+  for (const v of ['INPUT_WORKER', 'INPUT_RANGE', 'INPUT_FAIL_ON', 'INPUT_COMMENT', 'PITROOM_GITHUB_TOKEN']) assert.match(yml, new RegExp(`^ {8}${v}: \\$\\{\\{ inputs\\.`, 'm'));
   assert.match(yml, /run: node "\$GITHUB_ACTION_PATH\/scripts\/github-review\.mjs"/);
 });

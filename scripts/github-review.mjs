@@ -3,8 +3,12 @@
 // commits, by a cheap worker, read-only. The review goes to the job summary and to one comment on the pull request,
 // updated on each push, and the step fails on critical (or important) findings when `fail-on` says so.
 //
-// Inputs come as INPUT_* variables (action.yml maps them); GITHUB_* are the runner's own. The worker's answer is put in
-// the comment inside a code fence, so nothing it writes is rendered as links, images or mentions.
+// Inputs come as INPUT_* variables (action.yml maps them); GITHUB_* are the runner's own. The pull request's code may
+// try to talk the worker into things, so: the GitHub token never reaches the worker's environment (it only posts the
+// comment) and is masked in the log; every secret-looking value of the environment (the worker's API key, the token,
+// as such or as the base64 header actions/checkout keeps in .git/config) is cut out of what is posted; and the
+// worker's text, error messages included, sits in a code fence, so nothing it writes is rendered as a link, an image,
+// HTML or a mention.
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,6 +31,26 @@ function event() {
   }
 }
 
+// the token posts the comment and goes nowhere else: not to the reviewer, nor to its tools
+const token = env.PITROOM_GITHUB_TOKEN || env.GITHUB_TOKEN || '';
+if (token) console.log(`::add-mask::${token}`);
+const workerEnv = Object.fromEntries(
+  Object.entries(env).filter(([k]) => !/^(PITROOM_GITHUB_TOKEN|GITHUB_TOKEN|GH_TOKEN|GH_ENTERPRISE_TOKEN|ACTIONS_RUNTIME_TOKEN|ACTIONS_ID_TOKEN_REQUEST_TOKEN|ACTIONS_ID_TOKEN_REQUEST_URL)$/.test(k)),
+);
+
+/** The values to cut out of anything posted: the token in every form it is kept in, and secret-looking variables. */
+const secrets = [token, Buffer.from(`x-access-token:${token}`).toString('base64')]
+  .concat(Object.entries(env).filter(([k, v]) => /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(k) && v && v.length >= 8).map(([, v]) => v))
+  .filter((v) => v && v.length >= 8)
+  .sort((a, b) => b.length - a.length);
+const redact = (text) => secrets.reduce((t, v) => t.split(v).join('***'), text);
+
+/** `text` in a code fence longer than any run of backticks in it. */
+const fenced = (text, info = '') => {
+  const fence = '`'.repeat(Math.max(3, ...[...text.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  return `${fence}${info}\n${text}\n${fence}`;
+};
+
 const pr = event().pull_request;
 const range = input('RANGE') || (pr ? `${pr.base.sha}..${pr.head.sha}` : '');
 const failOn = input('FAIL_ON', 'never');
@@ -40,7 +64,7 @@ if (!['critical', 'important', 'never'].includes(failOn)) {
   process.exit(1);
 }
 
-const cli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env });
+const cli = (args) => spawnSync(process.execPath, [CLI, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: workerEnv });
 const r = cli(['review', '--range', range, '--json', ...(worker ? ['-W', worker] : [])]);
 let meta;
 try {
@@ -56,27 +80,25 @@ const shownRange = range.split('..').map(short).join('..');
 const who = meta ? (meta.ran ?? meta.worker) : undefined;
 // the model named first: a run that failed may report another as its session's
 const model = who && (who.model ?? meta.resolvedModel);
-const workerText = who ? `${who.backend}${model ? ` (${model})` : ''}` : worker || 'the default worker';
+const workerText = (who ? `${who.backend}${model ? ` (${model})` : ''}` : worker || 'the default worker').replace(/[^\w./:#@()+ -]/g, '');
 
 let body;
 if (finished) {
   const report = cli(['show', meta.id, '--full']).stdout.trimEnd();
-  const fence = '`'.repeat(Math.max(3, ...[...report.matchAll(/`+/g)].map((m) => m[0].length + 1)));
   body = [
     `### Pitroom review: SPEC ${verdict.spec.toUpperCase()} · QUALITY ${verdict.quality === 'approved' ? 'APPROVED' : 'NEEDS FIXES'}`,
-    `**critical ${verdict.critical} · important ${verdict.important} · minor ${verdict.minor}** · \`${shownRange}\` reviewed by ${workerText} · run \`${meta.id}\``,
+    `**critical ${verdict.critical} · important ${verdict.important} · minor ${verdict.minor}** · \`${shownRange}\` reviewed by \`${workerText}\` · run \`${meta.id}\``,
     '',
     '<details><summary>The review</summary>',
     '',
-    `${fence}text`,
-    report,
-    fence,
+    fenced(report, 'text'),
     '</details>',
   ].join('\n');
 } else {
   const why = meta?.error ?? (meta ? `the reviewer ended ${meta.state} without a verdict` : (r.stderr || r.stdout || `exit ${r.status}`).trim().split('\n').slice(-3).join(' '));
-  body = `### Pitroom review could not finish\n\`${shownRange}\` on ${workerText}: ${why.replace(/`/g, "'").slice(0, 500)}`;
+  body = `### Pitroom review could not finish\n\`${shownRange}\` on \`${workerText}\`:\n\n${fenced(why.slice(0, 500), 'text')}`;
 }
+body = redact(body);
 
 append(env.GITHUB_STEP_SUMMARY, `${body}\n`);
 if (meta) {
@@ -86,7 +108,6 @@ if (meta) {
 
 /** One comment per pull request, updated on each run: found by the marker it starts with. */
 async function comment(text) {
-  const token = env.GITHUB_TOKEN;
   const repo = env.GITHUB_REPOSITORY;
   if (!token || !repo || !pr?.number) return;
   const api = (env.GITHUB_API_URL || 'https://api.github.com').replace(/\/$/, '');
@@ -99,7 +120,8 @@ async function comment(text) {
   let mine;
   for (let page = 1; page <= 10 && !mine; page++) {
     const list = await call('GET', `${api}/repos/${repo}/issues/${pr.number}/comments?per_page=100&page=${page}`);
-    mine = list.find((c) => typeof c.body === 'string' && c.body.startsWith(MARKER));
+    // the marker in a comment by a bot: a person who pastes it gets no update of their comment
+    mine = list.find((c) => typeof c.body === 'string' && c.body.startsWith(MARKER) && c.user?.type === 'Bot');
     if (list.length < 100) break;
   }
   const payload = { body: `${MARKER}\n${text}` };

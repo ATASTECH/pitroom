@@ -21,6 +21,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0 # the review reads the commits between base and head
+          persist-credentials: false # no token in .git/config for the worker to read
       - run: npm install --global opencode-ai # your worker's CLI
       - uses: ATASTECH/pitroom@v0.29.0 # pin a release
         with:
@@ -47,5 +48,6 @@ Outputs: `run` (the review's run id), `spec` (`pass`, `fail`), `quality` (`appro
 
 - The reviewer is a read run: it gets the numbered diff and reads the files it needs. It does not change the checkout, and it never commits or pushes (the git guard applies as on your machine).
 - Every `path:line` the review cites is checked against the checkout, as for any run; the report says how many held.
-- The worker's text goes into the comment inside a code fence, so nothing it writes is rendered as a link, an image or a mention.
+- The pull request's code may try to talk the reviewer into things, so the GitHub token never reaches the worker or its tools (it only posts the comment) and is masked in the log; every secret-looking value of the job's environment (your worker's API key, the token, also as the base64 header `actions/checkout` keeps in `.git/config` without `persist-credentials: false`) is replaced by `***` in what is posted; and the comment is found again only among comments by a bot, so a person who pastes the marker does not get their comment rewritten.
+- The worker's text, error messages included, goes into the comment inside a code fence, so nothing it writes is rendered as a link, an image, HTML or a mention.
 - Pitroom's records live in the runner's temp folder and go with the job. There is no Pitroom service: the only network traffic is your worker CLI's and the comment.

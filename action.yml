@@ -61,7 +61,7 @@ runs:
         INPUT_RANGE: ${{ inputs.range }}
         INPUT_FAIL_ON: ${{ inputs.fail-on }}
         INPUT_COMMENT: ${{ inputs.comment }}
-        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PITROOM_GITHUB_TOKEN: ${{ inputs.github-token }}
         PITROOM_HOME: ${{ runner.temp }}/pitroom
         PITROOM_MCP_DASH: '0'
       run: node "$GITHUB_ACTION_PATH/scripts/github-review.mjs"

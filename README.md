@@ -481,7 +481,7 @@ The repository is also a GitHub Action: on each push to a pull request a worker 
 
 ```yaml
 - uses: actions/checkout@v4
-  with: { fetch-depth: 0 }
+  with: { fetch-depth: 0, persist-credentials: false }
 - run: npm install --global opencode-ai
 - uses: ATASTECH/pitroom@v0.29.0
   with: { worker: "opencode:opencode/big-pickle", fail-on: critical }
