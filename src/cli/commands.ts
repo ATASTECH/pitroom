@@ -19,6 +19,7 @@ import { addNote, formatPlanStatus, planStatus } from '../core/plan-status.js';
 import { formatReport, progress, readSummary } from '../core/report.js';
 import { auditTask, auditors } from '../core/audit.js';
 import { cacheKey, cachedNote, findCached } from '../core/cache.js';
+import { expandScopes, scopedTask } from '../core/scopes.js';
 import { type EvalRow, formatEval, loadEval, scoreAnswer, summarize, truthOf } from '../core/eval.js';
 import { repoRoot } from '../vcs/git.js';
 import { prune as pruneSnapshots } from '../core/snapshot.js';
@@ -234,8 +235,14 @@ export function cmdPlan(p: Parsed): number {
 /** Several tasks as one group of background workers. */
 export function cmdCrew(p: Parsed): number {
   const file = flag(p, 'task-file');
-  const tasks = (file ? fs.readFileSync(file, 'utf8').split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
+  let tasks = (file ? fs.readFileSync(file, 'utf8').split(/^\s*---\s*$/m) : p.positional).map((t) => t.trim()).filter(Boolean);
   if (!tasks.length) throw new UserError('crew needs tasks: pitroom crew -g NAME "task 1" "task 2" (or --task-file with --- separators)');
+  const over = p.flags.get('over');
+  if (over) {
+    if (tasks.length > 1) throw new UserError('--over takes one task, run once per part: pitroom crew --over src/a,src/b "Find … in {scope}"');
+    const mode = has(p, 'isolate') ? 'isolate' : has(p, 'write') ? 'write' : 'read';
+    tasks = expandScopes(over, flag(p, 'dir') ?? process.cwd()).map((scope) => scopedTask(tasks[0]!, scope, mode));
+  }
   if (has(p, 'write') && tasks.length > 1) {
     throw new UserError('parallel --write runs would edit the same tree; use --isolate (each worker gets its own isolated copy)');
   }

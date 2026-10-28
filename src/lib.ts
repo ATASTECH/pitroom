@@ -13,6 +13,7 @@ export { parseAudit, parseStatus, parseVerdict } from './core/answers.js';
 export { ASKS_FOR_LIST, fixTask, focusedRate } from './core/audit.js';
 export { rankChain, scoreOf } from './core/rank.js';
 export { retryCommands } from './core/group.js';
+export { expandScopes, scopedTask } from './core/scopes.js';
 export { answerParts, loadEval, pathsIn, scoreAnswer, summarize, truthOf } from './core/eval.js';
 export { brief, loadPlan, parsePlan, planName, planTask } from './core/plan.js';
 export { cmdShim, guardEnv, scoopTarget, shimDir, shimReady } from './vcs/guard.js';

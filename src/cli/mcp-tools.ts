@@ -5,7 +5,7 @@
 import { DEFAULT_WAIT, MAX_TASKS, MAX_WAIT, type Json, type Tool, ToolError, bool, ensureDash, oneOf, plain, since, startAndWait, startCrew, str, strs, waitFor, waitSeconds, withLiveView, workerFlags } from './mcp-support.js';
 
 const WORKER_PROPS = {
-  worker: { type: 'string', description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku". Default: configured.' },
+  worker: { type: 'string', description: 'Worker "backend[:model]", e.g. "opencode", "claude:haiku".' },
   model: { type: 'string', description: 'Model for that worker.' },
   tier: { type: 'string', description: 'cheap, standard or capable (from the config).' },
   effort: { type: 'string', description: 'low, medium, high, xhigh.' },
@@ -16,7 +16,7 @@ const WORKER_PROPS = {
   web: { type: 'boolean', description: 'Allow web tools.' },
   group: { type: 'string', description: 'Group name for related runs.' },
 };
-const WAIT_PROP = { waitSeconds: { type: 'number', description: `Wait this long before returning "still running" (default ${DEFAULT_WAIT}, max ${MAX_WAIT}).` } };
+const WAIT_PROP = { waitSeconds: { type: 'number', description: `Seconds before returning "still running" (default ${DEFAULT_WAIT}, max ${MAX_WAIT}).` } };
 const RUN_ID = { type: 'string', description: 'Run id, or "last".' };
 
 const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
@@ -75,12 +75,13 @@ export const TOOLS: Tool[] = [
     name: 'pitroom_run',
     title: 'Run a worker',
     description:
-      'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). Give "tasks" instead of "task" to run independent tasks in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. The using-pitroom skill (or prompt) says when and how to delegate. Cancelling the call stops the run.',
+      'Hand a bounded task to a cheaper worker agent. mode "read" (default): read-only research, an answer with verified file:line references. "isolate": the worker edits a private copy and you get the exact diff (then pitroom_review, pitroom_apply or pitroom_discard). "write": edits the working tree (undo: pitroom_revert). "tasks" or "scopes" run workers in parallel (read or isolate). Returns the report(s) and a receipt (a read question asked before on the same code comes back cached), or "still running" for pitroom_wait. The using-pitroom skill (or prompt) says when and how to delegate. Cancelling the call stops the run.',
     inputSchema: {
       type: 'object',
       properties: {
         task: { type: 'string', description: 'What to do, with the context the worker needs.' },
-        tasks: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: MAX_TASKS, description: 'Or several independent tasks, one worker each.' },
+        tasks: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: MAX_TASKS, description: 'Or independent tasks, one worker each.' },
+        scopes: { type: 'array', items: { type: 'string' }, description: 'Or "task" per part ({scope}): paths that do not overlap, or "src/*/".' },
         mode: { type: 'string', enum: ['read', 'isolate', 'write'] },
         continue: { type: 'string', description: 'A finished run to follow up in the same worker session.' },
         inPlace: { type: 'boolean', description: 'Read: read the directory itself, not a snapshot without secret-looking files.' },
@@ -104,6 +105,13 @@ export const TOOLS: Tool[] = [
         if (bool(a, 'fresh')) flags.push('--fresh');
       }
       const follow = str(a, 'continue');
+      const scopes = strs(a, 'scopes').filter((t) => t.trim());
+      if (scopes.length) {
+        if (!task) throw new ToolError('"scopes" splits one "task" over parts of the project: give "task", not "tasks"');
+        if (mode === 'write') throw new ToolError('parallel workers never write in place: use mode "isolate" (each gets its own copy)');
+        if (follow) throw new ToolError('"continue" follows up one run: drop "scopes"');
+        return startCrew([...flags, ...scopes.flatMap((sc) => ['--over', sc]), ...workerFlags(a)], [task], waitSeconds(a), ctx);
+      }
       if (tasks.length) {
         if (tasks.length > MAX_TASKS) throw new ToolError(`at most ${MAX_TASKS} tasks at once: start the rest when these are done`);
         if (mode === 'write') throw new ToolError('parallel workers never write in place: use mode "isolate" (each gets its own copy)');

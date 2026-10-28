@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Crews
+- **One question, split by part: `pitroom crew --over src/auth,src/billing "… in {scope}"`** (MCP: `pitroom_run` with `task` and `scopes`). The task runs once per part, `{scope}` filled in, and each worker is told that its part is the only one it reads (in an `-i` crew, the only one it changes). A pattern in the last part of a path makes one part per match (`--over "packages/*/"`: one per folder, hidden ones left out). Parts must exist and must not overlap: `src` with `src/auth` is refused. Workers that read the same files hand the primary agent answers about the same code to reconcile, and when they disagree it opens the files itself, which is the reading a crew is meant to save.
+- **The crew skill says to split by where, not by what.** It asked for parts that never edit the same file, and said nothing about reading: three workers asked for "validation bugs", "error-handling bugs" and "security holes" each read the whole project. It now says to give each worker its own part, names `--over`, and keeps a question about how parts connect as one brief.
+
 ### Workers
 - **Antigravity runs share one pnpm store.** Each Antigravity workspace gets a home of its own, and `pnpm install` in a run built a whole store there (2.2 GB in one home, 7.6 GB over 85 homes on one machine). Every home now links its pnpm store (`Library/pnpm` on macOS, `.local/share/pnpm` on Linux) to one shared folder in Pitroom's state, which goes like the homes when unused for two weeks. Only the store, which pnpm checks file by file against its hashes; caches nothing checks stay per home, so one workspace's worker cannot plant files another's will use. A link the worker puts on the way (its `Library` pointing elsewhere) makes Pitroom link nothing there. A home's own old store is left to go with its home (Pitroom removes nothing inside a home, where a worker could race it); the shared one serves new homes. Tried with agy 1.4.7: `pnpm add` in an isolated copy wrote to the shared store.
 

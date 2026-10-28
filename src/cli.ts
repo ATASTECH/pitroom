@@ -21,6 +21,9 @@ Usage
   pitroom [run] [options] "task"        run a worker (task: argument, "-" for stdin, or --task-file)
   pitroom crew [options] -g NAME "task 1" "task 2" …
                                         start several workers in background as one group
+  pitroom crew [options] --over src/a,src/b "task about {scope}"
+                                        one task per part of the project, each worker kept to its part
+                                        (a pattern such as "src/*/" makes one part per folder)
   pitroom review [run | --range A..B [--plan PLAN]] [--tier T | -W T] [--bg]
                                         read-only review of a run's change (a follow-up: only its
                                         fix round) or of a commit range; by default on another worker
