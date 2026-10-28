@@ -60,6 +60,8 @@ export interface PitroomConfig {
   autoFallback?: boolean;
   /** Your relative cost per model, keyed "backend:model": {"codex:gpt-6-sol": 1, "codex:gpt-6.1-sol": 2}. Any unit; it is only compared. */
   costs?: Record<string, number>;
+  /** When a change's --verify check fails, send its output back to the worker this many times to fix it (default 1, at most 3; 0 = off; PITROOM_VERIFY_FIX). */
+  verifyFix?: number;
 }
 
 const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record' | 'numbers'> = {
@@ -91,6 +93,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   budgetDaily: 'number',
   rankWorkers: 'boolean',
   autoFallback: 'boolean',
+  verifyFix: 'number',
 };
 
 export function configPath(): string {
@@ -180,6 +183,15 @@ const days = (v: unknown) => {
   return typeof n === 'number' && Number.isInteger(n) && n >= 0 ? n : undefined;
 };
 
+/** The most fix rounds a failed --verify gets: each is another worker turn and another run of the check. */
+export const MAX_VERIFY_FIX = 3;
+
+/** Fix rounds after a failed --verify: a whole number, 0 or more, at most MAX_VERIFY_FIX. */
+export const fixRounds = (v: unknown): number | undefined => {
+  const n = days(v);
+  return n === undefined ? undefined : Math.min(n, MAX_VERIFY_FIX);
+};
+
 /** An on/off environment variable: 1/true/on/yes or 0/false/off/no. */
 const flag01 = (v: string | undefined): boolean | undefined => {
   const t = v?.trim().toLowerCase();
@@ -232,5 +244,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     rankWorkers: setting<boolean>(undefined, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
     autoFallback: setting<boolean>(undefined, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting<number | undefined>(undefined, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), undefined),
+    verifyFix: setting<number>(undefined, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
   };
 }

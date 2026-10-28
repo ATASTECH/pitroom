@@ -25,6 +25,8 @@ export function activeSpend(sinceMs: number): number {
       const m = freshMeta(id);
       if (!isActive(m.state) || Date.parse(m.startedAt) < sinceMs) continue;
       const target = m.ran ?? m.worker;
+      // the turns before this one (a worker a limit stopped part way, a fix round's earlier turns)
+      if (m.priorUsage) total += m.priorUsage.cost ?? m.priorUsage.costEstimate ?? 0;
       const events = runFile(id, 'events.jsonl');
       if (!fs.existsSync(events)) continue;
       const run = getBackend(target.backend).parse(fs.readFileSync(events, 'utf8'));

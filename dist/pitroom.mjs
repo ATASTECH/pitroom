@@ -2381,7 +2381,8 @@ var SCHEMA = {
   priceFeedHours: "number",
   budgetDaily: "number",
   rankWorkers: "boolean",
-  autoFallback: "boolean"
+  autoFallback: "boolean",
+  verifyFix: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path12.resolve(process.env.PITROOM_CONFIG);
@@ -2447,6 +2448,11 @@ var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
 };
+var MAX_VERIFY_FIX = 3;
+var fixRounds = (v) => {
+  const n = days(v);
+  return n === void 0 ? void 0 : Math.min(n, MAX_VERIFY_FIX);
+};
 var flag01 = (v) => {
   const t = v?.trim().toLowerCase();
   return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
@@ -2492,7 +2498,8 @@ function effective(flags = {}) {
     priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
     rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
-    budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0)
+    budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
+    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1)
   };
 }
 
@@ -2513,6 +2520,7 @@ var VALUE_FLAGS = {
   "-t": "timeout",
   "--timeout": "timeout",
   "--verify": "verify",
+  "--verify-fix": "verify-fix",
   "--link": "link",
   "-c": "continue",
   "--continue": "continue",
@@ -2654,6 +2662,7 @@ function runOptions(p, task) {
     effort: effortFlag(p),
     timeoutSec: parseDuration(effective({ timeout: flag(p, "timeout") }).timeout.value),
     verify: flag(p, "verify"),
+    verifyFix: verifyFixFlag(p),
     continueFrom: cont ? resolveRun(cont) : void 0,
     allowNonGit: has(p, "allow-non-git"),
     web: has(p, "web") || effective().web.value,
@@ -2668,6 +2677,13 @@ function planStep(p) {
   if (!file2 || !step) throw new UserError("--plan and --step go together: pitroom run -i --plan PLAN.md --step N");
   if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
   return { file: file2, step: Number(step) };
+}
+function verifyFixFlag(p) {
+  const v = flag(p, "verify-fix");
+  if (v === void 0) return void 0;
+  if (!flag(p, "verify")) throw new UserError("--verify-fix goes with --verify CMD: the check whose failure goes back to the worker");
+  if (!/^\d+$/.test(v) || Number(v) > MAX_VERIFY_FIX) throw new UserError(`--verify-fix takes a number of rounds from 0 to ${MAX_VERIFY_FIX}, not "${v}"`);
+  return Number(v);
 }
 function effortFlag(p) {
   const v = flag(p, "effort");
@@ -4176,8 +4192,8 @@ function compactRun(meta) {
     return;
   }
   for (const n of names) {
-    if (/^events(\.attempt-\d+)?\.jsonl$/.test(n)) gzipFile(path21.join(dir, n));
-    else if (/^stderr(\.attempt-\d+)?\.log$/.test(n)) {
+    if (/^events(\.(attempt|round)-\d+)?\.jsonl$/.test(n)) gzipFile(path21.join(dir, n));
+    else if (/^stderr(\.(attempt|round)-\d+)?\.log$/.test(n)) {
       if (meta.state === "done" && !/attempt/.test(n)) fs23.rmSync(path21.join(dir, n), { force: true });
       else gzipFile(path21.join(dir, n));
     }
@@ -4185,13 +4201,18 @@ function compactRun(meta) {
 }
 var clip2 = (s, n) => s && s.length > n ? s.slice(0, n) : s;
 function timelineOf(meta) {
-  const raw = readRunFile(meta.id, "events.jsonl");
-  if (!raw) return [];
-  try {
-    return getBackend((meta.ran ?? meta.worker).backend).parse(raw).timeline ?? [];
-  } catch {
-    return [];
+  const rounds = meta.verifyRounds ?? [];
+  const steps = [];
+  for (let i = 0; i <= rounds.length; i++) {
+    if (i) steps.push({ kind: "say", text: `the check \`${meta.verify}\` failed (exit ${rounds[i - 1].code}): its output went back to the worker (fix ${i})` });
+    const raw = readRunFile(meta.id, i < rounds.length ? `events.round-${i + 1}.jsonl` : "events.jsonl");
+    if (!raw) continue;
+    try {
+      steps.push(...getBackend((meta.ran ?? meta.worker).backend).parse(raw).timeline ?? []);
+    } catch {
+    }
   }
+  return steps;
 }
 function recordRun(meta) {
   if (!TERMINAL.includes(meta.state)) return;
@@ -4508,6 +4529,7 @@ function activeSpend(sinceMs2) {
       const m = freshMeta(id2);
       if (!isActive(m.state) || Date.parse(m.startedAt) < sinceMs2) continue;
       const target = m.ran ?? m.worker;
+      if (m.priorUsage) total += m.priorUsage.cost ?? m.priorUsage.costEstimate ?? 0;
       const events = runFile(id2, "events.jsonl");
       if (!fs24.existsSync(events)) continue;
       const run2 = getBackend(target.backend).parse(fs24.readFileSync(events, "utf8"));
@@ -4788,7 +4810,10 @@ function formatReport(meta, finalText = readSummary(meta), maxLines = 400) {
   if (meta.verifyResult) {
     const v = meta.verifyResult;
     const notFound = !v.ok && v.code === 127 && /not found|no such file|is not recognized as an internal or external command/i.test(v.tail);
-    out.push(`\u2500\u2500 verify: \`${meta.verify}\` ${v.ok ? "\u2714 passed" : notFound ? "\u2718 could not run (exit 127: command not found)" : `\u2718 failed (exit ${v.code})`}`);
+    const fixes = meta.verifyRounds?.length ?? 0;
+    const rounds = `${fixes} fix round${fixes === 1 ? "" : "s"}`;
+    const after = !fixes ? "" : v.ok ? ` after ${rounds} (it failed first: exit ${meta.verifyRounds[0].code})` : `, also after ${rounds}`;
+    out.push(`\u2500\u2500 verify: \`${meta.verify}\` ${v.ok ? "\u2714 passed" : notFound ? "\u2718 could not run (exit 127: command not found)" : `\u2718 failed (exit ${v.code})`}${after}`);
     if (notFound) out.push("   the command is not on the PATH Pitroom runs with (an app such as an MCP client may start it without your shell's PATH): give its full path, or set PATH in the command");
     if (!v.ok && v.tail) out.push(...v.tail.split("\n").map((l) => `   ${l}`));
   }
@@ -5574,6 +5599,8 @@ function prepareRun(o) {
     link: parent?.link ?? o.link,
     timeoutSec: o.timeoutSec,
     verify: o.verify,
+    // a read run's worker cannot change what the check found
+    verifyFix: o.verify && mode !== "read" ? (o.verifyFix ?? effective().verifyFix.value) || void 0 : void 0,
     web: o.web || !!parent?.web,
     state: "queued",
     startedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -5708,6 +5735,7 @@ async function execute(meta) {
       }
       writeMeta(meta);
     }
+    if (!result.spawnError) result = await fixUntilVerified(meta, result);
     if (result.spawnError) {
       const b = getBackend((meta.ran ?? meta.worker).backend);
       meta.error = `${result.spawnError} (install ${b.name} or set PITROOM_${b.id.toUpperCase()}_BIN)`;
@@ -5875,10 +5903,10 @@ function sharedSnapshot(meta, root) {
     meta.warnings.push(`could not make a clean snapshot (${e.message.slice(0, 120)}): the worker reads the directory itself${shown ? `, where secret-looking files sit (${shown})` : ""}`);
   }
 }
-function attempt(meta, backend, target) {
+function attempt(meta, backend, target, prompt) {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: buildPrompt(meta.mode, meta.handoff ? `${meta.task}
+    prompt: prompt ?? buildPrompt(meta.mode, meta.handoff ? `${meta.task}
 
 ${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
@@ -5905,13 +5933,7 @@ function retryableFailure(meta, backend, res) {
   return f.kind === "rate-limited" ? { ...f, partial: true } : void 0;
 }
 function handOver(meta, backend, target) {
-  const run2 = backend.parse(read2(runFile(meta.id, "events.jsonl")));
-  const used = { ...run2.usage };
-  if (used.cost === void 0) {
-    const price = workerPrice(target.backend, run2.model, target.model);
-    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? "config" });
-  }
-  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+  bankUsage(meta, target, backend.parse(read2(runFile(meta.id, "events.jsonl"))));
   if (meta.mode === "read") return;
   let changed = [];
   try {
@@ -5921,6 +5943,75 @@ function handOver(meta, backend, target) {
   }
   const list2 = changed.length ? `: ${changed.slice(0, 30).join(", ")}${changed.length > 30 ? `, and ${changed.length - 30} more` : ""}` : "";
   meta.handoff = `Another worker started this task and stopped part way, at its usage limit. Its edits are already in the files${list2}. Do not start over: check what it changed against the task, keep what is right, fix what is not, and finish the task.`;
+}
+function bankUsage(meta, target, run2) {
+  const used = { ...run2.usage };
+  if (used.cost === void 0) {
+    const price = workerPrice(target.backend, run2.model, target.model);
+    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? "config" });
+  }
+  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+}
+async function fixUntilVerified(meta, result) {
+  const target = meta.ran;
+  if (!meta.verify || !meta.verifyFix || !target) return result;
+  const backend = getBackend(target.backend);
+  for (let round = 1; ; round++) {
+    if (result.timedOut || result.stopped || meta.error || failureOf(meta, backend, result)) return result;
+    const v = runVerify(meta);
+    meta.verifyResult = v;
+    writeMeta(meta);
+    if (v.ok || v.code === null || v.code === 127 || round > meta.verifyFix) return result;
+    if (fs32.existsSync(runFile(meta.id, STOP_FILE))) return result;
+    const done = backend.parse(read2(runFile(meta.id, "events.jsonl")));
+    meta.sessionId = done.sessionId ?? meta.sessionId;
+    const why = !meta.sessionId ? "its session is not known" : !inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : void 0;
+    if (why) {
+      meta.warnings.push(`the failed check was not sent back to the worker: ${why}`);
+      return result;
+    }
+    const prompt = fixPrompt(meta, v.code);
+    bankUsage(meta, target, done);
+    fs32.writeFileSync(runFile(meta.id, `summary.round-${round}.md`), done.finalText);
+    for (const f2 of ["events.jsonl", "stderr.log", "verify.log"]) {
+      const from = runFile(meta.id, f2);
+      if (fs32.existsSync(from)) fs32.renameSync(from, runFile(meta.id, f2.replace(".", `.round-${round}.`)));
+    }
+    (meta.verifyRounds ??= []).push({ code: v.code, tail: v.tail });
+    meta.verifyResult = void 0;
+    writeMeta(meta);
+    result = await attempt(meta, backend, target, prompt);
+    if (result.stopped || result.spawnError) return result;
+    const f = result.timedOut ? { kind: "other", message: `it ran out of time (${meta.timeoutSec}s)` } : failureOf(meta, backend, result);
+    if (f) {
+      if (f.kind === "rate-limited") recordCooldown(cooldownKey(target, backend), describeTarget(target), f.message);
+      meta.verifyRounds.at(-1).fixFailed = f.message;
+      meta.warnings.push(`fix ${round} after the failed check did not end well (${f.message}); the files hold what it changed before it stopped`);
+      return { ...result, timedOut: false };
+    }
+  }
+}
+function failureOf(meta, backend, res) {
+  return backend.failure(backend.parse(read2(runFile(meta.id, "events.jsonl"))), read2(runFile(meta.id, "stderr.log")), res.code);
+}
+function inBudget(target) {
+  try {
+    return withinBudget([target]).chain.length > 0;
+  } catch {
+    return false;
+  }
+}
+function fixPrompt(meta, code) {
+  const lines = read2(runFile(meta.id, "verify.log")).trimEnd().split("\n").slice(-120).join("\n");
+  const tail = lines.length > 8e3 ? `\u2026${lines.slice(-8e3)}` : lines;
+  const fence = "`".repeat(Math.max(3, ...[...tail.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  return `Pitroom ran the check the primary agent asked for, \`${meta.verify}\`, on your changes, and it failed (exit ${code}). The end of its output:
+
+${fence}
+${tail || "(no output)"}
+${fence}
+
+Find the cause and fix it, then finish the task. Do not weaken, skip or delete tests or the check itself to make it pass. If the failure is not caused by the task's change, or cannot be fixed within the task, leave it and say why under OPEN ISSUES. Same rules as before; end with the same answer format as before.`;
 }
 var HINTS = {
   "model-unavailable": "the model is not available; fix the worker config, pass --worker/--model, or configure fallback workers (see `pitroom doctor`)",
@@ -5935,9 +6026,13 @@ function finalize(meta, res) {
   if (meta.snapshot?.dir && meta.repoRoot) run2.finalText = backToProject(run2.finalText, meta.snapshot.dir, meta.repoRoot);
   meta.sessionId = run2.sessionId ?? meta.sessionId;
   meta.usage = run2.usage;
-  fs32.writeFileSync(runFile(meta.id, "summary.md"), `${run2.finalText}
+  const answer = withFixRounds(meta, run2.finalText);
+  fs32.writeFileSync(runFile(meta.id, "summary.md"), `${answer}
 `);
-  if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run2.finalText);
+  if (meta.plan && !meta.reviewOf) {
+    const status = parseStatus(run2.finalText);
+    meta.taskStatus = status === "unknown" ? parseStatus(answer) : status;
+  }
   if (meta.reviewOf) {
     meta.verdict = parseVerdict(run2.finalText);
     if (meta.packageFile) fs32.rmSync(meta.packageFile, { force: true });
@@ -5945,7 +6040,7 @@ function finalize(meta, res) {
   for (const w of backend.warnings?.(run2, read2(runFile(meta.id, "stderr.log"))) ?? []) {
     if (!meta.warnings.includes(w)) meta.warnings.push(w);
   }
-  if (!res.timedOut && !res.stopped && !meta.error) {
+  if (!res.timedOut && !res.stopped && !meta.error && !meta.verifyRounds?.at(-1)?.fixFailed) {
     const f = backend.failure(run2, read2(runFile(meta.id, "stderr.log")), res.code);
     if (f) {
       meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
@@ -5962,7 +6057,7 @@ function finalize(meta, res) {
   }
   if (meta.sessionId && backend.resolveModel) meta.resolvedModel = backend.resolveModel(meta.sessionId);
   meta.resolvedModel ??= run2.model ?? ran.model;
-  const refs = extractRefs(run2.finalText);
+  const refs = extractRefs(answer);
   if (refs.length) {
     meta.refs = verifyRefs(refs, [meta.cwd, meta.repoRoot ?? "", meta.dir]);
     if (meta.refs.invalid.length) {
@@ -5976,8 +6071,8 @@ function finalize(meta, res) {
     meta.auditVerdict = found.verdict;
     meta.auditDisputed = found.disputed;
   }
-  if (meta.state === "done" && !run2.finalText) meta.warnings.push("worker finished without a written answer");
-  if (meta.state === "done" && meta.verify) meta.verifyResult = runVerify(meta);
+  if (meta.state === "done" && !answer) meta.warnings.push("worker finished without a written answer");
+  if (meta.state === "done" && meta.verify && !meta.verifyResult) meta.verifyResult = runVerify(meta);
   meta.endedAt = (/* @__PURE__ */ new Date()).toISOString();
   if (meta.usage && meta.usage.cost === void 0) {
     const price = workerPrice(ran.backend, meta.resolvedModel ?? run2.model, ran.model);
@@ -5987,7 +6082,7 @@ function finalize(meta, res) {
     }
   }
   if (meta.priorUsage && meta.usage) meta.usage = addUsage(meta.priorUsage, meta.usage);
-  meta.returnedTokens = estimateTokens(formatReport(meta, run2.finalText));
+  meta.returnedTokens = estimateTokens(formatReport(meta, answer));
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
   if (meta.mode === "write" && meta.repoRoot) releaseWriteLock(meta.repoRoot, meta.id);
@@ -5996,6 +6091,16 @@ function finalize(meta, res) {
   notifyEnded(meta);
   refreshInBackground();
   return meta;
+}
+function withFixRounds(meta, last) {
+  const rounds = meta.verifyRounds ?? [];
+  if (!rounds.length) return last;
+  const parts = [read2(runFile(meta.id, "summary.round-1.md")).trim() || "(no written answer)"];
+  rounds.forEach((r, i) => {
+    const text = i + 1 < rounds.length ? read2(runFile(meta.id, `summary.round-${i + 2}.md`)) : last;
+    parts.push(`\u2500\u2500 fix ${i + 1}, after the check failed (exit ${r.code}):`, text.trim() || "(no written answer)");
+  });
+  return parts.join("\n\n");
 }
 function captureChanges(meta) {
   const root = meta.repoRoot;
@@ -7138,13 +7243,11 @@ function runDetail(id2) {
   const start = Date.parse(m.startedAt);
   const kept = isActive(m.state) ? void 0 : archivedRun(id2);
   let steps = kept?.steps ?? [];
-  if (!steps.length) try {
-    const events = readRunFile(id2, "events.jsonl");
-    steps = (events ? getBackend((m.ran ?? m.worker).backend).parse(events).timeline ?? [] : []).map((s) => ({
+  if (!steps.length) {
+    steps = timelineOf(m).map((s) => ({
       ...s,
       t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1e3)) : void 0
     }));
-  } catch {
   }
   const rel = (t) => [m.cwd, m.dir].filter(Boolean).reduce((x, base2) => x.split(`${base2}/`).join(""), t);
   steps = steps.map((x) => ({ ...x, text: rel(x.text) }));
@@ -7186,7 +7289,7 @@ function runDetail(id2) {
     attempts: m.attempts ?? [],
     warnings: m.warnings ?? [],
     refs: m.refs ? { valid: m.refs.valid, total: m.refs.total, invalid: m.refs.invalid.map((r) => `${r.ref} (${r.reason})`) } : void 0,
-    verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail } : void 0,
+    verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail, fixes: m.verifyRounds?.length || void 0 } : void 0,
     error: m.error,
     audit: m.auditOf ? m.state === "done" ? { state: m.state, verdict: m.auditVerdict, disputed: m.auditDisputed ?? [] } : void 0 : m.audit && { id: m.audit.id, state: m.audit.state, verdict: m.audit.verdict, disputed: m.audit.disputed ?? [] },
     report: isActive(m.state) ? progress(m) : formatReport(m, void 0, 120)
@@ -9514,6 +9617,8 @@ Run options
       --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
+      --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
+                        (0 to 3; default: config "verifyFix", 1)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
   -c, --continue RUN    follow up in the same worker session (and the same isolated copy)
       --bg              start in background, print the run id, return immediately
@@ -9533,10 +9638,10 @@ Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, P
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
      PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
-     PITROOM_<WORKER>_BIN
+     PITROOM_VERIFY_FIX, PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
         countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
-        auditFix, auditFocus, budgetDaily, rankWorkers)`;
+        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,

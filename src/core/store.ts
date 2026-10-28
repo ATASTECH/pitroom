@@ -65,6 +65,10 @@ export interface RunMeta {
   changes?: Change[];
   stats?: { files: number; insertions: number; deletions: number };
   verifyResult?: { ok: boolean; code: number | null; tail: string };
+  /** Fix rounds a failed --verify may get (config `verifyFix`, --verify-fix); only on a change with a check. */
+  verifyFix?: number;
+  /** The failed checks whose output went back to the worker, in order: one per fix round; `fixFailed` when that round did not end well (see run.ts). */
+  verifyRounds?: { code: number | null; tail: string; fixFailed?: string }[];
   refs?: RefCheck;
   usage?: Usage;
   returnedTokens?: number;

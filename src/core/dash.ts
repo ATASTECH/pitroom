@@ -11,13 +11,12 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getBackend } from '../backends/index.js';
 import type { Step } from '../backends/types.js';
 import { UserError } from './errors.js';
 import { fileDiffs, type FileDiffData } from './file-diff.js';
 import { MISSING, page, THEME_SCRIPT } from './dash-page.js';
 import { groupIds, headline, retryCommands, retryShell } from './group.js';
-import { archivedRun, historyStats, importRuns, listHistory, readRunFile } from './history.js';
+import { archivedRun, historyStats, importRuns, listHistory, readRunFile, timelineOf } from './history.js';
 import { primaryPrice, readLedger, settleLedger, totals } from './receipt.js';
 import { formatReport, live, progress, readSummary } from './report.js';
 import { renameOver } from './fs-atomic.js';
@@ -193,7 +192,8 @@ export interface RunDetail {
   attempts: { target: string; error: string; skipped?: boolean; partial?: true }[];
   warnings: string[];
   refs?: { valid: number; total: number; invalid: string[] };
-  verify?: { command: string; ok: boolean; tail: string };
+  /** `fixes`: the failed checks that went back to the worker before this result (verifyFix). */
+  verify?: { command: string; ok: boolean; tail: string; fixes?: number };
   error?: string;
   /** On an audited run: its audit; on an audit: the claims it disputes. */
   audit?: { id?: string; state: string; verdict?: string; disputed: string[] };
@@ -217,14 +217,12 @@ export function runDetail(id: string): RunDetail | undefined {
   // A finished run's steps and patch come from the history (its raw stream is compressed or gone).
   const kept = isActive(m.state) ? undefined : archivedRun(id);
   let steps: RunDetail['steps'] = kept?.steps ?? [];
-  if (!steps.length) try {
-    const events = readRunFile(id, 'events.jsonl');
-    steps = (events ? (getBackend((m.ran ?? m.worker).backend).parse(events).timeline ?? []) : []).map((s) => ({
+  if (!steps.length) {
+    // every fix round's steps too (verifyFix); a stream being written or from an unknown worker gives none
+    steps = timelineOf(m).map((s) => ({
       ...s,
       t: s.at && Number.isFinite(start) ? Math.max(0, Math.round((s.at - start) / 1000)) : undefined,
     }));
-  } catch {
-    // an event stream being written, or from a worker this version does not know
   }
   // Paths relative to where the worker ran read better than absolute ones.
   const rel = (t: string) => [m.cwd, m.dir].filter(Boolean).reduce((x, base) => x.split(`${base}/`).join(''), t);
@@ -272,7 +270,7 @@ export function runDetail(id: string): RunDetail | undefined {
     attempts: m.attempts ?? [],
     warnings: m.warnings ?? [],
     refs: m.refs ? { valid: m.refs.valid, total: m.refs.total, invalid: m.refs.invalid.map((r) => `${r.ref} (${r.reason})`) } : undefined,
-    verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail } : undefined,
+    verify: m.verifyResult && m.verify ? { command: m.verify, ok: m.verifyResult.ok, tail: m.verifyResult.tail, fixes: m.verifyRounds?.length || undefined } : undefined,
     error: m.error,
     audit: m.auditOf ? (m.state === 'done' ? { state: m.state, verdict: m.auditVerdict, disputed: m.auditDisputed ?? [] } : undefined) : m.audit && { id: m.audit.id, state: m.audit.state, verdict: m.audit.verdict, disputed: m.audit.disputed ?? [] },
     report: isActive(m.state) ? progress(m) : formatReport(m, undefined, 120),

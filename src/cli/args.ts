@@ -1,7 +1,7 @@
 // Argument parsing and the pieces every command shares.
 import fs from 'node:fs';
 import type { Mode } from '../backends/types.js';
-import { effective } from '../core/config.js';
+import { MAX_VERIFY_FIX, effective } from '../core/config.js';
 import { UserError } from '../core/errors.js';
 import type { RunOptions } from '../core/run.js';
 import { type RunMeta, resolveRun } from '../core/store.js';
@@ -14,7 +14,7 @@ export interface Parsed {
 const VALUE_FLAGS: Record<string, string> = {
   '-d': 'dir', '--dir': 'dir', '-f': 'file', '--file': 'file', '-m': 'model', '--model': 'model',
   '-W': 'worker', '--worker': 'worker', '--tier': 'tier', '--effort': 'effort', '-g': 'group', '--group': 'group',
-  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--link': 'link', '-c': 'continue',
+  '-t': 'timeout', '--timeout': 'timeout', '--verify': 'verify', '--verify-fix': 'verify-fix', '--link': 'link', '-c': 'continue',
   '--continue': 'continue', '--task-file': 'task-file', '--since': 'since', '--card': 'card', '--days': 'days',
   '--interval': 'interval', '--range': 'range', '--then': 'then', '--port': 'port', '--idle': 'idle', '--state': 'state', '--limit': 'limit',
   '--plan': 'plan', '--step': 'step', '--fallback': 'fallback', '--client': 'client', '--over': 'over',
@@ -113,6 +113,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
     effort: effortFlag(p),
     timeoutSec: parseDuration(effective({ timeout: flag(p, 'timeout') }).timeout.value),
     verify: flag(p, 'verify'),
+    verifyFix: verifyFixFlag(p),
     continueFrom: cont ? resolveRun(cont) : undefined,
     allowNonGit: has(p, 'allow-non-git'),
     web: has(p, 'web') || effective().web.value,
@@ -129,6 +130,15 @@ export function planStep(p: Parsed): { file: string; step: number } | undefined 
   if (!file || !step) throw new UserError('--plan and --step go together: pitroom run -i --plan PLAN.md --step N');
   if (!/^\d+$/.test(step)) throw new UserError(`--step takes a task number, not "${step}"`);
   return { file, step: Number(step) };
+}
+
+/** --verify-fix N: the fix rounds a failed --verify gets, 0 to MAX_VERIFY_FIX. */
+function verifyFixFlag(p: Parsed): number | undefined {
+  const v = flag(p, 'verify-fix');
+  if (v === undefined) return undefined;
+  if (!flag(p, 'verify')) throw new UserError('--verify-fix goes with --verify CMD: the check whose failure goes back to the worker');
+  if (!/^\d+$/.test(v) || Number(v) > MAX_VERIFY_FIX) throw new UserError(`--verify-fix takes a number of rounds from 0 to ${MAX_VERIFY_FIX}, not "${v}"`);
+  return Number(v);
 }
 
 /** --effort LEVEL: a word such as low, medium, high, xhigh, max; the worker CLI decides which it accepts. */

@@ -29,7 +29,7 @@ import { addUsage, costAt, estimateTokens, record, savedUsd, workerPrice } from 
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
 import { formatReport } from './report.js';
-import { type RunMeta, freshMeta, isActive, isAlive, newRunId, readMeta, requestStop, runDir, runFile, worktreesDir, writeMeta } from './store.js';
+import { type RunMeta, STOP_FILE, freshMeta, isActive, isAlive, newRunId, readMeta, requestStop, runDir, runFile, worktreesDir, writeMeta } from './store.js';
 import { describeTarget, sameTarget } from './target.js';
 
 declare const __VERSION__: string;
@@ -51,6 +51,8 @@ export interface RunOptions {
   plan?: { file: string; step: number };
   timeoutSec: number;
   verify?: string;
+  /** `--verify-fix N`: fix rounds a failed check of a change gets (default: the config's `verifyFix`). */
+  verifyFix?: number;
   continueFrom?: string;
   allowNonGit: boolean;
   web: boolean;
@@ -200,6 +202,8 @@ export function prepareRun(o: RunOptions): RunMeta {
     link: parent?.link ?? o.link,
     timeoutSec: o.timeoutSec,
     verify: o.verify,
+    // a read run's worker cannot change what the check found
+    verifyFix: o.verify && mode !== 'read' ? (o.verifyFix ?? effective().verifyFix.value) || undefined : undefined,
     web: o.web || !!parent?.web,
     state: 'queued',
     startedAt: new Date().toISOString(),
@@ -347,6 +351,8 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
       }
       writeMeta(meta);
     }
+    if (!result.spawnError) result = await fixUntilVerified(meta, result);
+    // also a fix round's: its worker could be gone by then
     if (result.spawnError) {
       const b = getBackend((meta.ran ?? meta.worker).backend);
       meta.error = `${result.spawnError} (install ${b.name} or set PITROOM_${b.id.toUpperCase()}_BIN)`;
@@ -558,10 +564,11 @@ function sharedSnapshot(meta: RunMeta, root: string): void {
   }
 }
 
-function attempt(meta: RunMeta, backend: Backend, target: Target): Promise<ProcessResult> {
+/** Runs the worker once; `prompt` replaces the task's (a fix round's, which continues the session). */
+function attempt(meta: RunMeta, backend: Backend, target: Target, prompt?: string): Promise<ProcessResult> {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: buildPrompt(meta.mode, meta.handoff ? `${meta.task}\n\n${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
+    prompt: prompt ?? buildPrompt(meta.mode, meta.handoff ? `${meta.task}\n\n${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
     cwd: meta.cwd,
     model: target.model,
     sessionId: meta.sessionId,
@@ -598,13 +605,7 @@ function retryableFailure(meta: RunMeta, backend: Backend, res: ProcessResult): 
  * one is told what it already changed (a read run's next worker starts over: its answer was not written yet).
  */
 function handOver(meta: RunMeta, backend: Backend, target: Target): void {
-  const run = backend.parse(read(runFile(meta.id, 'events.jsonl')));
-  const used = { ...run.usage };
-  if (used.cost === undefined) {
-    const price = workerPrice(target.backend, run.model, target.model);
-    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? 'config' });
-  }
-  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+  bankUsage(meta, target, backend.parse(read(runFile(meta.id, 'events.jsonl'))));
   if (meta.mode === 'read') return;
   let changed: string[] = [];
   try {
@@ -617,6 +618,91 @@ function handOver(meta: RunMeta, backend: Backend, target: Target): void {
   meta.handoff =
     `Another worker started this task and stopped part way, at its usage limit. Its edits are already in the files${list}. ` +
     'Do not start over: check what it changed against the task, keep what is right, fix what is not, and finish the task.';
+}
+
+/** What a worker turn used, kept as part of the run's cost before its event stream makes way for the next turn's. */
+function bankUsage(meta: RunMeta, target: Target, run: ReturnType<Backend['parse']>): void {
+  const used = { ...run.usage };
+  if (used.cost === undefined) {
+    const price = workerPrice(target.backend, run.model, target.model);
+    if (price) Object.assign(used, { costEstimate: costAt(used, price), costSource: price.source ?? 'config' });
+  }
+  meta.priorUsage = meta.priorUsage ? addUsage(meta.priorUsage, used) : used;
+}
+
+/**
+ * A change whose --verify check fails goes back to the worker that made it, in its own session, with the end of the
+ * check's output (config `verifyFix`, `--verify-fix N`: the rounds, default 1). It ends when the check passes, the
+ * rounds are used up, or a round does not end well: then the work before it stands, and the check run on what is in
+ * the files decides. The last check's result is the run's; finalize runs the check only when no round did.
+ */
+async function fixUntilVerified(meta: RunMeta, result: ProcessResult): Promise<ProcessResult> {
+  const target = meta.ran;
+  if (!meta.verify || !meta.verifyFix || !target) return result;
+  const backend = getBackend(target.backend);
+  for (let round = 1; ; round++) {
+    if (result.timedOut || result.stopped || meta.error || failureOf(meta, backend, result)) return result;
+    const v = runVerify(meta);
+    meta.verifyResult = v;
+    writeMeta(meta);
+    // a check that could not run (127) or was killed (null) is nothing a change can fix
+    if (v.ok || v.code === null || v.code === 127 || round > meta.verifyFix) return result;
+    if (fs.existsSync(runFile(meta.id, STOP_FILE))) return result;
+    const done = backend.parse(read(runFile(meta.id, 'events.jsonl')));
+    meta.sessionId = done.sessionId ?? meta.sessionId;
+    const why = !meta.sessionId ? 'its session is not known' :!inBudget(target) ? 'the daily budget ("budgetDaily") is spent' : undefined;
+    if (why) {
+      meta.warnings.push(`the failed check was not sent back to the worker: ${why}`);
+      return result;
+    }
+    const prompt = fixPrompt(meta, v.code);
+    bankUsage(meta, target, done);
+    fs.writeFileSync(runFile(meta.id, `summary.round-${round}.md`), done.finalText);
+    for (const f of ['events.jsonl', 'stderr.log', 'verify.log']) {
+      const from = runFile(meta.id, f);
+      if (fs.existsSync(from)) fs.renameSync(from, runFile(meta.id, f.replace('.', `.round-${round}.`)));
+    }
+    (meta.verifyRounds ??= []).push({ code: v.code, tail: v.tail });
+    meta.verifyResult = undefined;
+    writeMeta(meta);
+    result = await attempt(meta, backend, target, prompt);
+    if (result.stopped || result.spawnError) return result;
+    const f = result.timedOut ? { kind: 'other' as const, message: `it ran out of time (${meta.timeoutSec}s)` } : failureOf(meta, backend, result);
+    if (f) {
+      // the work before this round stands: a warning, not a failed run (finalize leaves it so)
+      if (f.kind === 'rate-limited') recordCooldown(cooldownKey(target, backend), describeTarget(target), f.message);
+      meta.verifyRounds.at(-1)!.fixFailed = f.message;
+      meta.warnings.push(`fix ${round} after the failed check did not end well (${f.message}); the files hold what it changed before it stopped`);
+      return { ...result, timedOut: false };
+    }
+  }
+}
+
+/** How the worker's last turn went wrong, as its backend says; undefined when it ended well. */
+function failureOf(meta: RunMeta, backend: Backend, res: ProcessResult): Failure | undefined {
+  return backend.failure(backend.parse(read(runFile(meta.id, 'events.jsonl'))), read(runFile(meta.id, 'stderr.log')), res.code);
+}
+
+function inBudget(target: Target): boolean {
+  try {
+    return withinBudget([target]).chain.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+/** A fix round's prompt: the check, how it failed, and the end of its output (as much as a worker needs to start). */
+function fixPrompt(meta: RunMeta, code: number | null): string {
+  const lines = read(runFile(meta.id, 'verify.log')).trimEnd().split('\n').slice(-120).join('\n');
+  const tail = lines.length > 8000 ? `…${lines.slice(-8000)}` : lines;
+  const fence = '`'.repeat(Math.max(3, ...[...tail.matchAll(/`+/g)].map((m) => m[0].length + 1)));
+  return `Pitroom ran the check the primary agent asked for, \`${meta.verify}\`, on your changes, and it failed (exit ${code}). The end of its output:
+
+${fence}
+${tail || '(no output)'}
+${fence}
+
+Find the cause and fix it, then finish the task. Do not weaken, skip or delete tests or the check itself to make it pass. If the failure is not caused by the task's change, or cannot be fixed within the task, leave it and say why under OPEN ISSUES. Same rules as before; end with the same answer format as before.`;
 }
 
 const HINTS: Record<Failure['kind'], string> = {
@@ -635,8 +721,13 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   if (meta.snapshot?.dir && meta.repoRoot) run.finalText = backToProject(run.finalText, meta.snapshot.dir, meta.repoRoot);
   meta.sessionId = run.sessionId ?? meta.sessionId;
   meta.usage = run.usage;
-  fs.writeFileSync(runFile(meta.id, 'summary.md'), `${run.finalText}\n`);
-  if (meta.plan && !meta.reviewOf) meta.taskStatus = parseStatus(run.finalText);
+  const answer = withFixRounds(meta, run.finalText);
+  fs.writeFileSync(runFile(meta.id, 'summary.md'), `${answer}\n`);
+  if (meta.plan && !meta.reviewOf) {
+    // the last round's STATUS line, else the first answer's
+    const status = parseStatus(run.finalText);
+    meta.taskStatus = status === 'unknown' ? parseStatus(answer) : status;
+  }
   if (meta.reviewOf) {
     meta.verdict = parseVerdict(run.finalText);
     if (meta.packageFile) fs.rmSync(meta.packageFile, { force: true });
@@ -644,7 +735,8 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   for (const w of backend.warnings?.(run, read(runFile(meta.id, 'stderr.log'))) ?? []) {
     if (!meta.warnings.includes(w)) meta.warnings.push(w);
   }
-  if (!res.timedOut && !res.stopped && !meta.error) {
+  // a fix round that did not end well is a warning (fixUntilVerified): the work before it stands
+  if (!res.timedOut && !res.stopped && !meta.error && !meta.verifyRounds?.at(-1)?.fixFailed) {
     const f = backend.failure(run, read(runFile(meta.id, 'stderr.log')), res.code);
     if (f) {
       meta.error = HINTS[f.kind] ? `${f.message} (${HINTS[f.kind]})` : f.message;
@@ -662,7 +754,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   }
   if (meta.sessionId && backend.resolveModel) meta.resolvedModel = backend.resolveModel(meta.sessionId);
   meta.resolvedModel ??= run.model ?? ran.model;
-  const refs = extractRefs(run.finalText);
+  const refs = extractRefs(answer);
   if (refs.length) {
     meta.refs = verifyRefs(refs, [meta.cwd, meta.repoRoot ?? '', meta.dir]);
     if (meta.refs.invalid.length) {
@@ -678,8 +770,9 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
     meta.auditVerdict = found.verdict;
     meta.auditDisputed = found.disputed;
   }
-  if (meta.state === 'done' && !run.finalText) meta.warnings.push('worker finished without a written answer');
-  if (meta.state === 'done' && meta.verify) meta.verifyResult = runVerify(meta);
+  if (meta.state === 'done' && !answer) meta.warnings.push('worker finished without a written answer');
+  // fixUntilVerified already checked what is in the files when no round came after its check
+  if (meta.state === 'done' && meta.verify && !meta.verifyResult) meta.verifyResult = runVerify(meta);
   meta.endedAt = new Date().toISOString();
 
   // A CLI that reports no cost (Codex, Gemini): estimate it from the prices the user gave, so the savings are not
@@ -693,7 +786,7 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   }
   // the workers a limit stopped part way cost too
   if (meta.priorUsage && meta.usage) meta.usage = addUsage(meta.priorUsage, meta.usage);
-  meta.returnedTokens = estimateTokens(formatReport(meta, run.finalText));
+  meta.returnedTokens = estimateTokens(formatReport(meta, answer));
   // An audit is overhead, not a delegation that saved anything.
   meta.savedUsd = meta.auditOf ? 0 : savedUsd(meta.usage, meta.returnedTokens);
   writeMeta(meta);
@@ -703,6 +796,18 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   notifyEnded(meta);
   refreshInBackground(); // the price catalog, when the feed is on and it is due: in a process of its own
   return meta;
+}
+
+/** The answer of a run whose failed check went back to the worker: the first answer says what was done, each fix what it fixed. */
+function withFixRounds(meta: RunMeta, last: string): string {
+  const rounds = meta.verifyRounds ?? [];
+  if (!rounds.length) return last;
+  const parts = [read(runFile(meta.id, 'summary.round-1.md')).trim() || '(no written answer)'];
+  rounds.forEach((r, i) => {
+    const text = i + 1 < rounds.length ? read(runFile(meta.id, `summary.round-${i + 2}.md`)) : last;
+    parts.push(`── fix ${i + 1}, after the check failed (exit ${r.code}):`, text.trim() || '(no written answer)');
+  });
+  return parts.join('\n\n');
 }
 
 function captureChanges(meta: RunMeta): void {
@@ -729,7 +834,7 @@ function verifyPath(): string {
   return parts.join(path.delimiter);
 }
 
-function runVerify(meta: RunMeta): RunMeta['verifyResult'] {
+function runVerify(meta: RunMeta): NonNullable<RunMeta['verifyResult']> {
   const r = spawnSync(meta.verify!, {
     cwd: meta.cwd,
     shell: true,

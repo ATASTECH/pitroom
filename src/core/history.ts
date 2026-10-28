@@ -108,8 +108,8 @@ export function compactRun(meta: RunMeta): void {
     return;
   }
   for (const n of names) {
-    if (/^events(\.attempt-\d+)?\.jsonl$/.test(n)) gzipFile(path.join(dir, n));
-    else if (/^stderr(\.attempt-\d+)?\.log$/.test(n)) {
+    if (/^events(\.(attempt|round)-\d+)?\.jsonl$/.test(n)) gzipFile(path.join(dir, n));
+    else if (/^stderr(\.(attempt|round)-\d+)?\.log$/.test(n)) {
       if (meta.state === 'done' && !/attempt/.test(n)) fs.rmSync(path.join(dir, n), { force: true });
       else gzipFile(path.join(dir, n));
     }
@@ -120,14 +120,21 @@ export function compactRun(meta: RunMeta): void {
 
 const clip = (s: string | undefined, n: number) => (s && s.length > n ? s.slice(0, n) : s);
 
-function timelineOf(meta: RunMeta): Step[] {
-  const raw = readRunFile(meta.id, 'events.jsonl');
-  if (!raw) return [];
-  try {
-    return getBackend((meta.ran ?? meta.worker).backend).parse(raw).timeline ?? [];
-  } catch {
-    return []; // a worker this version does not know
+/** The worker's steps; a run whose failed check went back to the worker has a turn of them per round, in order. */
+export function timelineOf(meta: RunMeta): Step[] {
+  const rounds = meta.verifyRounds ?? [];
+  const steps: Step[] = [];
+  for (let i = 0; i <= rounds.length; i++) {
+    if (i) steps.push({ kind: 'say', text: `the check \`${meta.verify}\` failed (exit ${rounds[i - 1]!.code}): its output went back to the worker (fix ${i})` });
+    const raw = readRunFile(meta.id, i < rounds.length ? `events.round-${i + 1}.jsonl` : 'events.jsonl');
+    if (!raw) continue;
+    try {
+      steps.push(...(getBackend((meta.ran ?? meta.worker).backend).parse(raw).timeline ?? []));
+    } catch {
+      // a worker this version does not know
+    }
   }
+  return steps;
 }
 
 /** Records (or updates) a finished run. Cheap when the run is already known: only its scalar fields change. */

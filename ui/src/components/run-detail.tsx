@@ -139,7 +139,7 @@ function Body({ d, reload }: { d: RunDetail; reload: () => void }) {
         {d.refs && <Note tone={d.refs.valid < d.refs.total ? undefined : 'ok'}>References verified: {d.refs.valid} of {d.refs.total}{d.refs.invalid.length ? ` · not found: ${d.refs.invalid.join(', ')}` : ''}</Note>}
         {d.attempts.map((a, i) => <Note key={i}>{a.skipped ? `Skipped ${a.target}: ${a.error}` : `Fell back from ${a.target}: ${a.error}`}</Note>)}
         {d.warnings.map((w, i) => <Note key={i}>{w}</Note>)}
-        {d.verify && <Note tone={d.verify.ok ? 'ok' : 'bad'}>Verify {d.verify.ok ? 'passed' : 'failed'}: {d.verify.command}</Note>}
+        {d.verify && <Note tone={d.verify.ok ? 'ok' : 'bad'}>Verify {d.verify.ok ? 'passed' : 'failed'}{d.verify.fixes ? `${d.verify.ok ? ' after' : ', also after'} ${d.verify.fixes} fix round${d.verify.fixes === 1 ? '' : 's'}` : ''}: {d.verify.command}</Note>}
         {d.error && <Note tone="bad">{d.error}</Note>}
         <div className="flex gap-1 pt-1">
           <Button variant="ghost" size="sm" onClick={() => { void navigator.clipboard?.writeText(d.id); setCopied(true); setTimeout(() => setCopied(false), 1400); }}>

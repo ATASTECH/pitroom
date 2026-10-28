@@ -62,7 +62,8 @@ export interface RunDetail {
   attempts: { target: string; error: string; skipped?: boolean }[];
   warnings: string[];
   refs?: { valid: number; total: number; invalid: string[] };
-  verify?: { command: string; ok: boolean; tail: string };
+  /** `fixes`: the failed checks that went back to the worker before this result. */
+  verify?: { command: string; ok: boolean; tail: string; fixes?: number };
   error?: string;
   audit?: { id?: string; state: string; verdict?: string; disputed: string[] };
   report: string;

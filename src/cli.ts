@@ -97,6 +97,8 @@ Run options
       --step N          the plan task for --plan
   -t, --timeout DUR     e.g. 900, 20m, 1h (default 30m, or PITROOM_TIMEOUT)
       --verify CMD      run CMD after the worker (in the isolated copy for --isolate)
+      --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
+                        (0 to 3; default: config "verifyFix", 1)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
   -c, --continue RUN    follow up in the same worker session (and the same isolated copy)
       --bg              start in background, print the run id, return immediately
@@ -116,10 +118,10 @@ Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, P
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
      PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
-     PITROOM_<WORKER>_BIN
+     PITROOM_VERIFY_FIX, PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
         countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
-        auditFix, auditFocus, budgetDaily, rankWorkers)`;
+        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Checks
+- **A failed `--verify` goes back to the worker.** When the check of a change (`-i`, `-w`) fails, its output (the last 120 lines) goes back to the worker that made the change, in its own session, to fix the cause, and the check runs again: one round by default, up to three (`verifyFix` in the config, `PITROOM_VERIFY_FIX`, `--verify-fix N` per run; `0` turns it off). The worker is told not to weaken, skip or delete the check. It all stays one run: one patch, every round's cost, the answer of each round (`── fix 1, after the check failed (exit 1):`), and the steps of every round on the dashboard and in the history. The report says `✔ passed after 1 fix round (it failed first: exit 1)` or `✘ failed (exit 1), also after 1 fix round`; exit codes are unchanged. No round for a read run, a check that could not run (exit 127) or was killed, or once the daily budget is spent; a round that ends badly (a rate limit, a timeout) is a warning, the work before it stands and the check run on the files decides.
+- The daily budget counts what a run still going used before its current turn (a worker a limit stopped part way, earlier fix rounds).
+
 ## 0.28.0
 
 ### Crews

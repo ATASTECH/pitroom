@@ -2659,7 +2659,8 @@ var SCHEMA = {
   priceFeedHours: "number",
   budgetDaily: "number",
   rankWorkers: "boolean",
-  autoFallback: "boolean"
+  autoFallback: "boolean",
+  verifyFix: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path15.resolve(process.env.PITROOM_CONFIG);
@@ -2725,6 +2726,11 @@ var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
 };
+var MAX_VERIFY_FIX = 3;
+var fixRounds = (v) => {
+  const n = days(v);
+  return n === void 0 ? void 0 : Math.min(n, MAX_VERIFY_FIX);
+};
 var flag01 = (v) => {
   const t = v?.trim().toLowerCase();
   return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
@@ -2770,7 +2776,8 @@ function effective(flags = {}) {
     priceFeedHours: setting(void 0, positiveInt(e.PITROOM_PRICE_FEED_HOURS), positiveInt(c.priceFeedHours), 24),
     rankWorkers: setting(void 0, flag01(e.PITROOM_RANK_WORKERS), c.rankWorkers, false),
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
-    budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0)
+    budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
+    verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1)
   };
 }
 
