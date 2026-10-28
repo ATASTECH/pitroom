@@ -475,6 +475,18 @@ Tiers map plan tasks to workers: `"tiers": {"cheap": "opencode", "standard": "co
 
 ---
 
+### On pull requests
+
+The repository is also a GitHub Action: on each push to a pull request a worker you choose reviews the new commits (`pitroom review --range base..head`, read-only), and the review goes to the job summary and to one comment, updated on every push. `fail-on: critical` makes it a required check. [The workflow and its inputs](docs/github-action.md).
+
+```yaml
+- uses: actions/checkout@v4
+  with: { fetch-depth: 0 }
+- run: npm install --global opencode-ai
+- uses: ATASTECH/pitroom@v0.29.0
+  with: { worker: "opencode:opencode/big-pickle", fail-on: critical }
+```
+
 ## Audits
 
 Pitroom checks every `path:line` a worker cites, which proves a line exists, not that the claim about it is true. An **audit** asks a second worker to verify an answer's key claims against your project and to say `AGREE`, `PARTIAL` or `DISAGREE`, with the claims it disputes.

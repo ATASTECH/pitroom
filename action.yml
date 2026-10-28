@@ -1,0 +1,67 @@
+name: Pitroom review
+description: A cheap worker agent reviews a pull request's commits, read-only; findings go to the job summary and one PR comment.
+author: ATASTECH
+branding:
+  icon: eye
+  color: blue
+
+inputs:
+  worker:
+    description: 'Worker "backend[:model]", e.g. "opencode:opencode/big-pickle". Install and sign in its CLI in an earlier step. Default: opencode with its own default model.'
+    required: false
+    default: ''
+  range:
+    description: 'The commits to review, "A..B". Default: the pull request, base..head (check out with fetch-depth: 0).'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Fail the step on "critical" findings, on "important" ones (and critical), or "never" (default). A review that cannot finish fails it too, unless "never".'
+    required: false
+    default: never
+  comment:
+    description: 'Post the review as one pull request comment, updated on each push ("true" or "false").'
+    required: false
+    default: 'true'
+  github-token:
+    description: 'Token for the comment; needs pull-requests: write.'
+    required: false
+    default: ${{ github.token }}
+  node-version:
+    description: 'Node.js for Pitroom (22.5 or later).'
+    required: false
+    default: '24'
+
+outputs:
+  run:
+    description: The review's run id.
+    value: ${{ steps.review.outputs.run }}
+  spec:
+    description: pass, fail or unknown.
+    value: ${{ steps.review.outputs.spec }}
+  quality:
+    description: approved, needs-fixes or unknown.
+    value: ${{ steps.review.outputs.quality }}
+  critical:
+    description: Critical findings.
+    value: ${{ steps.review.outputs.critical }}
+  important:
+    description: Important findings.
+    value: ${{ steps.review.outputs.important }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+    - id: review
+      shell: bash
+      env:
+        INPUT_WORKER: ${{ inputs.worker }}
+        INPUT_RANGE: ${{ inputs.range }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        PITROOM_HOME: ${{ runner.temp }}/pitroom
+        PITROOM_MCP_DASH: '0'
+      run: node "$GITHUB_ACTION_PATH/scripts/github-review.mjs"
