@@ -2661,7 +2661,8 @@ var SCHEMA = {
   rankWorkers: "boolean",
   autoFallback: "boolean",
   verifyFix: "number",
-  maxCost: "number"
+  maxCost: "number",
+  repoMap: "boolean"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path15.resolve(process.env.PITROOM_CONFIG);
@@ -2783,7 +2784,8 @@ function effective(flags = {}) {
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
     verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
-    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0)
+    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0),
+    repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false)
   };
 }
 

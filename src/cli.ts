@@ -34,6 +34,7 @@ Usage
                                         (definition: path:line, count: the number, set: F1 of the paths)
   pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
   pitroom plan note PLAN "Task N: …"    record a completion, deferred finding or ruling (outside the repo)
+  pitroom map [-d DIR] [--fresh]        the project map a run's prompt gets with --map (config "repoMap")
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run… | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -100,6 +101,8 @@ Run options
       --verify-fix N    when CMD fails on a change, send its output back to the worker N times to fix it
                         (0 to 3; default: config "verifyFix", 1)
       --max-cost USD    stop the worker when the run has cost this much (reported or estimated; config "maxCost")
+      --map             put a map of the project (files by folder, the names each declares) in the prompt;
+                        --no-map leaves it out (default: config "repoMap", off)
       --race N          -i: N workers (the worker and its fallbacks in turn, or -W each time) make the same change
                         side by side; when all end, the best one wins and the others' copies go (2 to 5)
       --link a,b        isolate: symlink ignored dirs (e.g. node_modules) into the copy
@@ -121,10 +124,10 @@ Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, P
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
      PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
-     PITROOM_VERIFY_FIX, PITROOM_MAX_COST, PITROOM_<WORKER>_BIN
+     PITROOM_VERIFY_FIX, PITROOM_MAX_COST, PITROOM_REPO_MAP, PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
         countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
-        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix, maxCost)`;
+        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix, maxCost, repoMap)`;
 
 type Command = (p: ReturnType<typeof parse>) => number | Promise<number>;
 
@@ -150,6 +153,7 @@ const COMMANDS: Record<string, Command> = {
     return has(p, 'http') ? serveMcpHttp({ port: port === undefined ? DEFAULT_PORT : Number(port) }) : serveMcp();
   },
   plan: cmd.cmdPlan,
+  map: cmd.cmdMap,
   status: cmd.cmdStatus,
   wait: cmd.cmdWait,
   watch: cmd.cmdWatch,

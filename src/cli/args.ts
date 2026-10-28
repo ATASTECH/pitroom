@@ -22,7 +22,7 @@ const VALUE_FLAGS: Record<string, string> = {
 
 const BOOL_FLAGS: Record<string, string> = {
   '-r': 'read', '--read': 'read', '-w': 'write', '--write': 'write', '-i': 'isolate', '--isolate': 'isolate',
-  '--bg': 'bg', '--mcp': 'mcp', '--no-skills': 'no-skills', '--dry-run': 'dry-run', '--in-place': 'in-place', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git',
+  '--bg': 'bg', '--mcp': 'mcp', '--no-skills': 'no-skills', '--dry-run': 'dry-run', '--in-place': 'in-place', '--audit': 'audit', '--no-audit': 'no-audit', '--web': 'web', '--no-fallback': 'no-fallback', '--json': 'json', '--allow-non-git': 'allow-non-git', '--map': 'map', '--no-map': 'no-map',
   '--patch': 'patch', '--events': 'events', '--full': 'full', '--badge': 'badge', '--probe': 'probe', '--clear': 'clear', '--refresh': 'refresh', '--quiet': 'quiet',
   '--copy': 'copy', '--all': 'all', '--models': 'models', '--force': 'force', '--allow-delete': 'allow-delete', '--yes': 'yes', '--any': 'any', '--brief': 'brief', '--running': 'running', '--detach': 'detach', '--stop': 'stop', '--open': 'open', '--serve': 'serve', '--fresh': 'fresh', '--http': 'http',
   '-h': 'help', '--help': 'help', '-v': 'version', '--version': 'version',
@@ -97,6 +97,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
   const cont = flag(p, 'continue');
   if (has(p, 'audit') && has(p, 'no-audit')) throw new UserError('choose one of --audit, --no-audit');
   if (has(p, 'audit') && (has(p, 'write') || has(p, 'isolate'))) throw new UserError('audits re-check the answer of a read run: drop -w/-i');
+  if (has(p, 'map') && has(p, 'no-map')) throw new UserError('choose one of --map, --no-map');
   return {
     mode: modes[0] ?? 'read',
     auditRate: has(p, 'no-audit') ? 0 : has(p, 'audit') ? 1 : undefined,
@@ -115,6 +116,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
     verify: flag(p, 'verify'),
     verifyFix: verifyFixFlag(p),
     maxCost: maxCostFlag(p),
+    map: has(p, 'map') ? true : has(p, 'no-map') ? false : undefined,
     continueFrom: cont ? resolveRun(cont) : undefined,
     allowNonGit: has(p, 'allow-non-git'),
     web: has(p, 'web') || effective().web.value,

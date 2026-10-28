@@ -441,6 +441,8 @@ pitroom run --continue last "Now handle the empty-page case too"
 
 **A failed check goes back to the worker.** With `--verify CMD` on a change (`-i` or `-w`), a check that fails is not the end of the run: its output (the last 120 lines) goes back to the same worker, in its own session, to fix the cause, and the check runs again. One round by default, up to three (`verifyFix`, `--verify-fix N`; `0` turns it off), and the worker is told not to weaken or skip the check. The report says `✔ passed after 1 fix round` or `✘ failed, also after 1 fix round`; the answer keeps what each round did and the receipt counts every round. A check that could not run (exit 127) or was killed is not sent back, nor anything once the daily budget is spent; a round that ends badly (a rate limit, a timeout) leaves the work before it, and the check run on the files decides.
 
+**A map for the worker.** With `--map` (or `"repoMap": true`), a new run's prompt starts with a map of the project: the files git sees in the run's directory by folder, with the names each source file declares at its top level (exports in TypeScript and JavaScript, `def` and `class` in Python, `func` and `type` in Go, `pub` items in Rust, classes in Java, Kotlin, C#, Swift, Ruby and PHP). A free model otherwise spends its first steps listing folders and grepping for where things are. It is kept to about 1,500 tokens: past that, trees of tests, docs, assets and the like become one line with their counts, then folders without names, then the largest folders lose their names. Secret-looking and git-ignored files are not in it, follow-ups, audits and reviews never get one, and it is made once per state of the project. `pitroom map` prints it.
+
 Long jobs: `--bg` returns immediately; `pitroom wait <id>` blocks for up to 9 minutes (made for agents with 10-minute tool limits; exit code 75 means "call wait again").
 
 ---
@@ -597,6 +599,7 @@ For changes, `pitroom crew -i …` gives every worker its own isolated copy of y
 ```text
 pitroom run [-r|-w|-i] [-W WORKER] [-m MODEL] [-d DIR] [-f FILE]… [-t 30m] [--verify CMD [--verify-fix N]] [--max-cost USD] [--link a,b] [--bg] "task"
 pitroom run -i --race N [--verify CMD] "task"     N workers (2 to 5) make the same change; the best one wins
+pitroom map [-d DIR] [--fresh]                    the project map a run's prompt gets with --map
 pitroom run --continue <run|last> "follow-up"
 pitroom crew [-i] [-g NAME] "task 1" "task 2" …   (or --task-file with --- separators)
 pitroom crew [-i] [-g NAME] --over src/a,src/b "task about {scope}"   (one worker per part; "src/*/": one per folder)
@@ -783,6 +786,7 @@ Or put defaults in `~/.config/pitroom/config.json` (flags and env still win); `p
 - `countRateLimits`: whether runs that failed on a rate limit or quota count in `pitroom history stats` and the dashboard's Stats (default `false`: they are left out of the run counts, success rates, times and tokens and shown apart as rate-limited, since they say nothing about the worker's work; `true` counts them as not ok).
 - `verifyFix`: how many times a failed `--verify` check of a change goes back to its worker, with the check's output, to fix it (default `1`, at most `3`, `0` = off; `PITROOM_VERIFY_FIX`; `--verify-fix N` per run). See [Modes](#modes).
 - `maxCost`: what one run's workers may cost, in USD (as their CLIs report it, or estimated from `workerPrices` and the price catalog; a worker a limit stopped and fix rounds included). The cost is checked every second while the worker runs; at the cap the worker is stopped, no fallback takes over, and the run fails saying so, with what it changed until then in its changes. A worker whose cost cannot be told (no reported cost, no price) is not stopped, and the run says the cap could not be checked. Default: none (`PITROOM_MAX_COST`; `--max-cost USD` per run).
+- `repoMap`: put a map of the project (files by folder, with the names each source file declares) in a new run's prompt, about 1,500 tokens at most (default `false`; `PITROOM_REPO_MAP=1`; `--map`, `--no-map` per run; `pitroom map` shows it). See [Modes](#modes).
 
 </details>
 

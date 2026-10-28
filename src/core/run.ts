@@ -25,6 +25,7 @@ import { brief, loadPlan, planName, planTask } from './plan.js';
 import { fill, loadTemplate } from './templates.js';
 import { acquireWriteLock, releaseSlot, releaseWriteLock, tryAcquireSlot } from './slots.js';
 import { buildPrompt } from './prompt.js';
+import { projectMap } from './repomap.js';
 import { addUsage, costAt, estimateTokens, record, savedUsd, usd, workerPrice } from './receipt.js';
 import { extractRefs, verifyRefs } from './refs.js';
 import { findSecretFiles, findSecretFilesInTree, secretWarning } from './secrets.js';
@@ -57,6 +58,8 @@ export interface RunOptions {
   maxCost?: number;
   /** Set on each run of a race (`--race N`): how many race. */
   race?: number;
+  /** `--map` / `--no-map`: a map of the project in the prompt (default: the config's `repoMap`). */
+  map?: boolean;
   continueFrom?: string;
   allowNonGit: boolean;
   web: boolean;
@@ -210,6 +213,8 @@ export function prepareRun(o: RunOptions): RunMeta {
     verifyFix: o.verify && mode !== 'read' ? (o.verifyFix ?? effective().verifyFix.value) || undefined : undefined,
     maxCost: o.maxCost ?? effective().maxCost.value,
     race: o.race,
+    // a follow-up's session has found its way already; audits, reviews and corrections bring what to read
+    map: (o.map ?? effective().repoMap.value) && !parent && !o.audit && !o.review && !o.fix ? true : undefined,
     web: o.web || !!parent?.web,
     state: 'queued',
     startedAt: new Date().toISOString(),
@@ -299,6 +304,7 @@ export async function execute(meta: RunMeta): Promise<RunMeta> {
   writeMeta(meta);
   try {
     prepareTree(meta);
+    if (meta.map) writeMap(meta);
     writeMeta(meta);
     const planned: Planned = { snapshot: meta.snapshot && { ...meta.snapshot }, cwd: meta.cwd };
     let lastFailure: Failure | undefined;
@@ -479,6 +485,15 @@ function prepareTree(meta: RunMeta): void {
   }
 }
 
+/** The project's map for the prompt (repomap.ts); a run without one still runs, and says so. */
+function writeMap(meta: RunMeta): void {
+  try {
+    fs.writeFileSync(runFile(meta.id, 'map.md'), projectMap(meta.dir));
+  } catch (e) {
+    meta.warnings.push(`no project map in the prompt: ${(e as Error).message.slice(0, 120)}`);
+  }
+}
+
 /** Where a read run was meant to read before any worker that may write got a snapshot of its own. */
 interface Planned {
   snapshot?: RunMeta['snapshot'];
@@ -575,7 +590,7 @@ function sharedSnapshot(meta: RunMeta, root: string): void {
 function attempt(meta: RunMeta, backend: Backend, target: Target, prompt?: string): Promise<ProcessResult> {
   const inv = backend.invocation({
     mode: meta.mode,
-    prompt: prompt ?? buildPrompt(meta.mode, meta.handoff ? `${meta.task}\n\n${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf),
+    prompt: prompt ?? buildPrompt(meta.mode, meta.handoff ? `${meta.task}\n\n${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf, meta.map ? read(runFile(meta.id, 'map.md')) : undefined),
     cwd: meta.cwd,
     model: target.model,
     sessionId: meta.sessionId,

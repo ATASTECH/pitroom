@@ -67,6 +67,8 @@ export interface RunMeta {
   verifyResult?: { ok: boolean; code: number | null; tail: string };
   /** Fix rounds a failed --verify may get (config `verifyFix`, --verify-fix); only on a change with a check. */
   verifyFix?: number;
+  /** The worker's prompt carries a map of the project (config `repoMap`, --map; see repomap.ts). */
+  map?: boolean;
   /** In a race (`--race N`): how many workers race, and this run's place once all have ended (see race.ts). */
   race?: number;
   racePlace?: number;

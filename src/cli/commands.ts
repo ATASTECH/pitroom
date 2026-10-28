@@ -32,6 +32,7 @@ import { archivedRun, historyFile, historyStats, importRuns, listHistory, openDb
 import { hookCards, statusLine } from '../core/ui.js';
 import { type RunOptions, applyRun, discardRun, execute, prepareRun, revertRun, startInBackground, stopRun } from '../core/run.js';
 import { MAX_RACE, formatRace, settleRace, startRace } from '../core/race.js';
+import { buildMap, projectMap } from '../core/repomap.js';
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
@@ -70,6 +71,16 @@ export async function cmdRun(p: Parsed): Promise<number> {
     return exitCodeFor(hit);
   }
   return launch(p, prepareRun({ ...opts, cache }));
+}
+
+/** `pitroom map`: the map a run's prompt gets with --map, for a look at what the worker is told (or for your agent). */
+export function cmdMap(p: Parsed): number {
+  const dir = path.resolve(flag(p, 'dir') ?? process.cwd());
+  if (!repoRoot(dir)) throw new UserError(`not in a git repository: ${dir} (the map lists the files git sees)`, 3);
+  const map = has(p, 'fresh') ? buildMap(dir) : projectMap(dir);
+  console.log(map || '(git lists no files here)');
+  console.error(dim(`── ${map.length} characters, ~${Math.ceil(map.length / 4)} tokens in a prompt`));
+  return 0;
 }
 
 function raceSize(v: string): number {

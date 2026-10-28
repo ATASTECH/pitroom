@@ -64,6 +64,8 @@ export interface PitroomConfig {
   verifyFix?: number;
   /** USD one run's workers may cost (reported or estimated); the worker is stopped when the run reaches it (default none; PITROOM_MAX_COST; --max-cost). */
   maxCost?: number;
+  /** Put a map of the project (files by folder, the names each declares) in a new run's prompt (default false; PITROOM_REPO_MAP=1; --map, --no-map). */
+  repoMap?: boolean;
 }
 
 const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record' | 'numbers'> = {
@@ -97,6 +99,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   autoFallback: 'boolean',
   verifyFix: 'number',
   maxCost: 'number',
+  repoMap: 'boolean',
 };
 
 export function configPath(): string {
@@ -255,5 +258,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     budgetDaily: setting<number | undefined>(undefined, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), undefined),
     verifyFix: setting<number>(undefined, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
     maxCost: setting<number | undefined>(undefined, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), undefined),
+    repoMap: setting<boolean>(undefined, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
   };
 }

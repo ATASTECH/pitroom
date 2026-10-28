@@ -19,8 +19,11 @@ const RULES: Record<Mode, string[]> = {
 const COMPLETE =
   'When the task asks for all of something, a list or a count: search the whole scope (e.g. a project-wide grep) instead of stopping at the first hits, give the complete list or the exact count, and say how you found it. If you could not cover everything, say what is left out under OPEN ISSUES.';
 
-/** An audit's task brings its own reply form and asks for a recount, so the auditor gets neither the answer format nor the economy rule. */
-export function buildPrompt(mode: Mode, task: string, followUp: boolean, audit = false): string {
+/**
+ * An audit's task brings its own reply form and asks for a recount, so the auditor gets neither the answer format nor
+ * the economy rule. `map`: the project's map (config `repoMap`), put before the task.
+ */
+export function buildPrompt(mode: Mode, task: string, followUp: boolean, audit = false, map?: string): string {
   if (followUp) return `Follow-up from the primary agent. Same rules and answer format as before.\n\n${task}`;
   const rules = mode === 'read' && !audit ? [...RULES[mode], COMPLETE] : RULES[mode];
   const economy = audit ? '' : '\n- Be economical: open only what you need, but do not cut a search short when the task asks for a complete list or a count.';
@@ -43,7 +46,10 @@ Rules:
 - Do not ask questions. If something is ambiguous, choose the safest reasonable interpretation and state the assumption.${economy}
 
 ${format}
-
+${map ? `
+Project map: the files git sees here, by folder, with the names each source file declares at its top level. A starting point to find your way, not the code: read what you rely on.
+${map}
+` : ''}
 Task:
 ${task}`;
 }
