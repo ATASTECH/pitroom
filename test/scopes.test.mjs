@@ -56,3 +56,11 @@ test('crew --over starts one worker per part, with the part in its task', () => 
   assert.equal(overlap.status, 2);
   assert.match(overlap.stderr, /app\.txt is inside \./);
 });
+
+test('scopes: a part that is a link to a folder outside the project is outside', { skip: process.platform === 'win32' && 'symlinks need privileges on Windows' }, () => {
+  const dir = tree();
+  const elsewhere = scratchDir('pitroom-elsewhere-');
+  fs.symlinkSync(elsewhere, path.join(dir, 'vendor-link'));
+  assert.throws(() => expandScopes(['vendor-link'], dir), /--over vendor-link is outside/);
+  assert.throws(() => expandScopes(['vendor-*'], dir), /is outside/);
+});

@@ -22,7 +22,7 @@ import { findSecretFiles, looksSecret } from '../../core/secrets.js';
 import { home } from '../../core/store.js';
 import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
-import { linkInto, writeIfChanged } from '../home.js';
+import { linkInto, pruneHomes, writeIfChanged } from '../home.js';
 import { splitModel } from '../text.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
@@ -316,7 +316,6 @@ function baseSettings() {
  */
 const rulePath = (p: string) => p.replace(/^[A-Za-z]:(?=[\\/])/, '').replace(/\\/g, '/');
 
-const HOMES_KEPT_DAYS = 14;
 
 /**
  * pnpm keeps its store in the home. In a home per workspace, `pnpm install` in an agy run built a store of its own each
@@ -395,22 +394,9 @@ function workerHome(workspace: string, reads: OutsideRead[] = [], writes = false
   const now = new Date();
   fs.utimesSync(dir, now, now);
   if (fs.existsSync(shared)) fs.utimesSync(shared, now, now);
-  pruneHomes(root, dir);
+  // the shared caches go too when no home has used them for as long
+  pruneHomes(root, dir, [SHARED]);
   return dir;
-}
-
-function pruneHomes(root: string, keep: string): void {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS * 86_400_000;
-  try {
-    for (const name of fs.readdirSync(root)) {
-      const dir = path.join(root, name);
-      // the shared caches go too when no home has used them for as long
-      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || name === SHARED)) continue;
-      if (fs.statSync(dir).mtimeMs < cutoff) fs.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-    // best effort
-  }
 }
 
 /**

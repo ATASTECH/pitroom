@@ -333,6 +333,18 @@ function linkInto(dir, from) {
   } catch {
   }
 }
+var HOMES_KEPT_DAYS = 14;
+function pruneHomes(root, keep, also = []) {
+  const cutoff = Date.now() - HOMES_KEPT_DAYS * 864e5;
+  try {
+    for (const name of fs5.readdirSync(root)) {
+      const dir = path4.join(root, name);
+      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || also.includes(name))) continue;
+      if (fs5.statSync(dir).mtimeMs < cutoff) fs5.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+  }
+}
 
 // src/backends/text.ts
 var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
@@ -710,7 +722,6 @@ function baseSettings() {
   };
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
-var HOMES_KEPT_DAYS = 14;
 var SHARED_CACHES = { darwin: ["Library/pnpm"], linux: [".local/share/pnpm"] };
 var NO_LONGER_SHARED = { darwin: ["Library/Caches"], linux: [".cache"] };
 var SHARED = "_shared";
@@ -760,19 +771,8 @@ function workerHome(workspace, reads = [], writes = false) {
   const now = /* @__PURE__ */ new Date();
   fs6.utimesSync(dir, now, now);
   if (fs6.existsSync(shared)) fs6.utimesSync(shared, now, now);
-  pruneHomes(root, dir);
+  pruneHomes(root, dir, [SHARED]);
   return dir;
-}
-function pruneHomes(root, keep) {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS * 864e5;
-  try {
-    for (const name of fs6.readdirSync(root)) {
-      const dir = path5.join(root, name);
-      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || name === SHARED)) continue;
-      if (fs6.statSync(dir).mtimeMs < cutoff) fs6.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-  }
 }
 function inCopy(prompt, project) {
   if (!project || project.root === project.copy) return prompt;
@@ -1421,7 +1421,6 @@ function cursor(args, timeout = 3e4) {
   const r = spawnSync4(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var HOMES_KEPT_DAYS2 = 14;
 var SECRETS2 = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/.netrc"];
 var HOME_SECRETS2 = [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gcloud", ".config/gh", ".config/cursor", ".gemini", ".cursor", ".claude", "Library/Keychains"];
 var WORKER_HOME_SECRETS = ["Library/Keychains", ".config/cursor", ".cursor"];
@@ -1453,9 +1452,10 @@ function workerSettings2(mode, web2, dir) {
 function authFile() {
   return process.platform === "win32" ? path8.join(process.env.APPDATA ?? path8.join(os6.homedir(), "AppData", "Roaming"), "Cursor", "auth.json") : path8.join(process.env.XDG_CONFIG_HOME?.trim() || path8.join(os6.homedir(), ".config"), "cursor", "auth.json");
 }
-function workerHome2(workspace, mode, web2) {
+function workerHome2(project, mode, web2) {
   const root = path8.join(home(), "cursor-home");
-  const id2 = crypto4.createHash("sha256").update(path8.resolve(workspace)).digest("hex").slice(0, 16);
+  const kind2 = `${mode === "read" ? "read" : "change"}${web2 ? "+web" : ""}`;
+  const id2 = crypto4.createHash("sha256").update(`${path8.resolve(project)}\0${kind2}`).digest("hex").slice(0, 16);
   const dir = path8.join(root, id2);
   fs9.mkdirSync(path8.join(dir, ".cursor"), { recursive: true });
   writeIfChanged(path8.join(dir, ".cursor", "cli-config.json"), `${JSON.stringify(workerSettings2(mode, web2, dir), null, 2)}
@@ -1469,18 +1469,8 @@ function workerHome2(workspace, mode, web2) {
   }
   const now = /* @__PURE__ */ new Date();
   fs9.utimesSync(dir, now, now);
-  pruneHomes2(root, dir);
+  pruneHomes(root, dir);
   return dir;
-}
-function pruneHomes2(root, keep) {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS2 * 864e5;
-  try {
-    for (const name of fs9.readdirSync(root)) {
-      const dir = path8.join(root, name);
-      if (dir !== keep && /^[0-9a-f]{16}$/.test(name) && fs9.statSync(dir).mtimeMs < cutoff) fs9.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-  }
 }
 function invocation4(req) {
   const prompt = inCopy(req.prompt, req.project);
@@ -1491,7 +1481,7 @@ function invocation4(req) {
   if (req.sessionId) args.push("--resume", req.sessionId);
   args.push("--", prompt);
   const { command, prefix } = resolveCommand(binary4());
-  const dir = workerHome2(req.cwd, req.mode, req.web);
+  const dir = workerHome2(req.project?.root ?? req.cwd, req.mode, req.web);
   const env = { HOME: dir, CURSOR_CONFIG_DIR: path8.join(dir, ".cursor") };
   if (process.platform === "win32") env.USERPROFILE = dir;
   return { command, args: [...prefix, ...args], env };
@@ -1535,6 +1525,7 @@ function doctor4({ models, hasFallback }) {
   );
   for (const m of models) checks.push({ level: "ok", message: m ? `Cursor model: ${m}` : "Cursor model: auto (Cursor picks; `cursor-agent models` lists yours)" });
   checks.push({ level: "ok", message: "Cursor applies your account's own User Rules from cursor.com to workers too (they may change the answer's language)" });
+  checks.push({ level: "ok", message: "Cursor workers have no web tools (a headless run cannot approve them; --web does not apply to them)" });
   checks.push({
     level: "warn",
     message: "Cursor runs a project's own hooks (.cursor/hooks.json, and Claude Code's in .claude/settings.json) in worker runs too, with no switch to turn them off: use the Cursor worker on code whose hooks you would run yourself (not on a stranger's pull request)"
@@ -2675,10 +2666,6 @@ var amount = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : void 0;
 };
-var positiveAmount = (v) => {
-  const n = amount(v);
-  return n === void 0 || n === 0 ? void 0 : n;
-};
 var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
@@ -2739,7 +2726,7 @@ function effective(flags = {}) {
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
     verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
-    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0),
+    maxCost: setting(void 0, amount(e.PITROOM_MAX_COST), amount(c.maxCost), void 0),
     repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
     repoMapTokens: setting(void 0, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500)
   };
@@ -2897,6 +2884,7 @@ function runOptions(p, task) {
   if (has(p, "audit") && has(p, "no-audit")) throw new UserError("choose one of --audit, --no-audit");
   if (has(p, "audit") && (has(p, "write") || has(p, "isolate"))) throw new UserError("audits re-check the answer of a read run: drop -w/-i");
   if (has(p, "map") && has(p, "no-map")) throw new UserError("choose one of --map, --no-map");
+  for (const only of ["task", "tokens"]) if (has(p, only)) throw new UserError(`--${only} goes with pitroom map (a run's map uses its own task and the config's "repoMapTokens")`);
   return {
     mode: modes[0] ?? "read",
     auditRate: has(p, "no-audit") ? 0 : has(p, "audit") ? 1 : void 0,
@@ -2939,8 +2927,9 @@ function verifyFixFlag(p) {
 function maxCostFlag(p) {
   const v = flag(p, "max-cost");
   if (v === void 0) return void 0;
-  const n = positiveAmount(v.trim().replace(/^\$/, ""));
-  if (n === void 0) throw new UserError(`--max-cost takes an amount in USD above 0, e.g. 0.50, not "${v}"`);
+  const t = v.trim().replace(/^\$/, "");
+  const n = /^\d+(\.\d+)?$/.test(t) ? Number(t) : void 0;
+  if (n === void 0) throw new UserError(`--max-cost takes an amount in USD, 0 or more, e.g. 0.50, not "${v}"`);
   return n;
 }
 function effortFlag(p) {
@@ -3533,7 +3522,7 @@ async function spawnWorker(inv, opts) {
     res.timedOut = true;
     end();
   }, opts.timeoutSec * 1e3);
-  const capWatch = opts.overCap ? setInterval(() => {
+  const capWatch2 = opts.overCap ? setInterval(() => {
     if (res.capped || !opts.overCap()) return;
     res.capped = true;
     end();
@@ -3546,7 +3535,7 @@ async function spawnWorker(inv, opts) {
     child.on("close", (c) => resolve2(c));
   });
   clearTimeout(timer2);
-  if (capWatch) clearInterval(capWatch);
+  if (capWatch2) clearInterval(capWatch2);
   if (killer) clearTimeout(killer);
   process.off("SIGINT", stop);
   process.off("SIGTERM", stop);
@@ -5874,11 +5863,13 @@ function buildMap(dir, opts = {}) {
       stats.known++;
     } else unread.push(f);
   }
-  const early = relevance(files, names, wanted);
-  score(root, early);
-  const worth = new Map(nodes(root).map((n) => [n.path, n.subtreeValue + n.value]));
-  const worthOf = (f) => (early.get(f) ?? 0) * 10 + (worth.get(path28.posix.dirname(f)) ?? 0);
-  unread.sort((a, b) => worthOf(b) - worthOf(a));
+  if (unread.length > MAX_SCANNED2) {
+    const early = relevance(files, names, wanted);
+    score(root, early);
+    const worth = new Map(nodes(root).map((n) => [n.path, n.subtreeValue + n.value]));
+    const worthOf = (f) => (early.get(f) ?? 0) * 10 + (worth.get(path28.posix.dirname(f)) ?? 0);
+    unread.sort((a, b) => worthOf(b) - worthOf(a));
+  }
   for (const f of unread.slice(0, MAX_SCANNED2)) {
     let list2 = [];
     try {
@@ -6523,8 +6514,28 @@ ${meta.handoff}` : meta.task, !!meta.parent, !!meta.auditOf, meta.map ? read2(ru
     stdoutFile: runFile(meta.id, "events.jsonl"),
     stderrFile: runFile(meta.id, "stderr.log"),
     timeoutSec: meta.timeoutSec,
-    overCap: meta.maxCost === void 0 ? void 0 : () => (costSoFar(meta, backend, target2) ?? 0) >= meta.maxCost
+    overCap: meta.maxCost === void 0 ? void 0 : capWatch(meta, backend, target2)
   });
+}
+var CAP_PARSE_MS = 5e3;
+function capWatch(meta, backend, target2) {
+  let size = -1;
+  let at = 0;
+  let over = false;
+  return () => {
+    let now = 0;
+    try {
+      now = fs34.statSync(runFile(meta.id, "events.jsonl")).size;
+    } catch {
+      return false;
+    }
+    if (now === size || Date.now() - at < CAP_PARSE_MS) return over;
+    size = now;
+    at = Date.now();
+    const spent = costSoFar(meta, backend, target2) ?? 0;
+    over = meta.maxCost === 0 ? spent > 0 : spent >= meta.maxCost;
+    return over;
+  };
 }
 function costSoFar(meta, backend, target2) {
   let now;
@@ -6583,7 +6594,7 @@ async function fixUntilVerified(meta, result) {
     const done = backend.parse(read2(runFile(meta.id, "events.jsonl")));
     meta.sessionId = done.sessionId ?? meta.sessionId;
     const spent = meta.maxCost !== void 0 ? costSoFar(meta, backend, target2) : void 0;
-    const why2 = !meta.sessionId ? "its session is not known" : !inBudget(target2) ? 'the daily budget ("budgetDaily") is spent' : spent !== void 0 && spent >= meta.maxCost ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost)})` : void 0;
+    const why2 = !meta.sessionId ? "its session is not known" : !inBudget(target2) ? 'the daily budget ("budgetDaily") is spent' : spent !== void 0 && (meta.maxCost === 0 ? spent > 0 : spent >= meta.maxCost) ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost)})` : void 0;
     if (why2) {
       meta.warnings.push(`the failed check was not sent back to the worker: ${why2}`);
       return result;
@@ -8858,6 +8869,16 @@ function expandScopes(patterns, dir) {
   return scopes;
 }
 function inside3(root, abs, raw) {
+  const real = (p) => {
+    try {
+      return fs42.realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  if (path38.relative(real(root), real(abs)).startsWith("..") || path38.isAbsolute(path38.relative(real(root), real(abs)))) {
+    throw new UserError(`--over ${raw} is outside ${root}`);
+  }
   const rel = path38.relative(root, abs);
   if (rel === ".." || rel.startsWith(`..${path38.sep}`) || path38.isAbsolute(rel)) throw new UserError(`--over ${raw} is outside ${root}`);
   return clean(rel);
@@ -9239,6 +9260,7 @@ function formatModels(t) {
 }
 
 // src/core/race.ts
+import crypto16 from "node:crypto";
 var MAX_RACE = 5;
 function racers(o, size) {
   if (o.worker) return Array.from({ length: size }, () => ({ worker: o.worker, model: o.model }));
@@ -9250,7 +9272,7 @@ function racers(o, size) {
 function startRace(o, size) {
   if (o.mode !== "isolate") throw new UserError("--race runs one change side by side in isolated copies: add -i");
   if (o.continueFrom || o.plan) throw new UserError("--race starts new runs: drop --continue and --plan");
-  const group = o.group ?? `race-${(/* @__PURE__ */ new Date()).toISOString().slice(11, 19).replace(/:/g, "")}`;
+  const group = o.group ?? `race-${(/* @__PURE__ */ new Date()).toISOString().slice(11, 19).replace(/:/g, "")}-${crypto16.randomBytes(2).toString("hex")}`;
   return racers(o, size).map((r) => startInBackground(prepareRun({ ...o, ...r, tier: void 0, effort: o.worker ? o.effort : void 0, group, race: size })));
 }
 var verifyScore = (m) => !m.verifyResult ? 1 : m.verifyResult.ok ? 0 : 2;

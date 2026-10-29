@@ -2,6 +2,7 @@
 // have ended, the best one wins: it ended well, its check passed, it changed something, its references held, its diff
 // is the smallest and it cost the least, in that order. The others' copies are discarded; their patches stay, so
 // `pitroom show RUN --patch` (and `pitroom apply RUN`) still work. Nothing reaches your tree until you apply.
+import crypto from 'node:crypto';
 import type { Target } from '../backends/types.js';
 import { resolveChain } from './chain.js';
 import { UserError } from './errors.js';
@@ -26,7 +27,8 @@ export function racers(o: RunOptions, size: number): { worker: string; model?: s
 export function startRace(o: RunOptions, size: number): RunMeta[] {
   if (o.mode !== 'isolate') throw new UserError('--race runs one change side by side in isolated copies: add -i');
   if (o.continueFrom || o.plan) throw new UserError('--race starts new runs: drop --continue and --plan');
-  const group = o.group ?? `race-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}`;
+  // the time and a random part: two races started in the same second must not share a group (and be ranked together)
+  const group = o.group ?? `race-${new Date().toISOString().slice(11, 19).replace(/:/g, '')}-${crypto.randomBytes(2).toString('hex')}`;
   return racers(o, size).map((r) => startInBackground(prepareRun({ ...o, ...r, tier: undefined, effort: o.worker ? o.effort : undefined, group, race: size })));
 }
 

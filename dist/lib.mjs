@@ -317,6 +317,18 @@ function linkInto(dir, from) {
   } catch {
   }
 }
+var HOMES_KEPT_DAYS = 14;
+function pruneHomes(root, keep, also = []) {
+  const cutoff = Date.now() - HOMES_KEPT_DAYS * 864e5;
+  try {
+    for (const name of fs5.readdirSync(root)) {
+      const dir = path4.join(root, name);
+      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || also.includes(name))) continue;
+      if (fs5.statSync(dir).mtimeMs < cutoff) fs5.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+  }
+}
 
 // src/backends/text.ts
 var clip = (s, n) => s.length > n ? `${s.slice(0, n - 1)}\u2026` : s;
@@ -694,7 +706,6 @@ function baseSettings() {
   };
 }
 var rulePath = (p) => p.replace(/^[A-Za-z]:(?=[\\/])/, "").replace(/\\/g, "/");
-var HOMES_KEPT_DAYS = 14;
 var SHARED_CACHES = { darwin: ["Library/pnpm"], linux: [".local/share/pnpm"] };
 var NO_LONGER_SHARED = { darwin: ["Library/Caches"], linux: [".cache"] };
 var SHARED = "_shared";
@@ -744,19 +755,8 @@ function workerHome(workspace, reads = [], writes = false) {
   const now = /* @__PURE__ */ new Date();
   fs6.utimesSync(dir, now, now);
   if (fs6.existsSync(shared)) fs6.utimesSync(shared, now, now);
-  pruneHomes(root, dir);
+  pruneHomes(root, dir, [SHARED]);
   return dir;
-}
-function pruneHomes(root, keep) {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS * 864e5;
-  try {
-    for (const name of fs6.readdirSync(root)) {
-      const dir = path5.join(root, name);
-      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || name === SHARED)) continue;
-      if (fs6.statSync(dir).mtimeMs < cutoff) fs6.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-  }
 }
 function inCopy(prompt, project) {
   if (!project || project.root === project.copy) return prompt;
@@ -1405,7 +1405,6 @@ function cursor(args, timeout = 3e4) {
   const r = spawnSync4(command, [...prefix, ...args], { encoding: "utf8", timeout, stdio: ["ignore", "pipe", "pipe"], maxBuffer: 16 * 1024 * 1024 });
   return { ok: r.status === 0, out: r.stdout ?? "", err: r.stderr ?? "", missing: !!r.error };
 }
-var HOMES_KEPT_DAYS2 = 14;
 var SECRETS2 = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "**/id_ed25519*", "**/.netrc"];
 var HOME_SECRETS2 = [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gcloud", ".config/gh", ".config/cursor", ".gemini", ".cursor", ".claude", "Library/Keychains"];
 var WORKER_HOME_SECRETS = ["Library/Keychains", ".config/cursor", ".cursor"];
@@ -1437,9 +1436,10 @@ function workerSettings2(mode, web2, dir) {
 function authFile() {
   return process.platform === "win32" ? path8.join(process.env.APPDATA ?? path8.join(os6.homedir(), "AppData", "Roaming"), "Cursor", "auth.json") : path8.join(process.env.XDG_CONFIG_HOME?.trim() || path8.join(os6.homedir(), ".config"), "cursor", "auth.json");
 }
-function workerHome2(workspace, mode, web2) {
+function workerHome2(project, mode, web2) {
   const root = path8.join(home(), "cursor-home");
-  const id2 = crypto4.createHash("sha256").update(path8.resolve(workspace)).digest("hex").slice(0, 16);
+  const kind2 = `${mode === "read" ? "read" : "change"}${web2 ? "+web" : ""}`;
+  const id2 = crypto4.createHash("sha256").update(`${path8.resolve(project)}\0${kind2}`).digest("hex").slice(0, 16);
   const dir = path8.join(root, id2);
   fs9.mkdirSync(path8.join(dir, ".cursor"), { recursive: true });
   writeIfChanged(path8.join(dir, ".cursor", "cli-config.json"), `${JSON.stringify(workerSettings2(mode, web2, dir), null, 2)}
@@ -1453,18 +1453,8 @@ function workerHome2(workspace, mode, web2) {
   }
   const now = /* @__PURE__ */ new Date();
   fs9.utimesSync(dir, now, now);
-  pruneHomes2(root, dir);
+  pruneHomes(root, dir);
   return dir;
-}
-function pruneHomes2(root, keep) {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS2 * 864e5;
-  try {
-    for (const name of fs9.readdirSync(root)) {
-      const dir = path8.join(root, name);
-      if (dir !== keep && /^[0-9a-f]{16}$/.test(name) && fs9.statSync(dir).mtimeMs < cutoff) fs9.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-  }
 }
 function invocation4(req) {
   const prompt = inCopy(req.prompt, req.project);
@@ -1475,7 +1465,7 @@ function invocation4(req) {
   if (req.sessionId) args.push("--resume", req.sessionId);
   args.push("--", prompt);
   const { command, prefix } = resolveCommand(binary4());
-  const dir = workerHome2(req.cwd, req.mode, req.web);
+  const dir = workerHome2(req.project?.root ?? req.cwd, req.mode, req.web);
   const env = { HOME: dir, CURSOR_CONFIG_DIR: path8.join(dir, ".cursor") };
   if (process.platform === "win32") env.USERPROFILE = dir;
   return { command, args: [...prefix, ...args], env };
@@ -1519,6 +1509,7 @@ function doctor4({ models, hasFallback }) {
   );
   for (const m of models) checks.push({ level: "ok", message: m ? `Cursor model: ${m}` : "Cursor model: auto (Cursor picks; `cursor-agent models` lists yours)" });
   checks.push({ level: "ok", message: "Cursor applies your account's own User Rules from cursor.com to workers too (they may change the answer's language)" });
+  checks.push({ level: "ok", message: "Cursor workers have no web tools (a headless run cannot approve them; --web does not apply to them)" });
   checks.push({
     level: "warn",
     message: "Cursor runs a project's own hooks (.cursor/hooks.json, and Claude Code's in .claude/settings.json) in worker runs too, with no switch to turn them off: use the Cursor worker on code whose hooks you would run yourself (not on a stranger's pull request)"
@@ -2953,10 +2944,6 @@ var amount = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isFinite(n) && n >= 0 ? n : void 0;
 };
-var positiveAmount = (v) => {
-  const n = amount(v);
-  return n === void 0 || n === 0 ? void 0 : n;
-};
 var days = (v) => {
   const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
   return typeof n === "number" && Number.isInteger(n) && n >= 0 ? n : void 0;
@@ -3017,7 +3004,7 @@ function effective(flags = {}) {
     autoFallback: setting(void 0, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
     verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
-    maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0),
+    maxCost: setting(void 0, amount(e.PITROOM_MAX_COST), amount(c.maxCost), void 0),
     repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
     repoMapTokens: setting(void 0, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500)
   };
@@ -3382,6 +3369,16 @@ function expandScopes(patterns, dir) {
   return scopes;
 }
 function inside3(root, abs, raw) {
+  const real = (p) => {
+    try {
+      return fs19.realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  if (path19.relative(real(root), real(abs)).startsWith("..") || path19.isAbsolute(path19.relative(real(root), real(abs)))) {
+    throw new UserError(`--over ${raw} is outside ${root}`);
+  }
   const rel = path19.relative(root, abs);
   if (rel === ".." || rel.startsWith(`..${path19.sep}`) || path19.isAbsolute(rel)) throw new UserError(`--over ${raw} is outside ${root}`);
   return clean(rel);

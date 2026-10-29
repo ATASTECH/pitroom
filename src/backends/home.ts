@@ -60,3 +60,23 @@ export function linkInto(dir: string, from: string): void {
     // see above
   }
 }
+
+/** Worker homes not used for this many days are removed, with what the CLI kept in them. */
+export const HOMES_KEPT_DAYS = 14;
+
+/**
+ * Removes the worker homes under `root` (folders named by a 16-hex id, and the `also` names) not used for
+ * HOMES_KEPT_DAYS, but `keep`. Best effort.
+ */
+export function pruneHomes(root: string, keep: string, also: string[] = []): void {
+  const cutoff = Date.now() - HOMES_KEPT_DAYS * 86_400_000;
+  try {
+    for (const name of fs.readdirSync(root)) {
+      const dir = path.join(root, name);
+      if (dir === keep || !(/^[0-9a-f]{16}$/.test(name) || also.includes(name))) continue;
+      if (fs.statSync(dir).mtimeMs < cutoff) fs.rmSync(dir, { recursive: true, force: true });
+    }
+  } catch {
+    // best effort
+  }
+}

@@ -43,12 +43,26 @@ test('max cost: the config and the environment set it too; a run under it is not
   assert.equal(meta(s, RUN_ID.exec(under.stdout)[0]).capped, undefined);
 });
 
-test('max cost: --max-cost takes an amount above 0', () => {
+test('max cost: --max-cost takes an amount, 0 or more; 0 stops a paid worker at its first cost, a free one runs on', () => {
   const s = sandbox();
-  for (const v of ['0', 'abc', '-1']) {
+  for (const v of ['abc', '-1', '1e3']) {
     const r = s.run(['run', '--max-cost', v, 'q']);
     assert.equal(r.status, 2, v);
-    assert.match(r.stderr, /--max-cost takes an amount in USD above 0/);
+    assert.match(r.stderr, /--max-cost takes an amount in USD, 0 or more/);
   }
   assert.equal(workerCalls(s).length, 0);
+  const free = s.run(['run', '--max-cost', '0', 'what is in app.txt?'], { MOCK_ACTIONS: 'answer:SUMMARY: line1' });
+  assert.equal(free.status, 0, free.stdout + free.stderr);
+  const paid = s.run(['run', '-i', '--max-cost', '$0', 'change app.txt'], SPENDY);
+  assert.equal(paid.status, 1, paid.stdout);
+  assert.match(paid.stdout, /stopped at the run's cost cap/);
+});
+
+test('max cost: map-only flags are refused by run', () => {
+  const s = sandbox();
+  for (const flag of ['--tokens', '--task']) {
+    const r = s.run(['run', flag, '3000', 'q']);
+    assert.equal(r.status, 2);
+    assert.match(r.stderr, new RegExp(`${flag} goes with pitroom map`));
+  }
 });

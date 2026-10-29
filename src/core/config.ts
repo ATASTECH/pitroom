@@ -62,7 +62,7 @@ export interface PitroomConfig {
   costs?: Record<string, number>;
   /** When a change's --verify check fails, send its output back to the worker this many times to fix it (default 1, at most 3; 0 = off; PITROOM_VERIFY_FIX). */
   verifyFix?: number;
-  /** USD one run's workers may cost (reported or estimated); the worker is stopped when the run reaches it (default none; PITROOM_MAX_COST; --max-cost). */
+  /** USD one run's workers may cost (reported or estimated); the worker is stopped when the run reaches it, and 0 stops one at its first cost (default none; PITROOM_MAX_COST; --max-cost). */
   maxCost?: number;
   /** Put a map of the project (files by folder, the names each declares) in a new run's prompt (default false; PITROOM_REPO_MAP=1; --map, --no-map). */
   repoMap?: boolean;
@@ -186,12 +186,6 @@ const amount = (v: unknown) => {
   return typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : undefined;
 };
 
-/** An amount of money above 0: a cap of 0 would stop every worker that costs anything at its first step. */
-export const positiveAmount = (v: unknown) => {
-  const n = amount(v);
-  return n === undefined || n === 0 ? undefined : n;
-};
-
 /** A whole number of days, 0 or more. */
 const days = (v: unknown) => {
   const n = typeof v === 'string' && v.trim() !== '' ? Number(v) : v;
@@ -266,7 +260,7 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     autoFallback: setting<boolean>(undefined, flag01(e.PITROOM_AUTO_FALLBACK), c.autoFallback, false),
     budgetDaily: setting<number | undefined>(undefined, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), undefined),
     verifyFix: setting<number>(undefined, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
-    maxCost: setting<number | undefined>(undefined, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), undefined),
+    maxCost: setting<number | undefined>(undefined, amount(e.PITROOM_MAX_COST), amount(c.maxCost), undefined),
     repoMap: setting<boolean>(undefined, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
     repoMapTokens: setting<number>(undefined, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500),
   };

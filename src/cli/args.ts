@@ -1,7 +1,7 @@
 // Argument parsing and the pieces every command shares.
 import fs from 'node:fs';
 import type { Mode } from '../backends/types.js';
-import { MAX_VERIFY_FIX, effective, positiveAmount } from '../core/config.js';
+import { MAX_VERIFY_FIX, effective } from '../core/config.js';
 import { UserError } from '../core/errors.js';
 import type { RunOptions } from '../core/run.js';
 import { type RunMeta, resolveRun } from '../core/store.js';
@@ -98,6 +98,7 @@ export function runOptions(p: Parsed, task: string): RunOptions {
   if (has(p, 'audit') && has(p, 'no-audit')) throw new UserError('choose one of --audit, --no-audit');
   if (has(p, 'audit') && (has(p, 'write') || has(p, 'isolate'))) throw new UserError('audits re-check the answer of a read run: drop -w/-i');
   if (has(p, 'map') && has(p, 'no-map')) throw new UserError('choose one of --map, --no-map');
+  for (const only of ['task', 'tokens']) if (has(p, only)) throw new UserError(`--${only} goes with pitroom map (a run's map uses its own task and the config's "repoMapTokens")`);
   return {
     mode: modes[0] ?? 'read',
     auditRate: has(p, 'no-audit') ? 0 : has(p, 'audit') ? 1 : undefined,
@@ -144,12 +145,13 @@ function verifyFixFlag(p: Parsed): number | undefined {
   return Number(v);
 }
 
-/** --max-cost USD: what one run's workers may cost, more than 0 (a leading $ is allowed). */
+/** --max-cost USD: what one run's workers may cost, 0 or more (0: only while it costs nothing; a leading $ is allowed). */
 function maxCostFlag(p: Parsed): number | undefined {
   const v = flag(p, 'max-cost');
   if (v === undefined) return undefined;
-  const n = positiveAmount(v.trim().replace(/^\$/, ''));
-  if (n === undefined) throw new UserError(`--max-cost takes an amount in USD above 0, e.g. 0.50, not "${v}"`);
+  const t = v.trim().replace(/^\$/, '');
+  const n = /^\d+(\.\d+)?$/.test(t) ? Number(t) : undefined;
+  if (n === undefined) throw new UserError(`--max-cost takes an amount in USD, 0 or more, e.g. 0.50, not "${v}"`);
   return n;
 }
 

@@ -47,7 +47,18 @@ export function expandScopes(patterns: string[], dir: string): string[] {
   return scopes;
 }
 
+/** A part relative to the project, compared where links lead (a link to a folder elsewhere is outside). */
 function inside(root: string, abs: string, raw: string): string {
+  const real = (p: string) => {
+    try {
+      return fs.realpathSync.native(p);
+    } catch {
+      return p;
+    }
+  };
+  if (path.relative(real(root), real(abs)).startsWith('..') || path.isAbsolute(path.relative(real(root), real(abs)))) {
+    throw new UserError(`--over ${raw} is outside ${root}`);
+  }
   const rel = path.relative(root, abs);
   if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new UserError(`--over ${raw} is outside ${root}`);
   return clean(rel);

@@ -20,7 +20,7 @@ import { home } from '../../core/store.js';
 import { inCopy } from '../antigravity/index.js';
 import { FORBIDDEN_COMMANDS } from '../deny.js';
 import { findBinary, resolveCommand } from '../exec.js';
-import { linkInto, writeIfChanged } from '../home.js';
+import { linkInto, pruneHomes, writeIfChanged } from '../home.js';
 import { splitModel } from '../text.js';
 import type { Backend, DoctorCheck, Failure, FailureKind, Mode, ModelCatalog, ParsedRun, WorkerRequest } from '../types.js';
 import { parseEvents } from './events.js';
@@ -33,7 +33,6 @@ function cursor(args: string[], timeout = 30_000) {
   return { ok: r.status === 0, out: r.stdout ?? '', err: r.stderr ?? '', missing: !!r.error };
 }
 
-const HOMES_KEPT_DAYS = 14;
 const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.netrc'];
 /** The user's own folders of credentials: a read run's tools may read outside the project, never these. */
 const HOME_SECRETS = ['.ssh', '.aws', '.gnupg', '.docker', '.kube', '.config/gcloud', '.config/gh', '.config/cursor', '.gemini', '.cursor', '.claude', 'Library/Keychains'];
@@ -79,12 +78,16 @@ function authFile(): string {
 }
 
 /**
- * The worker home for a workspace (follow-ups find their chat there): its settings written for this run, the
- * user's sign-in linked in. Homes not used for two weeks are removed, their chats with them.
+ * The worker home for a project and a kind of run (a read or a change, with or without the web: the settings differ):
+ * every read run reads a snapshot of its own and every isolated change has a copy of its own, and a home each
+ * (~11 MB) would pile up; one per project and kind is shared, and a follow-up, in the same project, finds its chat
+ * there. Its settings are written for this run, the user's sign-in linked in. Homes not used for two weeks are
+ * removed, their chats with them.
  */
-export function workerHome(workspace: string, mode: Mode, web: boolean): string {
+export function workerHome(project: string, mode: Mode, web: boolean): string {
   const root = path.join(home(), 'cursor-home');
-  const id = crypto.createHash('sha256').update(path.resolve(workspace)).digest('hex').slice(0, 16);
+  const kind = `${mode === 'read' ? 'read' : 'change'}${web ? '+web' : ''}`;
+  const id = crypto.createHash('sha256').update(`${path.resolve(project)}\0${kind}`).digest('hex').slice(0, 16);
   const dir = path.join(root, id);
   fs.mkdirSync(path.join(dir, '.cursor'), { recursive: true });
   writeIfChanged(path.join(dir, '.cursor', 'cli-config.json'), `${JSON.stringify(workerSettings(mode, web, dir), null, 2)}\n`);
@@ -102,18 +105,6 @@ export function workerHome(workspace: string, mode: Mode, web: boolean): string 
   return dir;
 }
 
-function pruneHomes(root: string, keep: string): void {
-  const cutoff = Date.now() - HOMES_KEPT_DAYS * 86_400_000;
-  try {
-    for (const name of fs.readdirSync(root)) {
-      const dir = path.join(root, name);
-      if (dir !== keep && /^[0-9a-f]{16}$/.test(name) && fs.statSync(dir).mtimeMs < cutoff) fs.rmSync(dir, { recursive: true, force: true });
-    }
-  } catch {
-    // best effort
-  }
-}
-
 function invocation(req: WorkerRequest) {
   // a worker in a snapshot or an isolated copy is told the copy's paths (an edit outside its workspace is refused)
   const prompt = inCopy(req.prompt, req.project);
@@ -127,7 +118,7 @@ function invocation(req: WorkerRequest) {
   // after "--", a prompt that starts with "-" is still the prompt
   args.push('--', prompt);
   const { command, prefix } = resolveCommand(binary());
-  const dir = workerHome(req.cwd, req.mode, req.web);
+  const dir = workerHome(req.project?.root ?? req.cwd, req.mode, req.web);
   // The worker's commands see this home too: the user's own dotfiles stay out of their reach.
   const env: Record<string, string> = { HOME: dir, CURSOR_CONFIG_DIR: path.join(dir, '.cursor') };
   if (process.platform === 'win32') env.USERPROFILE = dir;
@@ -184,6 +175,8 @@ function doctor({ models, hasFallback }: { models: (string | undefined)[]; hasFa
   );
   for (const m of models) checks.push({ level: 'ok', message: m ? `Cursor model: ${m}` : 'Cursor model: auto (Cursor picks; `cursor-agent models` lists yours)' });
   checks.push({ level: 'ok', message: "Cursor applies your account's own User Rules from cursor.com to workers too (they may change the answer's language)" });
+  // its web tools ask before each use, and a headless run cannot answer: WebFetch and WebSearch were refused, --web or not
+  checks.push({ level: 'ok', message: 'Cursor workers have no web tools (a headless run cannot approve them; --web does not apply to them)' });
   checks.push({
     level: 'warn',
     message: "Cursor runs a project's own hooks (.cursor/hooks.json, and Claude Code's in .claude/settings.json) in worker runs too, with no switch to turn them off: use the Cursor worker on code whose hooks you would run yourself (not on a stranger's pull request)",

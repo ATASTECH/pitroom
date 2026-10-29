@@ -15,7 +15,7 @@ const BY_MODEL = {
   }),
   MOCK_FAIL_MODELS: 'mock/c',
 };
-const RACE = /pitroom race "(race-\d{6})": 3 workers, winner (\d{8}-\d{6}-[0-9a-f]{4}) \(opencode \(a\)\)/;
+const RACE = /pitroom race "(race-\d{6}-[0-9a-f]{4})": 3 workers, winner (\d{8}-\d{6}-[0-9a-f]{4}) \(opencode \(a\)\)/;
 
 test('race: the racer whose check passed wins over a smaller diff and a failure; the losers\' copies go, their patches stay', () => {
   const s = sandbox();
@@ -56,7 +56,7 @@ test('race: --bg starts the racers (-W races one worker against itself) and wait
   const s = sandbox();
   const r = s.run(['run', '-i', '--race', '2', '--bg', '-W', 'opencode:mock/a', 'make app.txt good'], BY_MODEL);
   assert.equal(r.status, 0, r.stderr);
-  const group = /pitroom race "(race-\d{6})"/.exec(r.stdout)[1];
+  const group = /pitroom race "(race-\d{6}-[0-9a-f]{4})"/.exec(r.stdout)[1];
   assert.match(r.stdout, new RegExp(`results: pitroom wait -g ${group} {3}\\(names the winner\\)`));
   const w = s.run(['wait', '-g', group]);
   assert.equal(w.status, 0, w.stdout + w.stderr);

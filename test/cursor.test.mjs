@@ -39,14 +39,21 @@ test('cursor: a read is ask mode in its sandbox; a change runs commands but the 
   const change = b.invocation(request({ mode: 'isolate', web: true, model: 'claude-opus-5-5#high', sessionId: 'chat-9', cwd: '/tmp/other' }));
   assert.ok(!change.args.includes('--mode'));
   assert.deepEqual(change.args.slice(change.args.indexOf('--model'), change.args.indexOf('--model') + 4), ['--model', 'claude-opus-5-5-high', '--resume', 'chat-9']);
-  assert.notEqual(change.env.HOME, read.env.HOME, 'a home per workspace');
+  assert.notEqual(change.env.HOME, read.env.HOME, 'a home per project and kind of run');
   const cc = config(change);
   assert.deepEqual(cc.permissions.allow, ['Shell(*)']);
   assert.ok(!cc.permissions.deny.includes('WebFetch(*)'), '--web');
   assert.equal(cc.sandbox.networkAccess, 'allow_all');
-  // the same workspace again (a follow-up) finds the same home, and the settings of this run
-  assert.equal(b.invocation(request({ mode: 'read', cwd: '/tmp/other' })).env.HOME, change.env.HOME);
-  assert.deepEqual(config(change).permissions.allow, []);
+  // a run of the same kind in the same project (a follow-up, another isolated copy) finds the same home
+  const again = b.invocation(request({ mode: 'isolate', web: true, cwd: '/tmp/copy-2', project: { root: '/tmp/other', copy: '/tmp/copy-2' } }));
+  assert.equal(again.env.HOME, change.env.HOME);
+  // every read run reads a snapshot of its own: they share one home per project, not one each
+  const snapA = b.invocation(request({ cwd: '/snap/a', project: { root: '/tmp/proj', copy: '/snap/a' } }));
+  const snapB = b.invocation(request({ cwd: '/snap/b', project: { root: '/tmp/proj', copy: '/snap/b' } }));
+  assert.equal(snapA.env.HOME, snapB.env.HOME);
+  // a read and a change in the same project do not share one: their settings differ
+  assert.notEqual(b.invocation(request({ mode: 'write', cwd: '/tmp/proj' })).env.HOME, snapA.env.HOME);
+  assert.deepEqual(config(snapA).permissions.allow, []);
 });
 
 test('cursor: a read reads a snapshot of its own; an isolated edit stays in its copy; a follow-up resumes the chat in the same home', () => {

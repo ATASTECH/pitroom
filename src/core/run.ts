@@ -605,8 +605,36 @@ function attempt(meta: RunMeta, backend: Backend, target: Target, prompt?: strin
     stdoutFile: runFile(meta.id, 'events.jsonl'),
     stderrFile: runFile(meta.id, 'stderr.log'),
     timeoutSec: meta.timeoutSec,
-    overCap: meta.maxCost === undefined ? undefined : () => (costSoFar(meta, backend, target) ?? 0) >= meta.maxCost!,
+    overCap: meta.maxCost === undefined ? undefined : capWatch(meta, backend, target),
   });
+}
+
+/** How often at most the cost cap reads the whole stream again (it is checked every second, read only when it grew). */
+const CAP_PARSE_MS = 5000;
+
+/**
+ * Whether the run has reached its cost cap, for spawnWorker's watch. The stream is parsed again only when it has grown
+ * and CAP_PARSE_MS have passed (a long run's stream can be tens of MB). A cap of 0 stops a worker at its first cost:
+ * a free one runs on.
+ */
+function capWatch(meta: RunMeta, backend: Backend, target: Target): () => boolean {
+  let size = -1;
+  let at = 0;
+  let over = false;
+  return () => {
+    let now = 0;
+    try {
+      now = fs.statSync(runFile(meta.id, 'events.jsonl')).size;
+    } catch {
+      return false;
+    }
+    if (now === size || Date.now() - at < CAP_PARSE_MS) return over;
+    size = now;
+    at = Date.now();
+    const spent = costSoFar(meta, backend, target) ?? 0;
+    over = meta.maxCost === 0 ? spent > 0 : spent >= meta.maxCost!;
+    return over;
+  };
 }
 
 /**
@@ -700,7 +728,7 @@ async function fixUntilVerified(meta: RunMeta, result: ProcessResult): Promise<P
       ? 'its session is not known'
       : !inBudget(target)
         ? 'the daily budget ("budgetDaily") is spent'
-        : spent !== undefined && spent >= meta.maxCost!
+        : spent !== undefined && (meta.maxCost === 0 ? spent > 0 : spent >= meta.maxCost!)
           ? `the run reached its cost cap (${usd(spent)} of ${usd(meta.maxCost!)})`
           : undefined;
     if (why) {

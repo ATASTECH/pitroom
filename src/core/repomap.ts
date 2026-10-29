@@ -444,11 +444,13 @@ export function buildMap(dir: string, opts: { task?: string; tokens?: number; fr
     } else unread.push(f);
   }
   // what is not read yet is read by worth: its own relevance (by path, before any names are known), then its folder's
-  const early = relevance(files, names, wanted);
-  score(root, early);
-  const worth = new Map(nodes(root).map((n) => [n.path, n.subtreeValue + n.value]));
-  const worthOf = (f: string) => (early.get(f) ?? 0) * 10 + (worth.get(path.posix.dirname(f)) ?? 0);
-  unread.sort((a, b) => worthOf(b) - worthOf(a));
+  if (unread.length > MAX_SCANNED) {
+    const early = relevance(files, names, wanted);
+    score(root, early);
+    const worth = new Map(nodes(root).map((n) => [n.path, n.subtreeValue + n.value]));
+    const worthOf = (f: string) => (early.get(f) ?? 0) * 10 + (worth.get(path.posix.dirname(f)) ?? 0);
+    unread.sort((a, b) => worthOf(b) - worthOf(a));
+  }
   for (const f of unread.slice(0, MAX_SCANNED)) {
     let list: string[] = [];
     try {
