@@ -488,7 +488,8 @@ function prepareTree(meta: RunMeta): void {
 /** The project's map for the prompt (repomap.ts); a run without one still runs, and says so. */
 function writeMap(meta: RunMeta): void {
   try {
-    fs.writeFileSync(runFile(meta.id, 'map.md'), projectMap(meta.dir));
+    // the task decides where the map's detail goes (a plan task's brief included)
+    fs.writeFileSync(runFile(meta.id, 'map.md'), projectMap(meta.dir, meta.task, effective().repoMapTokens.value));
   } catch (e) {
     meta.warnings.push(`no project map in the prompt: ${(e as Error).message.slice(0, 120)}`);
   }

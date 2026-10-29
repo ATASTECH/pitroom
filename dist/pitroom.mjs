@@ -533,10 +533,10 @@ function denyCommandRules() {
     // whole command (a prefix of it was seen not to match), so find with -exec, -ok or -delete is refused outright,
     // up to six words before and after (grep -r does what find -exec grep did)
     ...["find", ".*/find"].flatMap((find) => [0, 1, 2, 3, 4, 5, 6].flatMap((before) => [0, 1, 2, 3, 4, 5, 6].flatMap((after) => {
-      const words = (n) => " .*".repeat(n);
+      const words2 = (n) => " .*".repeat(n);
       return [
-        ...after ? [`${find}${words(before)} -(exec|execdir|ok|okdir)${words(after)}`] : [],
-        `${find}${words(before)} -delete${words(after)}`
+        ...after ? [`${find}${words2(before)} -(exec|execdir|ok|okdir)${words2(after)}`] : [],
+        `${find}${words2(before)} -delete${words2(after)}`
       ];
     }))).map((r) => `command(regex:${r})`),
     // xargs runs its arguments as a command, and agy does not take it apart either; with a `{}` in it a rule has
@@ -2230,13 +2230,13 @@ function doctor6({ models, hasFallback }) {
   const def = defaultModel3();
   for (const m of models) {
     const model = m ?? def;
-    const label = m ? "model" : "default model";
+    const label2 = m ? "model" : "default model";
     if (!model) {
       checks.push({ level: "warn", message: 'OpenCode has no default model; it will pick one (set "model" in opencode.json)' });
     } else if (known.size && !known.has(model)) {
-      checks.push({ level: "fail", message: `OpenCode ${label} "${model}" is not in \`opencode models\`` });
+      checks.push({ level: "fail", message: `OpenCode ${label2} "${model}" is not in \`opencode models\`` });
     } else {
-      checks.push({ level: "ok", message: `OpenCode ${label}: ${model}` });
+      checks.push({ level: "ok", message: `OpenCode ${label2}: ${model}` });
     }
   }
   if (!hasFallback) {
@@ -2612,7 +2612,8 @@ var SCHEMA = {
   autoFallback: "boolean",
   verifyFix: "number",
   maxCost: "number",
-  repoMap: "boolean"
+  repoMap: "boolean",
+  repoMapTokens: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path13.resolve(process.env.PITROOM_CONFIG);
@@ -2687,6 +2688,10 @@ var fixRounds = (v) => {
   const n = days(v);
   return n === void 0 ? void 0 : Math.min(n, MAX_VERIFY_FIX);
 };
+var mapTokens = (v) => {
+  const n = positiveInt(v);
+  return n === void 0 ? void 0 : Math.min(Math.max(n, 300), 8e3);
+};
 var flag01 = (v) => {
   const t = v?.trim().toLowerCase();
   return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
@@ -2735,7 +2740,8 @@ function effective(flags = {}) {
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
     verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
     maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0),
-    repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false)
+    repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
+    repoMapTokens: setting(void 0, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500)
   };
 }
 
@@ -2759,6 +2765,8 @@ var VALUE_FLAGS = {
   "--verify-fix": "verify-fix",
   "--max-cost": "max-cost",
   "--race": "race",
+  "--task": "task",
+  "--tokens": "tokens",
   "--link": "link",
   "-c": "continue",
   "--continue": "continue",
@@ -2878,9 +2886,9 @@ function exitCodeFor(meta) {
 function readTask(p) {
   const file2 = flag(p, "task-file");
   if (file2) return fs14.readFileSync(file2, "utf8");
-  const words = p.positional;
-  if (words.length === 1 && words[0] === "-") return fs14.readFileSync(0, "utf8");
-  return words.join(" ");
+  const words2 = p.positional;
+  if (words2.length === 1 && words2[0] === "-") return fs14.readFileSync(0, "utf8");
+  return words2.join(" ");
 }
 function runOptions(p, task) {
   const modes = ["read", "write", "isolate"].filter((m) => has(p, m));
@@ -3588,12 +3596,12 @@ function cooldownKey(target2, backend) {
 }
 function retryAfterMs(message) {
   const compact3 = /(?:retry|try again|resets?|available again)[^0-9]{0,24}((?:\d+(?:\.\d+)?\s*[dhms]\s*)+)/i.exec(message)?.[1];
-  const words = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
+  const words2 = /(?:retry|try again|resets?)[^0-9]{0,24}(\d+(?:\.\d+)?)\s*(second|minute|hour)s?/i.exec(message);
   let ms = 0;
   if (compact3) {
     for (const [, n, unit] of compact3.matchAll(/(\d+(?:\.\d+)?)\s*([dhms])/gi)) ms += Number(n) * { d: 864e5, h: 36e5, m: 6e4, s: 1e3 }[unit.toLowerCase()];
-  } else if (words) {
-    ms = Number(words[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words[2].toLowerCase()];
+  } else if (words2) {
+    ms = Number(words2[1]) * { second: 1e3, minute: 6e4, hour: 36e5 }[words2[2].toLowerCase()];
   }
   return ms > 0 ? ms : void 0;
 }
@@ -4213,10 +4221,10 @@ function badgeUrl(t) {
 var esc = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
 function card(t, period) {
   const W = 720, H = 316, M = 32, GAP = 12;
-  const tile = (i, value, label) => {
+  const tile = (i, value, label2) => {
     const w = (W - 2 * M - 2 * GAP) / 3, x = M + i * (w + GAP);
     return `<rect x="${x}" y="196" width="${w}" height="72" rx="14" fill="#fff" fill-opacity=".035" stroke="#fff" stroke-opacity=".1"/>
-<text x="${x + 18}" y="224" class="lab">${esc(label.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
+<text x="${x + 18}" y="224" class="lab">${esc(label2.toUpperCase())}</text><text x="${x + 18}" y="254" class="val">${esc(value)}</text>`;
   };
   const when2 = period.toUpperCase();
   const pill = 22 + when2.length * 7.4;
@@ -5580,11 +5588,15 @@ ${task}`;
 import crypto10 from "node:crypto";
 import fs32 from "node:fs";
 import path28 from "node:path";
-var MAP_BUDGET = 6e3;
-var MAX_SCANNED2 = 3e3;
+var MAP_TOKENS = 1500;
+var MIN_MAP_TOKENS = 300;
+var MAX_MAP_TOKENS = 8e3;
+var MAX_SCANNED2 = 4e3;
 var MAX_FILE_BYTES = 2e5;
 var NAMES_PER_FILE = 10;
-var KEEP_DAYS = 3;
+var RELEVANT_FILES = 40;
+var FOCUSED_SHARE = 0.6;
+var KEEP_DAYS = 14;
 var DECLARATIONS = [
   [/\.(m|c)?[jt]sx?$/, /^export\s+(?:default\s+)?(?:declare\s+)?(?:async\s+)?(?:abstract\s+)?(?:function\*?|class|const|let|var|interface|type|enum)\s+([A-Za-z_$][\w$]*)/gm],
   [/\.py$/, /^(?:async\s+)?(?:def|class)\s+([A-Za-z_]\w*)/gm],
@@ -5601,126 +5613,91 @@ function declarations(file2, text) {
   for (const m of text.matchAll(rule[1])) if (m[1] && !names.includes(m[1])) names.push(m[1]);
   return names;
 }
+var canRead = (file2) => DECLARATIONS.some(([ext]) => ext.test(file2));
+var STOP = new Set(
+  "the and for with from into that this then than when where what which while how why who are was were has have had not but all any can could should would will shall may might must one two its their there here them they you your our out use used using make made add fix find show tell give take keep also only each every some more most file files code line lines function functions method class type value name names call calls return returns new old change changes test summary details answer task does doing done like just about please run runs".split(" ")
+);
+function words(s) {
+  return s.replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length >= 3);
+}
+function taskWords(task) {
+  return new Set(words(task).filter((w) => !STOP.has(w) && !/^\d+$/.test(w)));
+}
+var singular = (w) => w.length > 4 && w.endsWith("s") && !w.endsWith("ss") ? w.slice(0, -1) : w;
+var like = (a, b) => a.length >= 4 && b.length >= 4 && (a.startsWith(b) || b.startsWith(a));
+var ALIKE = 0.3;
+function relevance(files, names, wanted) {
+  const scores = /* @__PURE__ */ new Map();
+  if (!wanted.size) return scores;
+  const want = [...new Set([...wanted].map(singular))];
+  const hits = files.map((f) => {
+    const doc = new Set([...words(f), ...(names.get(f) ?? []).flatMap(words)].map(singular));
+    const same2 = want.filter((w) => doc.has(w));
+    return { same: same2, alike: want.filter((w) => !doc.has(w) && [...doc].some((d) => like(d, w))) };
+  });
+  const df = /* @__PURE__ */ new Map();
+  const dfAlike = /* @__PURE__ */ new Map();
+  for (const h of hits) {
+    for (const w of h.same) df.set(w, (df.get(w) ?? 0) + 1);
+    for (const w of h.alike) dfAlike.set(w, (dfAlike.get(w) ?? 0) + 1);
+  }
+  const idf = (n) => Math.log((files.length + 1) / (n + 1));
+  const all = files.map((f, i) => {
+    const h = hits[i];
+    const s = h.same.reduce((t, w) => t + idf(df.get(w)), 0) + h.alike.reduce((t, w) => t + ALIKE * idf((df.get(w) ?? 0) + dfAlike.get(w)), 0);
+    return [f, s];
+  });
+  const best = Math.max(0, ...all.map(([, s]) => s));
+  const top = all.filter(([, s]) => s > 0 && s >= best / 2).sort((a, b) => b[1] - a[1]).slice(0, RELEVANT_FILES);
+  for (const [f, s] of top) scores.set(f, s);
+  return scores;
+}
+var posix = (f) => f.split(path28.sep).join("/");
 function listFiles(dir) {
-  const r = git(dir, ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "."]);
-  if (r.code !== 0) return [];
-  const seen = /* @__PURE__ */ new Set();
-  for (const f of r.stdout.split("\0")) {
-    if (f && !looksSecret(path28.basename(f)) && fs32.existsSync(path28.join(dir, f))) seen.add(f);
+  const tracked = git(dir, ["ls-files", "-z", "--stage", "--", "."]);
+  if (tracked.code !== 0) return { files: [], keys: /* @__PURE__ */ new Map() };
+  const keys = /* @__PURE__ */ new Map();
+  for (const entry of tracked.stdout.split("\0")) {
+    const m = /^\d+ ([0-9a-f]+) \d+\t(.+)$/.exec(entry);
+    if (m) keys.set(posix(m[2]), m[1]);
   }
-  return [...seen].sort();
-}
-function byFolder(files) {
-  const folders = /* @__PURE__ */ new Map();
-  for (const f of files) {
-    const d = path28.posix.dirname(f.split(path28.sep).join("/"));
-    folders.set(d, [...folders.get(d) ?? [], path28.posix.basename(f)]);
+  const changed = new Set(git(dir, ["ls-files", "-z", "--modified", "--", "."]).stdout.split("\0").filter(Boolean).map(posix));
+  for (const f of git(dir, ["ls-files", "-z", "--others", "--exclude-standard", "--", "."]).stdout.split("\0").filter(Boolean)) {
+    keys.set(posix(f), "");
+    changed.add(posix(f));
   }
-  return new Map([...folders].sort(([a], [b]) => a === "." ? -1 : b === "." ? 1 : a < b ? -1 : a > b ? 1 : 0));
-}
-var folderLabel = (d) => d === "." ? "./" : `${d}/`;
-var LOW = /^(\..+|tests?|__tests__|specs?|fixtures?|mocks?|docs?|examples?|samples?|benchmarks?|bench|marketing|assets|static|public|scripts|vendor|third_party|dist|build|out|coverage)$/i;
-var lowValue = (d) => d !== "." && d.split("/").some((seg) => LOW.test(seg));
-function renderFolder(d, list2, detail, names) {
-  if (detail === 0) return `${folderLabel(d)}  (${list2.length} file${list2.length === 1 ? "" : "s"})`;
-  const lines = [folderLabel(d)];
-  for (const f of list2) {
-    const n = detail === 2 ? names.get(d === "." ? f : `${d}/${f}`) ?? [] : [];
-    const shown = n.slice(0, NAMES_PER_FILE).join(", ") + (n.length > NAMES_PER_FILE ? `, +${n.length - NAMES_PER_FILE} more` : "");
-    lines.push(`  ${f}${shown ? `: ${shown}` : ""}`);
-  }
-  return lines.join("\n");
-}
-function lowRoot(d) {
-  const segs = d.split("/");
-  const i = segs.findIndex((seg) => LOW.test(seg));
-  return d === "." || i < 0 ? void 0 : segs.slice(0, i + 1).join("/");
-}
-function renderMap(folders, names) {
-  const rolled = /* @__PURE__ */ new Map();
-  const lines = [];
-  for (const f of folders) {
-    const root = f.detail === 0 ? lowRoot(f.d) : void 0;
-    if (!root) {
-      lines.push(renderFolder(f.d, f.list, f.detail, names));
-      continue;
-    }
-    const r = rolled.get(root);
-    if (r) {
-      r.files += f.list.length;
-      r.folders++;
-    } else {
-      rolled.set(root, { files: f.list.length, folders: 1, at: lines.push("") - 1 });
-    }
-  }
-  for (const [root, r] of rolled) {
-    lines[r.at] = `${root}/  (${r.files} file${r.files === 1 ? "" : "s"}${r.folders > 1 ? ` in ${r.folders} folders` : ""})`;
-  }
-  return lines.join("\n");
-}
-function buildMap(dir, budget = MAP_BUDGET) {
-  const files = listFiles(dir);
-  if (!files.length) return "";
-  const names = /* @__PURE__ */ new Map();
-  if (files.length <= MAX_SCANNED2) {
-    for (const f of files) {
-      const full = path28.join(dir, f);
+  const files = [];
+  for (const f of [...keys.keys()].sort()) {
+    if (looksSecret(path28.posix.basename(f))) continue;
+    if (changed.has(f)) {
       try {
-        if (fs32.statSync(full).size > MAX_FILE_BYTES) continue;
-        const n = declarations(f, fs32.readFileSync(full, "utf8"));
-        if (n.length) names.set(f.split(path28.sep).join("/"), n);
+        const s = fs32.statSync(path28.join(dir, f));
+        if (!s.isFile()) continue;
+        keys.set(f, `${f}\0${s.size}\0${s.mtimeMs}`);
       } catch {
+        continue;
       }
     }
+    files.push(f);
   }
-  const folders = [...byFolder(files)].map(([d, list2]) => {
-    const named = list2.some((f) => names.has(d === "." ? f : `${d}/${f}`));
-    return { d, list: list2, named, low: lowValue(d), detail: named ? 2 : 1 };
-  });
-  const size = (group) => group.reduce((n, f) => n + renderFolder(f.d, f.list, f.detail, names).length, 0);
-  const largest = (groups) => groups.reduce((a, b) => size(b) > size(a) ? b : a);
-  let map = renderMap(folders, names);
-  while (map.length > budget) {
-    const open = folders.filter((f) => f.detail > 0);
-    if (!open.length) break;
-    const trees = /* @__PURE__ */ new Map();
-    for (const f of open.filter((x) => x.low)) trees.set(lowRoot(f.d), [...trees.get(lowRoot(f.d)) ?? [], f]);
-    const plain2 = open.filter((f) => !f.named);
-    if (trees.size) for (const f of largest([...trees.values()])) f.detail = 0;
-    else if (plain2.length) largest(plain2.map((f) => [f]))[0].detail = 0;
-    else largest(open.map((f) => [f]))[0].detail--;
-    map = renderMap(folders, names);
-  }
-  return map.length <= budget ? map : `${map.slice(0, budget).replace(/\n[^\n]*$/, "")}
-\u2026 (${folders.length} folders in all)`;
-}
-function stateKey(dir) {
-  const head = git(dir, ["rev-parse", "HEAD"]);
-  const changed = git(dir, ["ls-files", "-z", "--modified", "--others", "--deleted", "--exclude-standard", "--", "."]);
-  if (changed.code !== 0) return void 0;
-  const h = crypto10.createHash("sha256").update(`${dir}\0${head.code === 0 ? head.stdout.trim() : "no-commit"}\0`);
-  for (const f of changed.stdout.split("\0").filter(Boolean).sort()) {
-    let stat = "gone";
-    try {
-      const s = fs32.statSync(path28.join(dir, f));
-      stat = `${s.size}:${s.mtimeMs}`;
-    } catch {
-    }
-    h.update(`${f}\0${stat}\0`);
-  }
-  return h.digest("hex").slice(0, 24);
+  return { files, keys };
 }
 var mapsDir = () => path28.join(home(), "maps");
-function projectMap(dir) {
-  const key = stateKey(dir);
-  const file2 = key && path28.join(mapsDir(), `${key}.md`);
-  if (file2 && fs32.existsSync(file2)) return fs32.readFileSync(file2, "utf8");
-  const map = buildMap(dir);
-  if (!file2) return map;
+var namesFile = (dir) => path28.join(mapsDir(), `names-${crypto10.createHash("sha256").update(path28.resolve(dir)).digest("hex").slice(0, 16)}.json`);
+function loadNames(dir) {
+  try {
+    const data = JSON.parse(fs32.readFileSync(namesFile(dir), "utf8"));
+    return data && typeof data.names === "object" ? data.names : {};
+  } catch {
+    return {};
+  }
+}
+function saveNames(dir, names) {
   try {
     fs32.mkdirSync(mapsDir(), { recursive: true });
+    const file2 = namesFile(dir);
     const tmp = `${file2}.${process.pid}.tmp`;
-    fs32.writeFileSync(tmp, map);
+    fs32.writeFileSync(tmp, JSON.stringify({ version: 1, names }));
     fs32.renameSync(tmp, file2);
     const old = Date.now() - KEEP_DAYS * 864e5;
     for (const f of fs32.readdirSync(mapsDir())) {
@@ -5729,7 +5706,200 @@ function projectMap(dir) {
     }
   } catch {
   }
-  return map;
+}
+var LOW = /^(\..+|tests?|__tests__|specs?|fixtures?|mocks?|docs?|examples?|samples?|benchmarks?|bench|marketing|assets|static|public|scripts|vendor|third_party|dist|build|out|coverage)$/i;
+function buildTree(files) {
+  const make = (p, parent) => ({
+    path: p,
+    depth: parent ? parent.depth + 1 : 0,
+    files: [],
+    children: [],
+    parent,
+    totalFiles: 0,
+    totalFolders: 1,
+    score: 0,
+    value: 0,
+    subtreeValue: 0,
+    detail: 2,
+    collapsed: false,
+    hot: false,
+    folded: false
+  });
+  const root = make(".");
+  const index = /* @__PURE__ */ new Map([[".", root]]);
+  const folder = (p) => {
+    const known = index.get(p);
+    if (known) return known;
+    const parent = folder(path28.posix.dirname(p));
+    const node = make(p, parent);
+    parent.children.push(node);
+    index.set(p, node);
+    return node;
+  };
+  for (const f of files) folder(path28.posix.dirname(f)).files.push(path28.posix.basename(f));
+  const count = (n) => {
+    n.children.sort((a, b) => a.path < b.path ? -1 : 1);
+    n.totalFiles = n.files.length;
+    n.totalFolders = 1;
+    for (const c of n.children) {
+      count(c);
+      n.totalFiles += c.totalFiles;
+      n.totalFolders += c.totalFolders;
+    }
+  };
+  count(root);
+  return root;
+}
+var nodes = (n) => [n, ...n.children.flatMap(nodes)];
+var fileOf = (n, f) => n.path === "." ? f : `${n.path}/${f}`;
+var label = (n) => n.path === "." ? "./" : `${n.path}/`;
+function score(root, rel) {
+  for (const n of nodes(root)) {
+    n.score = Math.max(0, ...n.files.map((f) => rel.get(fileOf(n, f)) ?? 0));
+    const low = n.path.split("/").some((seg) => LOW.test(seg));
+    n.value = (1 / (1 + 0.5 * n.depth) + n.score * 3) * (low ? 0.2 : 1);
+  }
+  const up = (n) => n.subtreeValue = Math.max(n.value, ...n.children.map(up));
+  up(root);
+  const heat = (n) => {
+    const below = n.children.map(heat).some(Boolean);
+    return n.hot = below || n.files.some((f) => rel.has(fileOf(n, f)));
+  };
+  heat(root);
+}
+var plural2 = (k, one) => `${k} ${one}${k === 1 ? "" : "s"}`;
+function ownText(n, k) {
+  if (n.collapsed) {
+    return `${label(n)}  (${plural2(n.totalFiles, "file")}${n.totalFolders > 1 ? ` in ${n.totalFolders} folders` : ""})`;
+  }
+  if (!n.files.length) return "";
+  const line = (f, withNames) => {
+    const list2 = withNames ? k.names.get(fileOf(n, f)) ?? [] : [];
+    const shown = list2.slice(0, NAMES_PER_FILE).join(", ") + (list2.length > NAMES_PER_FILE ? `, +${list2.length - NAMES_PER_FILE} more` : "");
+    return `  ${f}${shown ? `: ${shown}` : ""}`;
+  };
+  const relevant = (f) => k.rel.has(fileOf(n, f));
+  if (n.detail === 0) {
+    const kept = n.files.filter(relevant);
+    return [`${label(n)}  (${plural2(n.files.length, "file")}${kept.length ? `; the task's ${kept.length}:` : ""})`, ...kept.map((f) => line(f, true))].join("\n");
+  }
+  return [label(n), ...n.files.map((f) => line(f, n.detail === 2 || relevant(f)))].join("\n");
+}
+function foldText(n) {
+  const cold = n.children.filter((c) => !c.hot);
+  if (!n.folded || !cold.length) return "";
+  const files = cold.reduce((t, c) => t + c.totalFiles, 0);
+  const folders = cold.reduce((t, c) => t + c.totalFolders, 0);
+  return `${n.path === "." ? "" : `${n.path}/`}\u2026  (${plural2(files, "more file")} in ${plural2(folders, "other folder")})`;
+}
+function render(root, k) {
+  const out = [];
+  const walk = (n) => {
+    const own = ownText(n, k);
+    if (own) out.push(own);
+    if (n.collapsed) return;
+    const fold = foldText(n);
+    if (fold) out.push(fold);
+    for (const c of n.children) if (!n.folded || c.hot) walk(c);
+  };
+  walk(root);
+  return out.join("\n");
+}
+function fit(root, k, budget) {
+  const size = (n) => {
+    const t = ownText(n, k);
+    return t ? t.length + 1 : 0;
+  };
+  const foldSize = (n) => {
+    const t = foldText(n);
+    return t ? t.length + 1 : 0;
+  };
+  const visible = (n) => size(n) + (n.collapsed ? 0 : foldSize(n) + n.children.reduce((s, c) => s + (n.folded && !c.hot ? 0 : visible(c)), 0));
+  let total = visible(root);
+  const focused = root.hot;
+  const coldTarget = focused ? budget * FOCUSED_SHARE : budget;
+  if (total <= coldTarget) return;
+  const actions = [];
+  for (const n of nodes(root)) {
+    const per = (count) => 10 / Math.max(10, count);
+    const named = n.files.filter((f) => k.names.has(fileOf(n, f))).length;
+    if (named) actions.push({ loss: n.value * per(named), node: n, kind: "names" });
+    if (n.files.length) actions.push({ loss: n.value * 2 * per(n.files.length), node: n, kind: "list" });
+    if (n !== root) actions.push({ loss: n.subtreeValue * 3, node: n, kind: "collapse" });
+    const cold = n.children.filter((c) => !c.hot);
+    if (n.hot && cold.length > 1) actions.push({ loss: Math.max(...cold.map((c) => c.subtreeValue)) * 3 * (n === root ? 100 : 1 + 2 / n.depth), node: n, kind: "fold" });
+  }
+  actions.sort((a, b) => a.loss - b.loss || b.node.depth - a.node.depth || b.node.totalFiles - a.node.totalFiles);
+  const hidden = (n) => {
+    for (let c = n, p = n.parent; p; c = p, p = p.parent) if (p.collapsed || p.folded && !c.hot) return true;
+    return false;
+  };
+  for (const a of actions) {
+    const n = a.node;
+    const cold = a.kind === "fold" ? n !== root : !n.hot;
+    if (total <= (cold ? coldTarget : budget)) continue;
+    if (n.collapsed || hidden(n)) continue;
+    if (a.kind === "collapse" || a.kind === "fold") {
+      const before = visible(n);
+      if (a.kind === "collapse") n.collapsed = true;
+      else n.folded = true;
+      total += visible(n) - before;
+    } else {
+      const want = a.kind === "names" ? 1 : 0;
+      if (n.detail <= want) continue;
+      const before = size(n);
+      n.detail = want;
+      total += size(n) - before;
+    }
+  }
+}
+function buildMap(dir, opts = {}) {
+  const budget = Math.min(Math.max(opts.tokens ?? MAP_TOKENS, MIN_MAP_TOKENS), MAX_MAP_TOKENS) * 4;
+  const { files, keys } = listFiles(dir);
+  const stats = { files: files.length, folders: 0, read: 0, known: 0 };
+  if (!files.length) return { text: "", stats };
+  const root = buildTree(files);
+  stats.folders = root.totalFolders;
+  const wanted = taskWords(opts.task ?? "");
+  const kept = opts.fresh ? {} : loadNames(dir);
+  const next = {};
+  const names = /* @__PURE__ */ new Map();
+  const unread = [];
+  for (const f of files) {
+    if (!canRead(f)) continue;
+    const key = keys.get(f);
+    if (Object.hasOwn(kept, key)) {
+      next[key] = kept[key];
+      if (kept[key].length) names.set(f, kept[key]);
+      stats.known++;
+    } else unread.push(f);
+  }
+  const early = relevance(files, names, wanted);
+  score(root, early);
+  const worth = new Map(nodes(root).map((n) => [n.path, n.subtreeValue + n.value]));
+  const worthOf = (f) => (early.get(f) ?? 0) * 10 + (worth.get(path28.posix.dirname(f)) ?? 0);
+  unread.sort((a, b) => worthOf(b) - worthOf(a));
+  for (const f of unread.slice(0, MAX_SCANNED2)) {
+    let list2 = [];
+    try {
+      const full = path28.join(dir, f);
+      if (fs32.statSync(full).size <= MAX_FILE_BYTES) list2 = declarations(f, fs32.readFileSync(full, "utf8"));
+    } catch {
+    }
+    next[keys.get(f)] = list2;
+    if (list2.length) names.set(f, list2);
+    stats.read++;
+  }
+  if (stats.read || Object.keys(next).length !== Object.keys(kept).length) saveNames(dir, next);
+  const known = { names, rel: relevance(files, names, wanted) };
+  score(root, known.rel);
+  fit(root, known, budget);
+  const text = render(root, known);
+  return { text: text.length <= budget ? text : `${text.slice(0, budget).replace(/\n[^\n]*$/, "")}
+\u2026 (${root.totalFolders} folders in all)`, stats };
+}
+function projectMap(dir, task, tokens) {
+  return buildMap(dir, { task, tokens }).text;
 }
 
 // src/core/refs.ts
@@ -6262,7 +6432,7 @@ function prepareTree(meta) {
 }
 function writeMap(meta) {
   try {
-    fs34.writeFileSync(runFile(meta.id, "map.md"), projectMap(meta.dir));
+    fs34.writeFileSync(runFile(meta.id, "map.md"), projectMap(meta.dir, meta.task, effective().repoMapTokens.value));
   } catch (e) {
     meta.warnings.push(`no project map in the prompt: ${e.message.slice(0, 120)}`);
   }
@@ -8977,7 +9147,7 @@ var base = (model) => (model ?? "").split("#")[0];
 function usage() {
   const eff = effective();
   const out = /* @__PURE__ */ new Map();
-  const add2 = (spec, label) => {
+  const add2 = (spec, label2) => {
     let t;
     try {
       t = parseTarget(spec, "opencode");
@@ -8987,7 +9157,7 @@ function usage() {
     const model = base(t.model) || base(eff.models.value[t.backend]);
     if (!model) return;
     const key = `${t.backend}:${model}`;
-    out.set(key, [...out.get(key) ?? [], label]);
+    out.set(key, [...out.get(key) ?? [], label2]);
   };
   add2(eff.worker.value, "default worker");
   for (const [name, spec] of Object.entries(eff.tiers.value)) add2(spec, `tier ${name}`);
@@ -9086,7 +9256,7 @@ function startRace(o, size) {
 var verifyScore = (m) => !m.verifyResult ? 1 : m.verifyResult.ok ? 0 : 2;
 var diffSize = (m) => m.stats ? m.stats.insertions + m.stats.deletions : 0;
 var costOf = (m) => m.usage?.cost ?? m.usage?.costEstimate;
-function score(m) {
+function score2(m) {
   return [
     m.state === "done" ? 0 : 1,
     verifyScore(m),
@@ -9098,8 +9268,8 @@ function score(m) {
   ];
 }
 function compare(a, b) {
-  const x = score(a);
-  const y = score(b);
+  const x = score2(a);
+  const y = score2(b);
   for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return x[i] - y[i];
   return 0;
 }
@@ -9180,9 +9350,16 @@ ${formatReport(hit)}`);
 function cmdMap(p) {
   const dir = path40.resolve(flag(p, "dir") ?? process.cwd());
   if (!repoRoot(dir)) throw new UserError(`not in a git repository: ${dir} (the map lists the files git sees)`, 3);
-  const map = has(p, "fresh") ? buildMap(dir) : projectMap(dir);
-  console.log(map || "(git lists no files here)");
-  console.error(dim(`\u2500\u2500 ${map.length} characters, ~${Math.ceil(map.length / 4)} tokens in a prompt`));
+  const raw = flag(p, "tokens");
+  if (raw !== void 0 && !(/^\d+$/.test(raw) && Number(raw) >= MIN_MAP_TOKENS && Number(raw) <= MAX_MAP_TOKENS)) {
+    throw new UserError(`--tokens takes the map's budget, ${MIN_MAP_TOKENS} to ${MAX_MAP_TOKENS}, not "${raw}"`);
+  }
+  const tokens = raw === void 0 ? effective().repoMapTokens.value : Number(raw);
+  const { text, stats } = buildMap(dir, { task: flag(p, "task") ?? p.positional.join(" "), tokens, fresh: has(p, "fresh") });
+  console.log(text || "(git lists no files here)");
+  console.error(dim(
+    `\u2500\u2500 ${text.length} characters, ~${Math.ceil(text.length / 4)} of ${tokens} tokens \xB7 ${stats.files} files in ${stats.folders} folders \xB7 names read from ${stats.read} file${stats.read === 1 ? "" : "s"}, ${stats.known} already known`
+  ));
   return 0;
 }
 function raceSize(v) {
@@ -10138,7 +10315,9 @@ Usage
                                         (definition: path:line, count: the number, set: F1 of the paths)
   pitroom plan status PLAN [--json]     a plan's progress: runs, STATUS, review, fix rounds, applied
   pitroom plan note PLAN "Task N: \u2026"    record a completion, deferred finding or ruling (outside the repo)
-  pitroom map [-d DIR] [--fresh]        the project map a run's prompt gets with --map (config "repoMap")
+  pitroom map [-d DIR] [--task TEXT] [--tokens N] [--fresh]
+                                        the project map a run's prompt gets with --map (config "repoMap",
+                                        "repoMapTokens"): detailed where the task is, within the budget
   pitroom status [run | -g NAME]        state / live progress (default: latest run)
   pitroom wait [run\u2026 | -g NAME] [--any] [--brief] [--timeout 540]
                                         block until all (or any) are done, then print reports
@@ -10228,10 +10407,10 @@ Env: PITROOM_WORKER, PITROOM_MODEL, PITROOM_FALLBACK="t1,t2", PITROOM_TIMEOUT, P
      PITROOM_PRIMARY=sonnet|opus|haiku|gpt-5, PITROOM_PRICE="in,out", PITROOM_HOME, PITROOM_CONFIG, PITROOM_CACHE_DAYS,
      PITROOM_NOTIFY, PITROOM_NOTIFY_COMMAND, PITROOM_NOTIFY_AFTER, PITROOM_MCP_DASH, PITROOM_PRICE_FEED, PITROOM_PRICE_FEED_URL,
      PITROOM_PRICE_FEED_HOURS, PITROOM_AUDIT, PITROOM_AUDIT_FIX, PITROOM_AUDIT_FOCUS, PITROOM_BUDGET_DAILY, PITROOM_RANK_WORKERS,
-     PITROOM_VERIFY_FIX, PITROOM_MAX_COST, PITROOM_REPO_MAP, PITROOM_<WORKER>_BIN
+     PITROOM_VERIFY_FIX, PITROOM_MAX_COST, PITROOM_REPO_MAP, PITROOM_REPO_MAP_TOKENS, PITROOM_<WORKER>_BIN
 Config: ~/.config/pitroom/config.json (worker, fallback, models, tiers, timeout, primary, price, link, web, maxParallel, audit, readIn, cacheDays,
         countRateLimits, mcpDash, notify, notifyCommand, notifyAfter, workerPrices, priceFeed, priceFeedUrl, priceFeedHours,
-        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix, maxCost, repoMap)`;
+        auditFix, auditFocus, budgetDaily, rankWorkers, verifyFix, maxCost, repoMap, repoMapTokens)`;
 var COMMANDS = {
   run: cmdRun,
   crew: cmdCrew,

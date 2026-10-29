@@ -32,7 +32,7 @@ import { archivedRun, historyFile, historyStats, importRuns, listHistory, openDb
 import { hookCards, statusLine } from '../core/ui.js';
 import { type RunOptions, applyRun, discardRun, execute, prepareRun, revertRun, startInBackground, stopRun } from '../core/run.js';
 import { MAX_RACE, formatRace, settleRace, startRace } from '../core/race.js';
-import { buildMap, projectMap } from '../core/repomap.js';
+import { MAX_MAP_TOKENS, MIN_MAP_TOKENS, buildMap } from '../core/repomap.js';
 import {
   type RunMeta, TERMINAL, freshMeta, isActive, listRunIds, readMeta, resolveRun, runDir, runFile, writeMeta,
 } from '../core/store.js';
@@ -73,13 +73,24 @@ export async function cmdRun(p: Parsed): Promise<number> {
   return launch(p, prepareRun({ ...opts, cache }));
 }
 
-/** `pitroom map`: the map a run's prompt gets with --map, for a look at what the worker is told (or for your agent). */
+/**
+ * `pitroom map [--task TEXT] [--tokens N] [--fresh]`: the map a run's prompt gets with --map, for a look at what a
+ * worker is told for that task (or for your agent). --fresh reads every file's names again.
+ */
 export function cmdMap(p: Parsed): number {
   const dir = path.resolve(flag(p, 'dir') ?? process.cwd());
   if (!repoRoot(dir)) throw new UserError(`not in a git repository: ${dir} (the map lists the files git sees)`, 3);
-  const map = has(p, 'fresh') ? buildMap(dir) : projectMap(dir);
-  console.log(map || '(git lists no files here)');
-  console.error(dim(`── ${map.length} characters, ~${Math.ceil(map.length / 4)} tokens in a prompt`));
+  const raw = flag(p, 'tokens');
+  if (raw !== undefined && !(/^\d+$/.test(raw) && Number(raw) >= MIN_MAP_TOKENS && Number(raw) <= MAX_MAP_TOKENS)) {
+    throw new UserError(`--tokens takes the map's budget, ${MIN_MAP_TOKENS} to ${MAX_MAP_TOKENS}, not "${raw}"`);
+  }
+  const tokens = raw === undefined ? effective().repoMapTokens.value : Number(raw);
+  const { text, stats } = buildMap(dir, { task: flag(p, 'task') ?? p.positional.join(' '), tokens, fresh: has(p, 'fresh') });
+  console.log(text || '(git lists no files here)');
+  console.error(dim(
+    `── ${text.length} characters, ~${Math.ceil(text.length / 4)} of ${tokens} tokens · ${stats.files} files in ${stats.folders} folders · ` +
+      `names read from ${stats.read} file${stats.read === 1 ? '' : 's'}, ${stats.known} already known`,
+  ));
   return 0;
 }
 

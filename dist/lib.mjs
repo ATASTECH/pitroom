@@ -2890,7 +2890,8 @@ var SCHEMA = {
   autoFallback: "boolean",
   verifyFix: "number",
   maxCost: "number",
-  repoMap: "boolean"
+  repoMap: "boolean",
+  repoMapTokens: "number"
 };
 function configPath() {
   if (process.env.PITROOM_CONFIG) return path16.resolve(process.env.PITROOM_CONFIG);
@@ -2965,6 +2966,10 @@ var fixRounds = (v) => {
   const n = days(v);
   return n === void 0 ? void 0 : Math.min(n, MAX_VERIFY_FIX);
 };
+var mapTokens = (v) => {
+  const n = positiveInt(v);
+  return n === void 0 ? void 0 : Math.min(Math.max(n, 300), 8e3);
+};
 var flag01 = (v) => {
   const t = v?.trim().toLowerCase();
   return t === void 0 || t === "" ? void 0 : ["1", "true", "on", "yes"].includes(t) ? true : ["0", "false", "off", "no"].includes(t) ? false : void 0;
@@ -3013,7 +3018,8 @@ function effective(flags = {}) {
     budgetDaily: setting(void 0, amount(e.PITROOM_BUDGET_DAILY), amount(c.budgetDaily), void 0),
     verifyFix: setting(void 0, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
     maxCost: setting(void 0, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), void 0),
-    repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false)
+    repoMap: setting(void 0, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
+    repoMapTokens: setting(void 0, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500)
   };
 }
 

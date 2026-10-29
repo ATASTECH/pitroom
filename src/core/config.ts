@@ -66,6 +66,8 @@ export interface PitroomConfig {
   maxCost?: number;
   /** Put a map of the project (files by folder, the names each declares) in a new run's prompt (default false; PITROOM_REPO_MAP=1; --map, --no-map). */
   repoMap?: boolean;
+  /** The map's budget in tokens, 300 to 8000 (default 1500; PITROOM_REPO_MAP_TOKENS): a big project gets an overview, detailed where the task is. */
+  repoMapTokens?: number;
 }
 
 const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'number' | 'record' | 'numbers'> = {
@@ -100,6 +102,7 @@ const SCHEMA: Record<keyof PitroomConfig, 'string' | 'string[]' | 'boolean' | 'n
   verifyFix: 'number',
   maxCost: 'number',
   repoMap: 'boolean',
+  repoMapTokens: 'number',
 };
 
 export function configPath(): string {
@@ -204,6 +207,12 @@ export const fixRounds = (v: unknown): number | undefined => {
   return n === undefined ? undefined : Math.min(n, MAX_VERIFY_FIX);
 };
 
+/** A map budget in tokens: a whole number, held to 300..8000 (see repomap.ts). */
+const mapTokens = (v: unknown) => {
+  const n = positiveInt(v);
+  return n === undefined ? undefined : Math.min(Math.max(n, 300), 8000);
+};
+
 /** An on/off environment variable: 1/true/on/yes or 0/false/off/no. */
 const flag01 = (v: string | undefined): boolean | undefined => {
   const t = v?.trim().toLowerCase();
@@ -259,5 +268,6 @@ export function effective(flags: { worker?: string; model?: string; timeout?: st
     verifyFix: setting<number>(undefined, fixRounds(e.PITROOM_VERIFY_FIX), fixRounds(c.verifyFix), 1),
     maxCost: setting<number | undefined>(undefined, positiveAmount(e.PITROOM_MAX_COST), positiveAmount(c.maxCost), undefined),
     repoMap: setting<boolean>(undefined, flag01(e.PITROOM_REPO_MAP), c.repoMap, false),
+    repoMapTokens: setting<number>(undefined, mapTokens(e.PITROOM_REPO_MAP_TOKENS), mapTokens(c.repoMapTokens), 1500),
   };
 }
