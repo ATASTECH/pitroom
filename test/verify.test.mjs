@@ -121,3 +121,12 @@ test('verify fix: --verify-fix takes 0 to 3 rounds and goes with --verify', () =
   assert.match(many.stderr, /--verify-fix takes a number of rounds from 0 to 3, not "9"/);
   assert.equal(workerCalls(s).length, 0);
 });
+
+test('a change to a file that runs commands by itself is named in the report; an ordinary change is not', () => {
+  const s = sandbox();
+  const hook = s.run(['run', '-i', 'add an MCP server'], { MOCK_ACTIONS: 'write:.mcp.json:{};write:lefthook.yml:x;answer:SUMMARY: added' });
+  assert.equal(hook.status, 0, hook.stdout + hook.stderr);
+  assert.match(hook.stdout, /the change touches configuration that runs commands by itself \(\.mcp\.json, lefthook\.yml\): check it before applying it/);
+  const plain = s.run(['run', '-i', 'change app.txt'], { MOCK_ACTIONS: 'write:app.txt:x;answer:SUMMARY: changed' });
+  assert.doesNotMatch(plain.stdout, /runs commands by itself/);
+});

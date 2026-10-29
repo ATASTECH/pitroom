@@ -812,6 +812,12 @@ function finalize(meta: RunMeta, res: ProcessResult): RunMeta {
   } catch (e) {
     meta.warnings.push(`could not compute changes: ${(e as Error).message}`);
   }
+  const autorun = (meta.changes ?? []).map((c) => c.path).filter((p) => RUNS_BY_ITSELF.test(p));
+  if (autorun.length) {
+    meta.warnings.push(
+      `the change touches configuration that runs commands by itself (${autorun.slice(0, 5).join(', ')}${autorun.length > 5 ? ', …' : ''}): check it before ${meta.mode === 'isolate' ? 'applying' : 'keeping'} it`,
+    );
+  }
   if (meta.mode === 'read' && run.edits.length && !meta.warnings.some((w) => w.startsWith('READ-ONLY VIOLATION'))) {
     meta.warnings.push(`READ-ONLY VIOLATION: worker modified ${[...new Set(run.edits)].join(', ')}`);
   }
@@ -872,6 +878,13 @@ function withFixRounds(meta: RunMeta, last: string): string {
   });
   return parts.join('\n\n');
 }
+
+/**
+ * Files an agent or an editor runs commands from on its own: hooks (Cursor, Claude Code, Gemini CLI), MCP servers,
+ * editor tasks, git hooks kept in the tree. A worker's shell can write them whatever its CLI's file rules say, so a
+ * change that touches one is named in its report.
+ */
+const RUNS_BY_ITSELF = /(^|\/)(\.cursor\/(.*\/)?(hooks|mcp|cli)\.json|\.(cursor|claude)\/hooks\/.*|\.claude\/settings(\.local)?\.json|\.gemini\/settings\.json|\.mcp\.json|\.vscode\/(tasks|settings)\.json|\.(husky|githooks)\/.*|lefthook(-local)?\.ya?ml|\.pre-commit-config\.ya?ml)$/;
 
 function captureChanges(meta: RunMeta): void {
   const root = meta.repoRoot;

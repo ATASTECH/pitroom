@@ -1410,7 +1410,7 @@ var SECRETS2 = ["**/.env", "**/.env.*", "**/*.pem", "**/*.key", "**/id_rsa*", "*
 var HOME_SECRETS2 = [".ssh", ".aws", ".gnupg", ".docker", ".kube", ".config/gcloud", ".config/gh", ".config/cursor", ".gemini", ".cursor", ".claude", "Library/Keychains"];
 var WORKER_HOME_SECRETS = ["Library/Keychains", ".config/cursor", ".cursor"];
 function workerSettings2(mode, web2, dir) {
-  const appData = process.platform === "win32" ? [path8.join(process.env.APPDATA ?? path8.join(os6.homedir(), "AppData", "Roaming"), "Cursor")] : [];
+  const signIn = process.platform === "darwin" ? [] : [path8.dirname(authFile())];
   return {
     version: 1,
     permissions: {
@@ -1419,10 +1419,11 @@ function workerSettings2(mode, web2, dir) {
       deny: [
         ...FORBIDDEN_COMMANDS.map((c) => `Shell(${c})`),
         ...SECRETS2.flatMap((p) => [`Read(${p})`, `Write(${p})`]),
-        ...[...HOME_SECRETS2.map((d) => path8.join(os6.homedir(), d)), ...appData].map((d) => `Read(${d}/**)`),
+        ...[.../* @__PURE__ */ new Set([...HOME_SECRETS2.map((d) => path8.join(os6.homedir(), d)), ...signIn])].map((d) => `Read(${d}/**)`),
         ...WORKER_HOME_SECRETS.flatMap((d) => [`Read(${path8.join(dir, d)}/**)`, `Write(${path8.join(dir, d)}/**)`]),
         // Cursor runs a project's own hooks (.cursor/hooks.json, Claude Code's .claude/settings.json) and there is no
-        // switch to turn them off: no worker may plant any, for its follow-ups or for your own Cursor
+        // switch to turn them off: its write tool may not plant any (a shell command still could: the core names a
+        // change to such a file in the run's report)
         "Write(**/.cursor/**)",
         "Write(**/.claude/**)",
         ...web2 ? [] : ["WebFetch(*)"]

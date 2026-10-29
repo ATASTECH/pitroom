@@ -37,6 +37,7 @@ const HOMES_KEPT_DAYS = 14;
 const SECRETS = ['**/.env', '**/.env.*', '**/*.pem', '**/*.key', '**/id_rsa*', '**/id_ed25519*', '**/.netrc'];
 /** The user's own folders of credentials: a read run's tools may read outside the project, never these. */
 const HOME_SECRETS = ['.ssh', '.aws', '.gnupg', '.docker', '.kube', '.config/gcloud', '.config/gh', '.config/cursor', '.gemini', '.cursor', '.claude', 'Library/Keychains'];
+// (the sign-in folder is also denied where authFile() finds it: under XDG_CONFIG_HOME, or APPDATA on Windows)
 /** In the worker's own home: the sign-in linked in, and Cursor's own settings and chats. */
 const WORKER_HOME_SECRETS = ['Library/Keychains', '.config/cursor', '.cursor'];
 
@@ -45,7 +46,7 @@ const WORKER_HOME_SECRETS = ['Library/Keychains', '.config/cursor', '.cursor'];
  * worker's home, whose sign-in links its read tool must not follow.
  */
 export function workerSettings(mode: Mode, web: boolean, dir: string) {
-  const appData = process.platform === 'win32' ? [path.join(process.env.APPDATA ?? path.join(os.homedir(), 'AppData', 'Roaming'), 'Cursor')] : [];
+  const signIn = process.platform === 'darwin' ? [] : [path.dirname(authFile())];
   return {
     version: 1,
     permissions: {
@@ -54,10 +55,11 @@ export function workerSettings(mode: Mode, web: boolean, dir: string) {
       deny: [
         ...FORBIDDEN_COMMANDS.map((c) => `Shell(${c})`),
         ...SECRETS.flatMap((p) => [`Read(${p})`, `Write(${p})`]),
-        ...[...HOME_SECRETS.map((d) => path.join(os.homedir(), d)), ...appData].map((d) => `Read(${d}/**)`),
+        ...[...new Set([...HOME_SECRETS.map((d) => path.join(os.homedir(), d)), ...signIn])].map((d) => `Read(${d}/**)`),
         ...WORKER_HOME_SECRETS.flatMap((d) => [`Read(${path.join(dir, d)}/**)`, `Write(${path.join(dir, d)}/**)`]),
         // Cursor runs a project's own hooks (.cursor/hooks.json, Claude Code's .claude/settings.json) and there is no
-        // switch to turn them off: no worker may plant any, for its follow-ups or for your own Cursor
+        // switch to turn them off: its write tool may not plant any (a shell command still could: the core names a
+        // change to such a file in the run's report)
         'Write(**/.cursor/**)',
         'Write(**/.claude/**)',
         ...(web ? [] : ['WebFetch(*)']),
